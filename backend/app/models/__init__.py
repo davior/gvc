@@ -6,7 +6,9 @@ empty migration and a silent schema drift.
 """
 
 from app.models.project import Project, ProjectVersion
+from app.models.provider import AIProvider
 from app.models.render import RenderJob
+from app.models.usage import UsageEvent
 from app.models.user import User
 
-__all__ = ["Project", "ProjectVersion", "RenderJob", "User"]
+__all__ = ["AIProvider", "Project", "ProjectVersion", "RenderJob", "UsageEvent", "User"]
