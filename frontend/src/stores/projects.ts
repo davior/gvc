@@ -1,7 +1,9 @@
 import { create } from 'zustand'
 import { apiErrorMessage } from '@/api/client'
+import { gamApi, type GamAsset } from '@/api/gam'
 import {
   projectsApi,
+  type NoteMediaCopy,
   specIssuesOf,
   type Project,
   type ProjectSummary,
@@ -37,6 +39,11 @@ interface ProjectState {
 
   versions: Version[]
 
+  /** GAM assets the draft shows, by GAM id: names, thumbnails, fresh signed URLs.
+   *  Null for one GAM no longer has. Never saved: the URLs expire. */
+  gamAssets: Record<string, GamAsset | null>
+  gamError: string | null
+
   loadList: () => Promise<void>
   createBlank: (title: string) => Promise<Project | null>
   open: (id: string) => Promise<void>
@@ -46,6 +53,10 @@ interface ProjectState {
   loadVersions: () => Promise<void>
   revert: (versionId: string) => Promise<void>
   remove: (id: string) => Promise<boolean>
+  /** Look up whichever of these GAM ids are not already known. */
+  loadGamAssets: (ids: string[]) => Promise<void>
+  /** Move a pushed note's files into GAM. Needs a saved draft: it writes a version. */
+  copyNoteMedia: () => Promise<NoteMediaCopy | null>
   reset: () => void
 }
 
@@ -61,6 +72,8 @@ const initial = {
   error: null,
   issues: [],
   versions: [],
+  gamAssets: {},
+  gamError: null,
 }
 
 // Bumped by every request that replaces what is on screen, and by `reset()`. A
@@ -105,6 +118,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       versions: [],
       project: null,
       draft: null,
+      gamAssets: {},
+      gamError: null,
     })
     try {
       const project = await projectsApi.get(id)
@@ -189,6 +204,46 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     } catch (error) {
       set({ listError: apiErrorMessage(error) })
       return false
+    }
+  },
+
+  async loadGamAssets(ids) {
+    const known = get().gamAssets
+    const wanted = ids.filter((id) => !(id in known))
+    if (wanted.length === 0) return
+    const token = projectToken
+    try {
+      const found = await gamApi.lookup(wanted)
+      if (token !== projectToken) return
+      set({ gamAssets: { ...get().gamAssets, ...found }, gamError: null })
+    } catch (error) {
+      if (token !== projectToken) return
+      // Shown beside the scenes, not as the page's error: the project is still
+      // editable with GAM down, it just cannot show its pictures.
+      set({ gamError: apiErrorMessage(error) })
+    }
+  },
+
+  async copyNoteMedia() {
+    const project = get().project
+    if (!project || get().dirty) return null
+    const token = projectToken
+    set({ saving: true, error: null })
+    try {
+      const result = await projectsApi.copyNoteMedia(project.id)
+      if (token !== projectToken) return null
+      set({
+        project: result.project,
+        draft: result.project.spec,
+        dirty: false,
+        saving: false,
+      })
+      void get().loadVersions()
+      return result
+    } catch (error) {
+      if (token !== projectToken) return null
+      set({ saving: false, error: apiErrorMessage(error) })
+      return null
     }
   },
 

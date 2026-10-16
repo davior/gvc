@@ -14,6 +14,8 @@ services:
       - CORS_ORIGIN=${CORS_ORIGIN:-}
       - NOTES_BASE_URL=${NOTES_BASE_URL:-https://notes.geckopico.com}
       - GAM_BASE_URL=${GAM_BASE_URL:-https://gam.geckopico.com}
+      - GAM_TIMEOUT_SECONDS=${GAM_TIMEOUT_SECONDS:-30}
+      - NOTE_MEDIA_MAX_MB=${NOTE_MEDIA_MAX_MB:-4096}
       - ADMIN_USERS=${ADMIN_USERS:-}
       - ENVIRONMENT=${ENVIRONMENT:-production}
     # Never published to the host: the frontend proxies it, and ProxyHeadersMiddleware
@@ -38,6 +40,8 @@ services:
     environment:
       # The CSP's connect-src; must agree with the backend's value.
       - NOTES_BASE_URL=${NOTES_BASE_URL:-https://notes.geckopico.com}
+      # The CSP's img-src and media-src, for GAM thumbnails and previews; same rule.
+      - GAM_BASE_URL=${GAM_BASE_URL:-https://gam.geckopico.com}
     depends_on:
       - gvc-backend
     networks:

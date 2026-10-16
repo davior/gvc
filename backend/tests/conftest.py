@@ -87,3 +87,19 @@ def switch_user_fixture():
     def switch(user_id: str) -> None:
         fastapi_app.dependency_overrides[current_user] = _as(user_id)
     return switch
+
+
+@pytest.fixture(name="siblings")
+def siblings_fixture(monkeypatch):
+    """GAM and Notes, faked. Every outbound request GVC makes goes here."""
+    import httpx
+
+    from app import outbound
+    from app.config import settings
+    from tests.fake_siblings import GAM, NOTES, FakeSiblings
+
+    fake = FakeSiblings()
+    monkeypatch.setattr(outbound, "TRANSPORT", httpx.MockTransport(fake.handler))
+    monkeypatch.setattr(settings, "gam_base_url", GAM)
+    monkeypatch.setattr(settings, "notes_base_url", NOTES)
+    return fake
