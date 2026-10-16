@@ -1,0 +1,399 @@
+{
+  "spec_version": "0.1",
+  "id": "vid_salt_road_01",
+  "title": "The Salt Road",
+  "source": {
+    "note_id": "6b1e0c2a-4f7d-4c1e-9a55-3f0d2b8e7a10",
+    "note_version_id": "c3d9a2f1-5e8b-4a7c-b0d6-1f2e3a4b5c6d",
+    "imported_at": "2026-10-07T09:12:00Z"
+  },
+  "output": {
+    "aspect": "16:9",
+    "resolution": "1080p",
+    "fps": 30,
+    "quality": "standard",
+    "subtitles": "sidecar",
+    "chapters": true,
+    "thumbnail": true
+  },
+  "voice": {
+    "provider": "deepgram",
+    "voice": "flux-haley-en",
+    "speed": 1.0,
+    "expressivity": 0,
+    "pauses": {
+      "paragraph_ms": 350,
+      "heading_ms": 800,
+      "segment_end_ms": 600
+    }
+  },
+  "style": {
+    "background": {
+      "type": "gradient",
+      "colors": [
+        "#1e293b",
+        "#0f172a"
+      ],
+      "angle": 135
+    },
+    "fit": "blur",
+    "motion": {
+      "effect": "alternate",
+      "amount": 0.12
+    },
+    "transition": {
+      "style": "fade",
+      "duration": 0.6
+    },
+    "min_segment_seconds": 2.5,
+    "cards": {
+      "seconds": 3.5,
+      "motion": false,
+      "title": {
+        "title_pct": 6.8,
+        "subtitle_pct": 2.9
+      },
+      "chapter": {
+        "title_pct": 6.8,
+        "subtitle_pct": 2.9
+      }
+    },
+    "quote": {
+      "position": "center",
+      "size_pct": 4.2,
+      "color": "#ffffff",
+      "accent": "#818cf8",
+      "scrim": 0.55
+    },
+    "code": {
+      "position": "center",
+      "size_pct": 3.4,
+      "color": "#e2e8f0",
+      "scrim": 0.72
+    }
+  },
+  "chrome": {
+    "watermark": {
+      "asset": "a_logo",
+      "text": "geckopico",
+      "position": "bottom-right",
+      "opacity": 0.85,
+      "scale_pct": 6.0,
+      "caption_pct": 2.3,
+      "margin_pct": 4
+    },
+    "overlay_text": {
+      "mode": "title_chapter",
+      "position": "bottom-left",
+      "color": "#ffffff",
+      "size_pct": 3.0,
+      "margin_pct": 5,
+      "shadow": true
+    }
+  },
+  "assets": {
+    "a_logo": {
+      "from": "gam",
+      "id": "0b6f6c3e-2d1a-4e8b-9c55-7a3e1f0d2b44",
+      "label": "Gecko logo"
+    },
+    "a_intro": {
+      "from": "gam",
+      "id": "5d2e9a17-6b3c-4f80-a1d4-c8e7f2b0961a",
+      "label": "Channel intro sting"
+    },
+    "a_outro": {
+      "from": "gam",
+      "id": "e41c7b90-3a2d-4f6e-8b15-92d0c4a7f3e8",
+      "label": "Channel outro"
+    },
+    "a_map": {
+      "from": "notes",
+      "url": "/media/9c41e2f0-1b7d-4a3e-8f62-d05a7c3b1e98/2f8a6c1d-4e3b-4b7a-9e0f-5c2d1a8b7e6f.png",
+      "type": "image",
+      "label": "Hand-drawn route map"
+    },
+    "a_caravan": {
+      "from": "gam",
+      "id": "8e3b7c21-4d5f-4a90-b6e2-1c7d9f0a3b58",
+      "label": "Archive interview reel, 1971"
+    },
+    "a_market": {
+      "from": "generate",
+      "type": "image",
+      "prompt": "A crowded desert salt market at dawn, slabs of salt stacked on woven mats, long warm shadows, documentary photograph",
+      "status": "pending",
+      "label": "Salt market at dawn (to generate)"
+    },
+    "a_ruins": {
+      "from": "search",
+      "query": "drone footage of desert ruins at dusk",
+      "type": "video",
+      "status": "unresolved",
+      "label": "Ruins b-roll (to find)"
+    },
+    "a_theme": {
+      "from": "gam",
+      "id": "2a9d4e6f-7b1c-4c3e-a8f0-6d5b3c2e1f94",
+      "label": "Desert theme"
+    },
+    "a_close": {
+      "from": "gam",
+      "id": "b7f3e2d1-0c9a-4b8e-9d6f-3a1c5e7b2d40",
+      "label": "Closing theme"
+    },
+    "a_bell": {
+      "from": "gam",
+      "id": "41d8e6c3-9b2a-4f7e-8c0d-5e1f3a9b7c26",
+      "label": "Camel bell"
+    }
+  },
+  "segments": [
+    {
+      "id": "s_title",
+      "kind": "card",
+      "role": "title",
+      "chapter": "The Salt Road",
+      "card": {
+        "variant": "title",
+        "title": "The Salt Road",
+        "subtitle": "geckopico"
+      }
+    },
+    {
+      "id": "s_intro",
+      "kind": "clip",
+      "role": "intro",
+      "chapter": "Intro",
+      "visual": {
+        "asset": "a_intro",
+        "audio": "play"
+      },
+      "chrome": false
+    },
+    {
+      "id": "s_open",
+      "kind": "scene",
+      "chapter": "Where it started",
+      "visual": {
+        "asset": "a_map",
+        "motion": {
+          "effect": "zoom_in",
+          "amount": 0.08
+        }
+      },
+      "narration": {
+        "beats": [
+          {
+            "id": "b1",
+            "kind": "heading",
+            "text": "Where it started."
+          },
+          {
+            "id": "b2",
+            "text": "Long before the roads were paved, salt crossed the desert on the backs of camels. [pause:long]"
+          },
+          {
+            "id": "b3",
+            "text": "One route carried more of it than any other."
+          }
+        ]
+      },
+      "source": {
+        "block_ids": [
+          "blk-01",
+          "blk-02",
+          "blk-03",
+          "blk-04"
+        ]
+      }
+    },
+    {
+      "id": "s_caravan",
+      "kind": "scene",
+      "chapter": "The caravans",
+      "visual": {
+        "asset": "a_caravan",
+        "trim": {
+          "in": 734.0,
+          "out": 752.5
+        },
+        "audio": "mute",
+        "loop": true
+      },
+      "narration": {
+        "beats": [
+          {
+            "id": "b1",
+            "text": "Caravans thousands of camels long made the crossing every year."
+          },
+          {
+            "id": "b2",
+            "kind": "quote",
+            "text": "Salt was worth its weight in gold, and the desert knew it."
+          },
+          {
+            "id": "b3",
+            "text": "The journey took weeks... if the wells held."
+          }
+        ]
+      },
+      "overlays": [
+        {
+          "id": "o_guide",
+          "type": "lower_third",
+          "title": "Caravan guide",
+          "subtitle": "Archive interview, 1971",
+          "show": {
+            "from": {
+              "beat": "b1",
+              "edge": "start",
+              "offset": 0.5
+            },
+            "to": {
+              "beat": "b1",
+              "edge": "end"
+            }
+          }
+        },
+        {
+          "id": "o_quote",
+          "type": "quote",
+          "text": "Salt was worth its weight in gold, and the desert knew it.",
+          "attribution": "Old caravan saying",
+          "show": {
+            "from": {
+              "beat": "b2",
+              "edge": "start"
+            },
+            "to": {
+              "beat": "b2",
+              "edge": "end",
+              "offset": 0.8
+            }
+          },
+          "fade": 0.4
+        }
+      ],
+      "transition_in": {
+        "style": "dissolve",
+        "duration": 1.0
+      }
+    },
+    {
+      "id": "s_market",
+      "kind": "scene",
+      "chapter": "The market",
+      "visual": {
+        "asset": "a_market",
+        "motion": {
+          "effect": "pan_right"
+        }
+      },
+      "narration": {
+        "beats": [
+          {
+            "id": "b1",
+            "text": "At the end of the road, the salt market opened at dawn."
+          },
+          {
+            "id": "b2",
+            "text": "Slabs were cut, weighed and traded before the heat set in."
+          }
+        ]
+      }
+    },
+    {
+      "id": "s_ruins",
+      "kind": "scene",
+      "chapter": "What remains",
+      "visual": {
+        "asset": "a_ruins"
+      },
+      "narration": {
+        "beats": [
+          {
+            "id": "b1",
+            "text": "Today, most of the waystations are ruins."
+          },
+          {
+            "id": "b2",
+            "text": "But the road is still there, if you know where to look."
+          }
+        ]
+      },
+      "duration": {
+        "min": 8
+      }
+    },
+    {
+      "id": "s_outro",
+      "kind": "clip",
+      "role": "outro",
+      "chapter": "Outro",
+      "visual": {
+        "asset": "a_outro",
+        "audio": "play"
+      },
+      "chrome": false
+    }
+  ],
+  "audio_tracks": [
+    {
+      "id": "m_theme",
+      "kind": "music",
+      "asset": "a_theme",
+      "start": {
+        "segment": "s_open",
+        "edge": "start"
+      },
+      "end": {
+        "segment": "s_market",
+        "edge": "end"
+      },
+      "loop": true,
+      "volume": 0.18,
+      "duck_under_narration": true,
+      "fade_in": 1.5,
+      "fade_out": 4.0
+    },
+    {
+      "id": "m_close",
+      "kind": "music",
+      "asset": "a_close",
+      "start": {
+        "segment": "s_ruins",
+        "edge": "start",
+        "offset": -3.0
+      },
+      "end": {
+        "segment": "s_ruins",
+        "edge": "end"
+      },
+      "trim": {
+        "in": 12.0
+      },
+      "volume": 0.22,
+      "duck_under_narration": true,
+      "fade_in": 3.0,
+      "fade_out": 2.0
+    },
+    {
+      "id": "x_bell",
+      "kind": "sfx",
+      "asset": "a_bell",
+      "start": {
+        "segment": "s_market",
+        "beat": "b1",
+        "edge": "start",
+        "offset": -0.3
+      },
+      "volume": 0.6
+    }
+  ],
+  "credits": {
+    "auto": true,
+    "card": true,
+    "description": true
+  }
+}

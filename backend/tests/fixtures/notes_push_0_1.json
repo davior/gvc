@@ -1,0 +1,332 @@
+{
+  "spec_version": "0.1",
+  "id": null,
+  "title": "The Salt Road",
+  "source": {
+    "note_id": "note-123",
+    "note_version_id": null,
+    "imported_at": "2026-10-16T09:00:00Z",
+    "selection": false
+  },
+  "output": {
+    "aspect": "16:9",
+    "resolution": "1080p",
+    "quality": "standard",
+    "fps": 30,
+    "subtitles": "sidecar",
+    "chapters": true,
+    "thumbnail": true
+  },
+  "voice": {
+    "provider": null,
+    "voice": null,
+    "speed": 1.0,
+    "expressivity": null,
+    "pauses": {
+      "paragraph_ms": 350,
+      "heading_ms": 800,
+      "segment_end_ms": 600
+    }
+  },
+  "style": {
+    "background": {
+      "type": "gradient",
+      "colors": [
+        "#1e293b",
+        "#0f172a"
+      ],
+      "angle": 135,
+      "asset": null
+    },
+    "fit": "blur",
+    "motion": {
+      "effect": "none",
+      "amount": 0.12
+    },
+    "transition": {
+      "style": "none",
+      "duration": 0.6
+    },
+    "min_segment_seconds": 2.5,
+    "cards": {
+      "seconds": 3.5,
+      "motion": false,
+      "title": {
+        "title_pct": 6.8,
+        "subtitle_pct": 2.9
+      },
+      "chapter": {
+        "title_pct": 6.8,
+        "subtitle_pct": 2.9
+      }
+    },
+    "quote": {
+      "position": "center",
+      "size_pct": 4.2,
+      "color": "#ffffff",
+      "accent": "#818cf8",
+      "scrim": 0.55
+    },
+    "code": {
+      "position": "center",
+      "size_pct": 3.4,
+      "color": "#e2e8f0",
+      "scrim": 0.72
+    }
+  },
+  "chrome": {
+    "watermark": null,
+    "overlay_text": null,
+    "waveform": null
+  },
+  "assets": {
+    "a1": {
+      "from": "notes",
+      "url": "/media/u1/map.png",
+      "type": "image",
+      "label": null
+    },
+    "a2": {
+      "from": "notes",
+      "url": "/media/u1/market.jpg",
+      "type": "image",
+      "label": null
+    },
+    "a3": {
+      "from": "notes",
+      "url": "/media/u1/theme.mp3",
+      "type": "audio",
+      "label": null
+    }
+  },
+  "segments": [
+    {
+      "id": "s1",
+      "kind": "card",
+      "role": "title",
+      "label": "title card",
+      "chapter": "The Salt Road",
+      "visual": null,
+      "card": {
+        "variant": "title",
+        "title": "The Salt Road",
+        "subtitle": "gecko"
+      },
+      "narration": null,
+      "overlays": [],
+      "transition_in": null,
+      "duration": null,
+      "chrome": null,
+      "source": null
+    },
+    {
+      "id": "s2",
+      "kind": "scene",
+      "role": null,
+      "label": "opening",
+      "chapter": "Where it started",
+      "visual": null,
+      "card": null,
+      "narration": {
+        "beats": [
+          {
+            "id": "b1",
+            "text": "Where it started.",
+            "kind": "heading",
+            "speak": true,
+            "hold": null,
+            "pause_after_ms": null,
+            "block_id": "h1"
+          }
+        ],
+        "voice": null
+      },
+      "overlays": [],
+      "transition_in": null,
+      "duration": null,
+      "chrome": null,
+      "source": {
+        "block_ids": [
+          "h1"
+        ]
+      }
+    },
+    {
+      "id": "s3",
+      "kind": "scene",
+      "role": null,
+      "label": "",
+      "chapter": null,
+      "visual": {
+        "asset": "a1",
+        "fit": null,
+        "motion": null,
+        "trim": null,
+        "audio": "mute",
+        "loop": true
+      },
+      "card": null,
+      "narration": {
+        "beats": [
+          {
+            "id": "b1",
+            "text": "Long before the roads were paved, salt crossed the desert. [pause:long].",
+            "kind": "prose",
+            "speak": true,
+            "hold": null,
+            "pause_after_ms": null,
+            "block_id": "p1"
+          },
+          {
+            "id": "b2",
+            "text": "Salt was worth its weight in gold.",
+            "kind": "quote",
+            "speak": true,
+            "hold": null,
+            "pause_after_ms": null,
+            "block_id": "q1"
+          }
+        ],
+        "voice": null
+      },
+      "overlays": [
+        {
+          "id": "o1",
+          "show": {
+            "from": {
+              "segment": null,
+              "beat": "b2",
+              "edge": "start",
+              "offset": 0.0
+            },
+            "to": {
+              "segment": null,
+              "beat": "b2",
+              "edge": "end",
+              "offset": 0.0
+            }
+          },
+          "fade": null,
+          "type": "quote",
+          "text": "Salt was worth its weight in gold.",
+          "attribution": "Old saying"
+        }
+      ],
+      "transition_in": null,
+      "duration": null,
+      "chrome": null,
+      "source": {
+        "block_ids": [
+          "img1",
+          "p1",
+          "q1"
+        ]
+      }
+    },
+    {
+      "id": "s4",
+      "kind": "scene",
+      "role": null,
+      "label": "after quote",
+      "chapter": "The market",
+      "visual": {
+        "asset": "a1",
+        "fit": null,
+        "motion": null,
+        "trim": null,
+        "audio": "mute",
+        "loop": true
+      },
+      "card": null,
+      "narration": {
+        "beats": [
+          {
+            "id": "b1",
+            "text": "The market.",
+            "kind": "heading",
+            "speak": true,
+            "hold": null,
+            "pause_after_ms": null,
+            "block_id": "h2"
+          }
+        ],
+        "voice": null
+      },
+      "overlays": [],
+      "transition_in": null,
+      "duration": null,
+      "chrome": null,
+      "source": {
+        "block_ids": [
+          "h2"
+        ]
+      }
+    },
+    {
+      "id": "s5",
+      "kind": "scene",
+      "role": null,
+      "label": "",
+      "chapter": null,
+      "visual": {
+        "asset": "a2",
+        "fit": null,
+        "motion": null,
+        "trim": null,
+        "audio": "mute",
+        "loop": true
+      },
+      "card": null,
+      "narration": {
+        "beats": [
+          {
+            "id": "b1",
+            "text": "At the end of the road, the market opened at dawn.",
+            "kind": "prose",
+            "speak": true,
+            "hold": null,
+            "pause_after_ms": null,
+            "block_id": "p2"
+          }
+        ],
+        "voice": null
+      },
+      "overlays": [],
+      "transition_in": null,
+      "duration": null,
+      "chrome": null,
+      "source": {
+        "block_ids": [
+          "img2",
+          "p2"
+        ]
+      }
+    }
+  ],
+  "audio_tracks": [
+    {
+      "id": "m1",
+      "kind": "music",
+      "asset": "a3",
+      "start": {
+        "segment": "s1",
+        "beat": null,
+        "edge": "start",
+        "offset": 0.0
+      },
+      "end": {
+        "segment": "s5",
+        "beat": null,
+        "edge": "end",
+        "offset": 0.0
+      },
+      "trim": null,
+      "loop": true,
+      "volume": 0.18,
+      "duck_under_narration": true,
+      "fade_in": 1.5,
+      "fade_out": 3.0
+    }
+  ],
+  "credits": null
+}
