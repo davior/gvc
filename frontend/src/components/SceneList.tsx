@@ -1,5 +1,8 @@
 import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react'
+import type { GamAsset } from '@/api/gam'
 import type { Segment, VideoSpec } from '@/api/projects'
+import VisualStrip from '@/components/VisualStrip'
+import { removeVisual } from '@/spec/footage'
 import {
   addScene,
   moveSegment,
@@ -12,6 +15,10 @@ import {
 interface Props {
   spec: VideoSpec
   onChange: (next: VideoSpec) => void
+  /** GAM assets the spec shows, looked up by the project store. */
+  gamAssets?: Record<string, GamAsset | null>
+  /** Open the footage search for the segment at this index. */
+  onFindFootage?: (index: number) => void
 }
 
 const KIND_LABEL: Record<Segment['kind'], string> = {
@@ -23,12 +30,17 @@ const KIND_LABEL: Record<Segment['kind'], string> = {
 /**
  * The video as a list of segments, built and rearranged by hand.
  *
- * The seed of M3's storyboard: today it edits labels, card titles and narration, and
- * adds, moves and removes scenes. Everything else a segment carries (its picture,
- * transition, Ken Burns move) is kept untouched and edited in the JSON tab until the
- * per-scene panel exists.
+ * The seed of M3's storyboard: today it edits labels, card titles, narration and each
+ * scene's picture or footage (found in GAM), and adds, moves and removes scenes.
+ * Everything else a segment carries (transition, Ken Burns move) is kept untouched and
+ * edited in the JSON tab until the per-scene panel exists.
  */
-export default function SceneList({ spec, onChange }: Props) {
+export default function SceneList({
+  spec,
+  onChange,
+  gamAssets = {},
+  onFindFootage,
+}: Props) {
   const segments = spec.segments
   const edit = (index: number, change: (s: Segment) => Segment) =>
     onChange(updateSegment(spec, index, change))
@@ -92,6 +104,16 @@ export default function SceneList({ spec, onChange }: Props) {
                   card: { ...s.card!, title: e.target.value },
                 }))
               }
+            />
+          )}
+
+          {segment.kind !== 'card' && onFindFootage && (
+            <VisualStrip
+              spec={spec}
+              segment={segment}
+              gamAssets={gamAssets}
+              onFind={() => onFindFootage(index)}
+              onRemove={() => onChange(removeVisual(spec, index))}
             />
           )}
 

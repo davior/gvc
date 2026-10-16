@@ -7,10 +7,13 @@ from app.auth import CurrentUser
 from app.database import get_session
 from app.models.project import Project, ProjectVersion
 from app.schemas import DataResponse, ListResponse
+from app.gam.client import GamClient
+from app.routers.gam import get_gam
 from app.schemas_projects import (
-    ProjectCreate, ProjectImport, ProjectRead, ProjectSummary, SpecSave, VersionDetail,
-    VersionRead,
+    CopyFailureRead, NoteMediaCopy, ProjectCreate, ProjectImport, ProjectRead,
+    ProjectSummary, SpecSave, VersionDetail, VersionRead,
 )
+from app.services import note_media
 from app.services import projects as service
 from app.spec.starter import starter_spec
 
@@ -146,3 +149,24 @@ def revert_project(
     project = service.get_owned(session, user, project_id)
     service.revert(session, project, service.get_version(session, project, version_id))
     return DataResponse(data=_read(project))
+
+
+@router.post("/{project_id}/copy-note-media", response_model=DataResponse[NoteMediaCopy])
+def copy_note_media(
+    project_id: str,
+    user: CurrentUser,
+    session: Session = Depends(get_session),
+    gam: GamClient = Depends(get_gam),
+) -> DataResponse[NoteMediaCopy]:
+    """Move the files a pushed note still points at into GAM, as one new version.
+
+    Synchronous: a pushed note carries a handful of pictures and a music file. If that
+    proves slow it moves onto the job queue rendering brings (M2).
+    """
+    project = service.get_owned(session, user, project_id)
+    result = note_media.copy_note_media(session, project, gam)
+    return DataResponse(data=NoteMediaCopy(
+        project=_read(project),
+        copied=result.copied,
+        failed=[CopyFailureRead(key=f.key, message=f.message) for f in result.failed],
+    ))

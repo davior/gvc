@@ -56,9 +56,15 @@ class Settings(BaseSettings):
     database_url: str = ""
 
     # ─── siblings ────────────────────────────────────────────────────────────
-    # The media library. Read from M1 on; set now so a deployment's .env is complete
-    # before anything depends on it.
+    # The media library: footage, pictures and music are searched for and kept there.
     gam_base_url: str = "https://gam.geckopico.com"
+    # Per request to GAM. Generous, because a search that runs its semantic half calls
+    # an embedding provider before it answers.
+    gam_timeout_seconds: float = 30
+    # The largest file "Copy into GAM" will move out of a pushed note. Streamed to a
+    # temp file and checked as it arrives, not after: a size checked afterwards has
+    # already filled the disk.
+    note_media_max_mb: int = 4096
 
     # ─── http ────────────────────────────────────────────────────────────────
     cors_origin: str = ""

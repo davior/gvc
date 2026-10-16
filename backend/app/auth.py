@@ -212,6 +212,30 @@ def current_user(
 CurrentUser = Annotated[UserCtx, Depends(current_user)]
 
 
+def caller_token(
+    authorization: Annotated[Optional[str], Header()] = None,
+    gecko_session: Annotated[Optional[str], Cookie()] = None,
+) -> Optional[str]:
+    """The raw token the caller signed in with, to call GAM as them.
+
+    GAM verifies the same Notes-issued JWT, so forwarding it lets GVC search and upload
+    as the user, with GAM's own per-user ownership intact and no service account to
+    hold. Same transport order as `current_user` (header, then cookie). Only meaningful
+    on a route that also depends on `current_user`, which has already verified it and
+    applied the cookie path's origin check.
+
+    None under the dev user: GAM then has to be running with a dev user of its own.
+    """
+    if authorization and authorization.startswith("Bearer "):
+        return authorization[7:].strip() or None
+    if gecko_session:
+        return gecko_session.strip() or None
+    return None
+
+
+CallerToken = Annotated[Optional[str], Depends(caller_token)]
+
+
 # ─── administrators ──────────────────────────────────────────────────────────
 #
 # The token carries no admin claim and `User.is_admin` has no writer, so an admin is

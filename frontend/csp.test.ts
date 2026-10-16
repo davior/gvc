@@ -70,4 +70,13 @@ describe('Content-Security-Policy', () => {
     expect(directive('connect-src')).toContain('${NOTES_BASE_URL}')
     expect(directive('connect-src')).not.toContain('geckopico.com')
   })
+
+  it('lets thumbnails and footage previews load from GAM, templated too', () => {
+    // GAM's signed media URLs go straight into <img> and <video>. Without its origin
+    // here every thumbnail is blocked, which shows only as a console warning.
+    for (const name of ['img-src', 'media-src']) {
+      expect(directive(name)).toContain('${GAM_BASE_URL}')
+      expect(directive(name)).not.toContain('geckopico.com')
+    }
+  })
 })

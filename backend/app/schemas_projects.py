@@ -67,3 +67,15 @@ class Validation(BaseModel):
     issues: List[SpecIssue] = Field(default_factory=list)
     # The spec as it would be stored: migrated, defaults filled in. Only when valid.
     spec: Optional[Dict[str, Any]] = None
+
+
+class CopyFailureRead(BaseModel):
+    key: str
+    message: str
+
+
+class NoteMediaCopy(BaseModel):
+    project: ProjectRead
+    # Asset keys now pointing at GAM, and the ones still in the note (retryable).
+    copied: List[str]
+    failed: List[CopyFailureRead]

@@ -147,8 +147,10 @@ Nothing after creation knows or cares which way a project came in. Consequences:
   reads them.
 - The Notes media a pushed spec refers to (`from: "notes"` URLs) is copied into GAM
   when the project is imported, so afterwards the project doesn't depend on the note
-  either. That copy needs M1's media resolver. Until then, an imported project is
-  flagged "media not yet copied".
+  either. A pushed project says how many files are still in the note, and "Copy into
+  GAM" (`POST /api/projects/{id}/copy-note-media`) moves them, replacing each ref
+  under the same key so nothing that pointed at it changes. Files that fail stay as
+  they were, to retry.
 - **The one remaining runtime tie to Notes is login.** GVC verifies the JWT Notes
   issues (suite SSO), as GAM does, and has no accounts of its own. If Notes is down,
   nobody can sign in anew, but everything else in GVC keeps working.
@@ -260,7 +262,7 @@ Specified here, applied in GAM's repository, not from this one.
 
 | | Change | Why |
 |---|---|---|
-| GAM-1 | `end_time` on `SearchHit`, from the transcript segment | S3: a moment needs an out point |
+| GAM-1 | `end_time` on `SearchHit`, from the transcript segment. **Done: [davior/gam#36](https://github.com/davior/gam/pull/36).** GVC also works without it, sizing a moment as start + 5 s | S3: a moment needs an out point |
 | GAM-2 | Run M5's acceptance on a real library; document that semantic search needs an embedding provider | "Find where people talk about *X*" is the feature most of this goal rests on, and it has never been checked end to end |
 | GAM-3 | `origin_project_id` / `origin_reference_id` on `Asset` (migration) + upload with `source: "gvc_export"` | Filing renders back into the library |
 | GAM-4 | M9: documented read API, `/picker?embed=1` with `postMessage({ assetId, inPoint, outPoint })` | Picking assets and moments by hand in the editor |
@@ -273,7 +275,7 @@ GAM-1 and GAM-2 come first. They're small, and M1 below depends on them.
 | | Change | Why |
 |---|---|---|
 | GN-V1 | "Make video" posts the spec from `POST /api/video/spec` to GVC's `POST /api/projects/import` and opens the returned project | The one-way push (D3) |
-| GN-V2 | Notes media readable by GAM's import (a signed URL or a server-to-server fetch with the user's token) | So a pushed project's pictures can be copied into GAM |
+| ~~GN-V2~~ | **Not needed.** Notes serves `/media/*` with no authentication at all (`gecko-notes/backend/app/main.py`), so GVC's server fetches a pushed note's files directly. Worth knowing for its own sake: anyone holding a note's media URL can fetch it, which is Notes' existing behaviour, not something GVC adds | |
 | GN-V3 | Once GVC renders (M2): Notes' own render pipeline is retired (the Notes spec doc §10, Phase 4) | One renderer, not two |
 
 ## Milestones
@@ -283,8 +285,8 @@ Each milestone ends with something you can use, not just with code merged.
 | | Milestone | Scope | Done when |
 |---|---|---|---|
 | **M0** | **Genesis** | Skeleton from GAM: `config.py`, `clock.py`, Alembic, shadow-user auth on the Notes JWT, `/api/health`, Dockerfiles (backend with ffmpeg), compose, nginx, CI. `Project` (current spec as JSON) and `ProjectVersion` (snapshot, author, message). Spec Pydantic model copied from Notes with S1–S3 applied, `0.1 → 0.2` migration on load. Projects API: blank project (title card + one empty scene), paste a spec, `POST /api/projects/import` for a Notes push, versions and revert, validation with errors by path. React shell: project list, a plain scene list (add, reorder, delete, edit narration), a JSON tab with live validation, version history. | You can sign in with your Notes account, make a video's structure by hand, paste the Notes spec doc's §6 example and see it validate (or see exactly why not), and import a spec Notes produced |
-| **M1** | **GAM as the library** | GAM-1 and GAM-2 applied. `from: "gam"` assets resolved through signed URLs into a local cache keyed on asset id and checksum. Search GAM from GVC: results with transcript snippets, and picking a hit fills a scene's visual and trim (S3). `search` placeholders resolved from that list. A pushed note's media copied into GAM (D3). | A scene's footage is found by what is said in it ("where people talk about *X*") and lands in the spec as a trimmed GAM clip |
-| **M2** | **Native renderer** | Engine copied from Notes (D1). The compile step from the Notes spec doc §5.8, plus S1 framing. Renders: per-join transitions with the project default, per-scene motion and framing, N audio tracks with fades, crossfades and ducking, trims, card/scene/clip. All media from GAM (M1). Placeholder slates. Preview (480p) and full render as jobs. Download, and file the render back to GAM (GAM-3). Credits from GAM attribution. TTS through Notes' `POST /api/settings/speech/tts`, so voices and keys stay in one place (open decision 3). | A spec with two music tracks crossfading at a scene cut, a dissolve into one scene, and a Ken Burns path over a chosen part of a picture renders correctly |
+| **M1** | **GAM as the library** | GAM-1 applied (gam#36). GVC's server calls GAM as the signed-in user by forwarding their own Notes token, so GAM's ownership checks hold and no service account exists. Search GAM from a scene: results with transcript snippets and the moment's time; picking a hit places it as muted b-roll or as a clip with its own sound, trimmed to what was said (padded, and sized by a placeholder's `moment`). `search` placeholders resolved the same way. Thumbnails and names looked up per page load, since GAM's signed URLs expire, and loaded straight from GAM (CSP `img-src`/`media-src`). A pushed note's media copied into GAM (D3). The byte cache keyed on asset id and checksum moved to M2: nothing reads media bytes until the renderer does. | A scene's footage is found by what is said in it ("where people talk about *X*") and lands in the spec as a trimmed GAM clip |
+| **M2** | **Native renderer** | Engine copied from Notes (D1). The compile step from the Notes spec doc §5.8, plus S1 framing. Renders: per-join transitions with the project default, per-scene motion and framing, N audio tracks with fades, crossfades and ducking, trims, card/scene/clip. All media from GAM (M1), its bytes fetched through signed URLs into a local cache keyed on asset id and checksum. Placeholder slates. Preview (480p) and full render as jobs. Download, and file the render back to GAM (GAM-3). Credits from GAM attribution. TTS through Notes' `POST /api/settings/speech/tts`, so voices and keys stay in one place (open decision 3). | A spec with two music tracks crossfading at a scene cut, a dissolve into one scene, and a Ken Burns path over a chosen part of a picture renders correctly |
 | **M3** | **Editor** | The M0 scene list grows into the storyboard: a card per segment (thumbnail, label, first line), lanes for audio tracks and overlays against the segments, a per-scene panel (visual, trim, transition, motion with a drag-a-box framing tool, voice), a project defaults panel. Sliders take their ranges from the schema (the Notes spec doc, open decision 12). Undo/redo over `ProjectVersion`. | You can build and fix a whole video by hand without opening the JSON tab |
 | **M4** | **AI drafting** | Providers copied from GAM's M6. "New video from a prompt": brief → spec (D2) with GAM search as a tool, and placeholders for gaps, with one repair round. Also from selected GAM assets. Cost estimate before running, usage recorded. | "Make a 3-minute video about *X* using clips where people talk about it" produces a spec that previews immediately |
 | **M5** | **AI editing** | The Notes spec doc §8.2 operations, addressed by id. Chat beside the storyboard. Suggestions staged and accepted one by one. Generate placeholders sent to GAM's M8. | "Change the music after the second chapter to something calmer, and dissolve into the last scene" becomes reviewed, applied edits |

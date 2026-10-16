@@ -19,6 +19,8 @@ from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from app.auth import CurrentUser, is_admin
 from app.config import settings
 from app.database import engine, get_session
+from app.gam.client import GamError
+from app.routers import gam as gam_router
 from app.routers import projects as projects_router
 from app.routers import spec as spec_router
 from app.schemas import ClientConfig, DataResponse, HealthResponse
@@ -76,6 +78,15 @@ async def _http_exception_handler(request, exc: StarletteHTTPException):
     return JSONResponse(status_code=exc.status_code, content={"detail": detail})
 
 
+@app.exception_handler(GamError)
+async def _gam_error_handler(request, exc: GamError):
+    """GAM failing is GVC's upstream failing: in the suite's error shape, with GAM's
+    own code where it gave one, so the editor can say which app is at fault."""
+    return JSONResponse(
+        status_code=exc.status_code, content={"detail": {"code": exc.code, "message": exc.message}}
+    )
+
+
 def _default_code(status_code: int) -> str:
     return {
         400: "bad_request",
@@ -126,3 +137,4 @@ def me(user: CurrentUser, session: Session = Depends(get_session)) -> DataRespon
 
 app.include_router(projects_router.router, prefix="/api/projects", tags=["projects"])
 app.include_router(spec_router.router, prefix="/api/spec", tags=["spec"])
+app.include_router(gam_router.router, prefix="/api/gam", tags=["gam"])

@@ -21,6 +21,41 @@ export interface Card {
   subtitle?: string
 }
 
+export interface Trim {
+  in: number
+  out?: number
+}
+
+export interface Visual {
+  asset: string
+  trim?: Trim
+  audio?: 'mute' | 'play'
+  loop?: boolean
+  [key: string]: unknown
+}
+
+/** An entry in the spec's asset registry. Only the fields the editor reads are named. */
+export type AssetRef =
+  | { from: 'gam'; id: string; type?: string; label?: string }
+  | { from: 'notes'; url: string; type: string; label?: string }
+  | {
+      from: 'generate'
+      type: string
+      prompt: string
+      status?: string
+      label?: string
+      [key: string]: unknown
+    }
+  | {
+      from: 'search'
+      query: string
+      type?: string
+      moment?: { min?: number; max?: number }
+      status?: 'unresolved' | 'resolved'
+      result?: { from: 'gam'; id: string; in?: number; out?: number }
+      label?: string
+    }
+
 export interface Segment {
   id: string
   kind: 'scene' | 'card' | 'clip'
@@ -28,6 +63,7 @@ export interface Segment {
   label?: string
   chapter?: string
   card?: Card
+  visual?: Visual
   narration?: { beats: Beat[]; [key: string]: unknown }
   transition_in?: { style?: string; duration?: number }
   [key: string]: unknown
@@ -38,6 +74,7 @@ export interface VideoSpec {
   id?: string
   title: string
   source?: { kind: 'note' | 'brief'; [key: string]: unknown }
+  assets?: Record<string, AssetRef>
   segments: Segment[]
   [key: string]: unknown
 }
@@ -78,6 +115,12 @@ export interface Validation {
   valid: boolean
   issues: SpecIssue[]
   spec: VideoSpec | null
+}
+
+export interface NoteMediaCopy {
+  project: Project
+  copied: string[]
+  failed: { key: string; message: string }[]
 }
 
 interface DataResponse<T> {
@@ -133,6 +176,13 @@ export const projectsApi = {
   revert(id: string, versionId: string): Promise<Project> {
     return client
       .post<DataResponse<Project>>(`/projects/${id}/revert/${versionId}`)
+      .then((r) => r.data.data)
+  },
+
+  /** Move a pushed note's files into GAM; failures stay in the note, to retry. */
+  copyNoteMedia(id: string): Promise<NoteMediaCopy> {
+    return client
+      .post<DataResponse<NoteMediaCopy>>(`/projects/${id}/copy-note-media`)
       .then((r) => r.data.data)
   },
 
