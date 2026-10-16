@@ -28,8 +28,15 @@ GAM by what is said in it. Then preview and render it:
 - text, lower thirds and pictures on screen, timed to the scenes and lines they belong to;
 - end credits from the library's attribution, and a description with chapters and credits.
 
-A finished render can be saved back into GAM. AI drafting and the full storyboard
-editor are next (M3, M4).
+A finished render can be saved back into GAM.
+
+**The assistant (M4/M5).** A panel beside every page that knows the whole video format.
+Describe a video and it drafts one from your GAM library, or ask for any change to the
+one open. What it would change is listed for you to apply or discard. It runs in the
+background, so a request finishes with the page closed. Set up its AI provider
+(Anthropic, OpenAI, DeepSeek, Ollama or a custom endpoint) under Settings.
+
+The full storyboard editor is next (M3).
 
 ## Read first
 

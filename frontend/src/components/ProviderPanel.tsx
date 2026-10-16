@@ -368,9 +368,6 @@ export default function ProviderPanel() {
           </div>
 
           <div>
-            {/* "Provider type", not "Provider": the embedding panel on the same page
-                already has a field labelled that, and two identical labels are
-                ambiguous to anyone navigating the page by label. */}
             <label className="label" htmlFor="provider-type">
               Provider type
             </label>

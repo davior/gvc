@@ -95,6 +95,10 @@ class OpenAIConversation:
         self.messages.append(message)
         return reply
 
+    def tell(self, text: str) -> None:
+        """A user message mid-turn: what the loop says when the model stops too soon."""
+        self.messages.append({"role": "user", "content": text})
+
     def answer(self, results: Sequence[ToolResult]) -> None:
         for r in results:
             # No error flag in this protocol: an error is said in the content.

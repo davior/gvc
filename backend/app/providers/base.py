@@ -79,6 +79,10 @@ class Conversation(Protocol):
         """Append the results of the tool calls in the last reply, all in one message."""
         ...
 
+    def tell(self, text: str) -> None:
+        """Append a user message after a reply that called no tools."""
+        ...
+
 
 class ChatProvider(Protocol):
     @property

@@ -114,6 +114,10 @@ class AnthropicConversation:
         self.messages.append({"role": "assistant", "content": content or []})
         return reply
 
+    def tell(self, text: str) -> None:
+        """A user message mid-turn: what the loop says when the model stops too soon."""
+        self.messages.append({"role": "user", "content": text})
+
     def answer(self, results: Sequence[ToolResult]) -> None:
         # Every result in one user message: splitting them teaches the model to stop
         # calling tools in parallel.
