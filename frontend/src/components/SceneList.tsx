@@ -1,6 +1,7 @@
 import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react'
 import type { GamAsset } from '@/api/gam'
 import type { Segment, VideoSpec } from '@/api/projects'
+import SceneSettings from '@/components/SceneSettings'
 import VisualStrip from '@/components/VisualStrip'
 import { removeVisual } from '@/spec/footage'
 import {
@@ -114,6 +115,16 @@ export default function SceneList({
               gamAssets={gamAssets}
               onFind={() => onFindFootage(index)}
               onRemove={() => onChange(removeVisual(spec, index))}
+            />
+          )}
+
+          {onFindFootage && (
+            <SceneSettings
+              spec={spec}
+              index={index}
+              segment={segment}
+              gamAssets={gamAssets}
+              onChange={onChange}
             />
           )}
 

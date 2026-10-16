@@ -25,7 +25,9 @@ result once, and typed.
 
 import base64
 import hashlib
+import hmac
 import logging
+import time
 from typing import Annotated, Optional
 from urllib.parse import urlsplit
 
@@ -317,3 +319,30 @@ def decrypt_api_key(value: str) -> str:
     except InvalidToken:
         logger.warning("Stored key could not be decrypted; treating as unset")
         return ""
+
+
+# ─── signed media URLs ───────────────────────────────────────────────────────
+#
+# Copied from GAM. A finished render is served at a signed URL rather than behind the
+# Authorization header, because a <video> element cannot send one. A signature works where an Authorization header cannot: a <video> or <img> element
+# cannot send one, but it can carry query parameters.
+
+
+def sign_media_key(key: str, *, ttl_seconds: Optional[int] = None) -> tuple[int, str]:
+    """Return `(expiry, signature)` for a storage key."""
+    ttl = settings.media_url_ttl_seconds if ttl_seconds is None else ttl_seconds
+    expires_at = int(time.time()) + ttl
+    return expires_at, _media_signature(key, expires_at)
+
+
+def _media_signature(key: str, expires_at: int) -> str:
+    message = f"{key}|{expires_at}".encode()
+    digest = hmac.new(settings.jwt_secret_key.encode(), message, hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(digest).decode().rstrip("=")
+
+
+def verify_media_signature(key: str, expires_at: int, signature: str) -> bool:
+    """Constant-time check of a media URL's signature and expiry."""
+    if expires_at < int(time.time()):
+        return False
+    return hmac.compare_digest(_media_signature(key, expires_at), signature)

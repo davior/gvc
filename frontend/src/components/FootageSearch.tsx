@@ -8,8 +8,9 @@ import { clock, momentTrim, type MomentSize, type PlaceMode } from '@/spec/foota
  * - `scene`: footage for one scene, as b-roll under its narration or as a clip with
  *   its own sound.
  * - `resolve`: whatever answers a `search` placeholder.
+ * - `track`: a sound to play under the video: music, an effect, a voice.
  */
-type Purpose = 'scene' | 'resolve'
+type Purpose = 'scene' | 'resolve' | 'track'
 
 interface Props {
   title: string
@@ -25,6 +26,7 @@ interface Props {
 const TYPES: { id: MediaKind | undefined; label: string }[] = [
   { id: 'video', label: 'Video' },
   { id: 'image', label: 'Pictures' },
+  { id: 'audio', label: 'Sound' },
   { id: undefined, label: 'Everything' },
 ]
 
@@ -205,6 +207,14 @@ export default function FootageSearch({
                       : selected.asset.file_url
                   }
                 />
+              ) : selected.asset.asset_type === 'audio' && selected.asset.file_url ? (
+                <audio
+                  key={selected.asset.id}
+                  controls
+                  preload="metadata"
+                  className="w-full"
+                  src={selected.asset.file_url}
+                />
               ) : selected.asset.file_url ? (
                 <img
                   src={selected.asset.file_url}
@@ -213,17 +223,29 @@ export default function FootageSearch({
                 />
               ) : null}
               <p className="text-sm text-gray-700 dark:text-gray-300">
-                {trim
-                  ? `Uses ${clock(trim.in)}–${clock(trim.out)} (${Math.round(trim.out - trim.in)} s)`
-                  : isVideo
-                    ? 'Uses the whole video'
-                    : 'A still picture'}
+                {purpose === 'track'
+                  ? selected.asset.duration_seconds
+                    ? `${clock(selected.asset.duration_seconds)} long`
+                    : 'A sound'
+                  : trim
+                    ? `Uses ${clock(trim.in)}–${clock(trim.out)} (${Math.round(trim.out - trim.in)} s)`
+                    : isVideo
+                      ? 'Uses the whole video'
+                      : 'A still picture'}
               </p>
               {selected.asset.credit && (
                 <p className="text-xs text-gray-500">{selected.asset.credit}</p>
               )}
               <div className="flex flex-wrap gap-2">
-                {purpose === 'resolve' ? (
+                {purpose === 'track' ? (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => onPick(selected, 'broll')}
+                  >
+                    Use this track
+                  </button>
+                ) : purpose === 'resolve' ? (
                   <button
                     type="button"
                     className="btn btn-primary"

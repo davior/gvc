@@ -42,8 +42,16 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements-dev.txt
 
-      # No ffmpeg step yet: nothing renders until M2, and no test shells out to it.
-      # Add GAM's "Ensure ffmpeg is available" step back with the renderer.
+      # The render tests encode real video. Conditional because the runner image may
+      # already ship it and `apt-get update` is not free.
+      - name: Ensure ffmpeg is available
+        run: |
+          if command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null; then
+            echo "ffmpeg already present: $(ffmpeg -version | head -1)"
+          else
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends ffmpeg
+          fi
 
       - name: Install dependencies
         run: pip install -r requirements-dev.txt

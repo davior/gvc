@@ -23,7 +23,7 @@ EXPOSE 80
 # not need its own image. Substituted at container start, not build time.
 ENV NOTES_BASE_URL=https://notes.geckopico.com
 # img-src and media-src: thumbnails and previews load from GAM directly.
-ENV GAM_BASE_URL=https://gam.geckopico.com
+ENV GAM_BASE_URL=https://assets.geckopico.com
 
 # Only these two are substituted; nginx's own $variables ($uri, $host, $remote_addr …)
 # must survive untouched, which is why envsubst is given an explicit list rather than

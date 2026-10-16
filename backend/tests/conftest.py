@@ -103,3 +103,61 @@ def siblings_fixture(monkeypatch):
     monkeypatch.setattr(settings, "gam_base_url", GAM)
     monkeypatch.setattr(settings, "notes_base_url", NOTES)
     return fake
+
+
+@pytest.fixture(autouse=True)
+def no_render_workers(monkeypatch, tmp_path):
+    """No worker threads in tests, and renders written under the test's own directory.
+
+    The app's lifespan starts the render queue, and TestClient runs the lifespan; a
+    test that wants a render to happen calls `worker._run` itself, which is also the
+    only way to assert on what it did.
+    """
+    from app.config import settings
+    from app.render import worker
+
+    monkeypatch.setattr(worker.queue, "start", lambda: None)
+    monkeypatch.setattr(worker.queue, "enqueue", lambda job_id: None)
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path / "data"))
+
+
+# ── media a render can really encode ─────────────────────────────────────────
+
+import subprocess  # noqa: E402
+
+
+def _make(path, *args):
+    subprocess.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *args, path], check=True)
+    with open(path, "rb") as f:
+        return f.read()
+
+
+@pytest.fixture(scope="module")
+def files(tmp_path_factory):
+    d = tmp_path_factory.mktemp("media")
+    return {
+        "picture": _make(str(d / "p.png"), "-f", "lavfi", "-i", "testsrc=size=1600x900", "-frames:v", "1"),
+        "reel": _make(str(d / "r.mp4"), "-f", "lavfi", "-i", "testsrc=size=640x360:rate=25",
+                      "-f", "lavfi", "-i", "sine=frequency=220", "-t", "20",
+                      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac"),
+        "song_a": _make(str(d / "a.mp3"), "-f", "lavfi", "-i", "sine=frequency=330", "-t", "30"),
+        "song_b": _make(str(d / "b.mp3"), "-f", "lavfi", "-i", "sine=frequency=660", "-t", "30"),
+        "speech": _make(str(d / "s.wav"), "-f", "lavfi", "-i", "sine=frequency=500", "-t", "1.5"),
+    }
+
+
+@pytest.fixture
+def library(siblings, files):
+    from tests.fake_siblings import gam_asset
+
+    for key, kind, size in (("p", "image", None), ("r", "video", 20.0),
+                            ("a", "audio", 30.0), ("b", "audio", 30.0)):
+        asset = gam_asset(key, f"asset {key}", kind, file_url=f"/media/{key}.bin", size_bytes=1,
+                          duration_seconds=size)
+        siblings.assets[key] = asset
+    siblings.media_files = {"/media/p.bin": files["picture"], "/media/r.bin": files["reel"],
+                            "/media/a.bin": files["song_a"], "/media/b.bin": files["song_b"]}
+    siblings.speech = files["speech"]
+    return siblings
+
+

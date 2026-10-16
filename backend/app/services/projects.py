@@ -171,6 +171,13 @@ def delete(session: Session, project: Project) -> None:
     # Versions first, flushed on their own. With no relationship declared between the
     # two tables, the unit of work is free to issue the project's DELETE first, which
     # the foreign key refuses.
+    from app.models.render import RenderJob
+    from app.render.worker import renders_dir
+    import shutil
+
+    for job in session.exec(select(RenderJob).where(RenderJob.project_id == project.id)).all():
+        shutil.rmtree(renders_dir() / job.id, ignore_errors=True)
+    session.exec(sa_delete(RenderJob).where(RenderJob.project_id == project.id))
     session.exec(sa_delete(ProjectVersion).where(ProjectVersion.project_id == project.id))
     session.delete(project)
     session.commit()

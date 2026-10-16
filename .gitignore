@@ -10,7 +10,7 @@ venv/
 .env.*
 !.env.example
 
-data/db/
+data/
 backend/data/
 backend/*.db*
 # Alembic's autogenerate scratch database (GAM committed one by accident once).

@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { authApi, redirectToLogin, type User } from '@/api/auth'
 import { apiErrorCode, apiErrorMessage, clearToken } from '@/api/client'
 import { useProjectStore } from '@/stores/projects'
+import { useRenderStore } from '@/stores/renders'
 
 /**
  * Who is signed in.
@@ -67,6 +68,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // Fan out to every store holding user data, so signing out cannot leave one
     // person's projects on screen for the next.
     useProjectStore.getState().reset()
+    // Also stops the poll, which would otherwise keep asking as the old user.
+    useRenderStore.getState().reset()
     void redirectToLogin()
   },
 

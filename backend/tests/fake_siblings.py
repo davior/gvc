@@ -38,6 +38,11 @@ class FakeSiblings:
     # Set to make GAM answer every request with this status.
     gam_status: Optional[int] = None
     gam_down: bool = False
+    # GAM media bytes by path ("/media/<key>"), and what Notes' speech says per chunk.
+    media_files: Dict[str, bytes] = field(default_factory=dict)
+    speech: Optional[bytes] = None
+    speech_provider: Optional[str] = "deepgram"
+    spoken: List[dict] = field(default_factory=list)
     # Filenames GAM should refuse on upload.
     refuse_uploads: List[str] = field(default_factory=list)
     uploads: List[dict] = field(default_factory=list)
@@ -47,6 +52,15 @@ class FakeSiblings:
         url = str(request.url)
         if url.startswith(GAM):
             return self._gam(request)
+        if url.startswith(NOTES) and request.url.path == "/api/settings/speech/tts":
+            body = json.loads(request.content)
+            self.spoken.append(body)
+            headers = {"content-type": "audio/wav"}
+            if self.speech_provider:
+                headers["x-speech-provider"] = body["provider"] if body["provider"] != "auto" \
+                    else self.speech_provider
+                headers["x-speech-voice"] = body.get("voice") or "Rex"
+            return httpx.Response(200, content=self.speech or b"", headers=headers)
         if url.startswith(NOTES):
             path = request.url.path
             if path in self.notes_files:
@@ -61,6 +75,8 @@ class FakeSiblings:
         if self.gam_status:
             return httpx.Response(self.gam_status, json={"detail": {"code": "x", "message": "y"}})
         path = request.url.path
+        if path.startswith("/media/") and path in self.media_files:
+            return httpx.Response(200, content=self.media_files[path])
         if path == "/api/search":
             return httpx.Response(200, json={
                 "data": self.hits, "total": len(self.hits),

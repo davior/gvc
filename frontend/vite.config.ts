@@ -26,6 +26,7 @@ export default defineConfig({
       // a sibling's port does not fail cleanly: that backend shares JWT_SECRET_KEY, so
       // it verifies the token and answers with another app's data.
       '/api': { target: 'http://localhost:8002', changeOrigin: true, ws: true },
+      '/media': { target: 'http://localhost:8002', changeOrigin: true },
     },
   },
   test: {
