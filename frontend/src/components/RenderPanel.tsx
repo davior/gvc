@@ -1,5 +1,15 @@
-import { useEffect } from 'react'
-import { Clapperboard, Download, Eye, Square, Trash2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import {
+  Check,
+  Clapperboard,
+  Copy,
+  Download,
+  ExternalLink,
+  Eye,
+  Library,
+  Square,
+  Trash2,
+} from 'lucide-react'
 import { ACTIVE, type Render } from '@/api/renders'
 import { useRenderStore } from '@/stores/renders'
 import { clock } from '@/spec/footage'
@@ -48,6 +58,9 @@ export default function RenderPanel({ projectId, dirty, version }: Props) {
   const start = useRenderStore((s) => s.start)
   const cancel = useRenderStore((s) => s.cancel)
   const remove = useRenderStore((s) => s.remove)
+  const saving = useRenderStore((s) => s.saving)
+  const saveToGam = useRenderStore((s) => s.saveToGam)
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     void load(projectId)
@@ -153,6 +166,32 @@ export default function RenderPanel({ projectId, dirty, version }: Props) {
             className="w-full rounded bg-black"
             src={latest.video_url}
           />
+          {latest.description && (
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 text-xs text-gray-500">
+                <span className="flex-1">Description: chapters and credits</span>
+                <button
+                  type="button"
+                  className="btn btn-ghost px-1 py-0.5 text-xs"
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(latest.description ?? '')
+                    setCopied(true)
+                    setTimeout(() => setCopied(false), 1500)
+                  }}
+                >
+                  {copied ? (
+                    <Check className="mr-1 inline h-3 w-3" />
+                  ) : (
+                    <Copy className="mr-1 inline h-3 w-3" />
+                  )}
+                  {copied ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+              <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-gray-50 p-2 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+                {latest.description}
+              </pre>
+            </div>
+          )}
           {latest.warnings.length > 0 && (
             <ul className="list-disc space-y-0.5 pl-5 text-xs text-amber-700 dark:text-amber-300">
               {latest.warnings.map((w) => (
@@ -188,6 +227,30 @@ export default function RenderPanel({ projectId, dirty, version }: Props) {
                   <Download className="h-4 w-4" />
                 </a>
               )}
+              {render.status === 'done' &&
+                !render.preview &&
+                (render.gam_asset_url ? (
+                  <a
+                    className="btn btn-ghost px-1 py-0.5"
+                    href={render.gam_asset_url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    In GAM
+                    <ExternalLink className="ml-1 inline h-3 w-3" />
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-ghost px-1 py-0.5"
+                    disabled={saving !== null}
+                    onClick={() => void saveToGam(render.id)}
+                    title="File this video in your asset library"
+                  >
+                    <Library className="mr-1 inline h-3 w-3" />
+                    {saving === render.id ? 'Saving…' : 'Save to GAM'}
+                  </button>
+                ))}
               {render.subtitles_url && (
                 <a
                   className="btn btn-ghost px-1 py-0.5"

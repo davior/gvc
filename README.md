@@ -24,9 +24,12 @@ There are three ways to start one:
 GAM by what is said in it. Then preview and render it:
 - per-scene transitions and Ken Burns moves between two frames of a picture;
 - any number of soundtrack tracks, crossfading between scenes;
-- trimmed clips, and narration read through Gecko Notes.
+- trimmed clips, and narration read through Gecko Notes;
+- text, lower thirds and pictures on screen, timed to the scenes and lines they belong to;
+- end credits from the library's attribution, and a description with chapters and credits.
 
-Timed overlays, saving renders to GAM and credits are next (M2b).
+A finished render can be saved back into GAM. AI drafting and the full storyboard
+editor are next (M3, M4).
 
 ## Read first
 

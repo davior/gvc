@@ -28,7 +28,9 @@ from app.gam.client import GamClient
 from app.render import compose
 from app.render import ffmpeg as F
 from app.render.compile import Media
-from app.spec.model import GamAsset, GeneratedAsset, NotesAsset, SearchAsset, VideoSpec
+from app.spec.model import (
+    GamAsset, GeneratedAsset, ImageOverlay, NotesAsset, SearchAsset, VideoSpec,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,12 +40,26 @@ class Resolution:
     media: Dict[str, Media] = field(default_factory=dict)
     # Reasons the render cannot go ahead, one per asset.
     problems: List[str] = field(default_factory=list)
+    # Each GAM asset's credit line as GAM resolves it (a clip's inherited from its
+    # parent), for the end credits. Empty for an asset nobody has attributed.
+    credits: Dict[str, str] = field(default_factory=dict)
+
+
+def keys_in_order(spec: VideoSpec) -> List[str]:
+    """The asset keys the video shows or plays, in the order a viewer meets them:
+    scene by scene (its picture, then its overlays), then the soundtrack."""
+    ordered: List[str] = []
+    for segment in spec.segments:
+        if segment.visual is not None:
+            ordered.append(segment.visual.asset)
+        ordered += [o.asset for o in segment.overlays if isinstance(o, ImageOverlay)]
+    ordered += [t.asset for t in spec.audio_tracks]
+    return list(dict.fromkeys(k for k in ordered if k in spec.assets))
 
 
 def used_keys(spec: VideoSpec) -> Set[str]:
     """Every asset key the render will read."""
-    keys = {s.visual.asset for s in spec.segments if s.visual is not None}
-    keys |= {t.asset for t in spec.audio_tracks}
+    keys = set(keys_in_order(spec))
     if spec.style.background.type == "image" and spec.style.background.asset:
         keys.add(spec.style.background.asset)
     if spec.chrome.watermark and spec.chrome.watermark.asset:
@@ -167,6 +183,7 @@ def resolve(
             if asset.out_point is not None:
                 media.length = max(0.1, asset.out_point - (asset.in_point or 0.0))
         out.media[key] = media
+        out.credits[key] = asset.credit or ""
 
     try:
         cache.prune(int(settings.render_cache_max_gb * 1024 ** 3))

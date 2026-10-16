@@ -9,8 +9,9 @@ import { clock, momentTrim, type MomentSize, type PlaceMode } from '@/spec/foota
  *   its own sound.
  * - `resolve`: whatever answers a `search` placeholder.
  * - `track`: a sound to play under the video: music, an effect, a voice.
+ * - `overlay`: a picture shown over a scene (a logo, a map, an inset).
  */
-type Purpose = 'scene' | 'resolve' | 'track'
+type Purpose = 'scene' | 'resolve' | 'track' | 'overlay'
 
 interface Props {
   title: string
@@ -245,6 +246,20 @@ export default function FootageSearch({
                   >
                     Use this track
                   </button>
+                ) : purpose === 'overlay' ? (
+                  selected.asset.asset_type === 'image' ? (
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => onPick(selected, 'broll')}
+                    >
+                      Put on screen
+                    </button>
+                  ) : (
+                    <p className="text-xs text-gray-500">
+                      Only a picture can go on screen.
+                    </p>
+                  )
                 ) : purpose === 'resolve' ? (
                   <button
                     type="button"

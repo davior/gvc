@@ -151,3 +151,77 @@ def test_another_users_render_does_not_exist_for_you(auth_client, switch_user):
                         ("get", f"/api/projects/{project['id']}/renders")):
         kwargs = {"json": {"preview": True}} if url.endswith("/renders") and method == "post" else {}
         assert getattr(auth_client, method)(url, **kwargs).status_code == 404, (method, url)
+
+
+# ── Save to GAM (M2b, GAM-3) ────────────────────────────────────────────────
+
+def _finished(auth_client, session, *, preview=False, description="0:00 Start"):
+    """A render marked done with a small file in place, without running ffmpeg."""
+    from app.models.render import RenderJob
+
+    project = _project(auth_client)
+    job = _start(auth_client, project["id"], preview=preview).json()["data"]
+    row = session.get(RenderJob, job["id"])
+    row.status, row.video_path, row.description = "done", "video.mp4", description
+    session.add(row)
+    session.commit()
+    folder = worker.renders_dir() / job["id"]
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "video.mp4").write_bytes(b"\x00" * 2048)
+    return project, job
+
+
+def test_a_render_is_saved_to_gam_with_its_origin_as_the_requester(auth_client, session, siblings):
+    project, job = _finished(auth_client, session)
+    auth = {"Authorization": "Bearer the-users-token"}
+
+    saved = auth_client.post(f"/api/renders/{job['id']}/save-to-gam", headers=auth)
+    assert saved.status_code == 200, saved.text
+    body = saved.json()["data"]
+    assert body["gam_asset_id"] == "gam-1"
+    assert body["gam_asset_url"] == f"{settings.gam_base_url}/a/gam-1"
+
+    upload = siblings.uploads[0]
+    assert upload["authorization"] == "Bearer the-users-token"
+    assert upload["fields"] == {"source": "gvc_export", "origin_project_id": project["id"],
+                                "origin_reference_id": job["id"]}
+    # Named after the project and version, described with the chapters and credits.
+    assert siblings.assets["gam-1"]["name"] == f"{project['title'] or 'Untitled video'} (v1)"
+    assert siblings.assets["gam-1"]["description"] == "0:00 Start"
+
+    # Saving again files it once.
+    again = auth_client.post(f"/api/renders/{job['id']}/save-to-gam", headers=auth)
+    assert again.json()["data"]["gam_asset_id"] == "gam-1"
+    assert len(siblings.uploads) == 1
+    listed = auth_client.get(f"/api/projects/{project['id']}/renders").json()["data"]
+    assert listed[0]["gam_asset_id"] == "gam-1"
+
+
+def test_a_render_deleted_from_gam_is_filed_again(auth_client, session, siblings):
+    _, job = _finished(auth_client, session)
+    auth_client.post(f"/api/renders/{job['id']}/save-to-gam")
+    del siblings.assets["gam-1"]
+    again = auth_client.post(f"/api/renders/{job['id']}/save-to-gam").json()["data"]
+    assert again["gam_asset_id"] == "gam-2"
+    assert len(siblings.uploads) == 2
+
+
+def test_a_preview_or_an_unfinished_render_cannot_be_saved(auth_client, session, siblings):
+    _, preview = _finished(auth_client, session, preview=True)
+    refused = auth_client.post(f"/api/renders/{preview['id']}/save-to-gam")
+    assert refused.status_code == 400
+    assert refused.json()["detail"]["code"] == "preview_not_saveable"
+
+    project = _project(auth_client)
+    queued = _start(auth_client, project["id"], preview=False).json()["data"]
+    refused = auth_client.post(f"/api/renders/{queued['id']}/save-to-gam")
+    assert refused.status_code == 409
+    assert refused.json()["detail"]["code"] == "render_not_done"
+    assert siblings.uploads == []
+
+
+def test_another_users_render_cannot_be_saved(auth_client, session, siblings, switch_user):
+    _, job = _finished(auth_client, session)
+    switch_user("someone-else")
+    assert auth_client.post(f"/api/renders/{job['id']}/save-to-gam").status_code == 404
+    assert siblings.uploads == []

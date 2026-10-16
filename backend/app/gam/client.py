@@ -154,12 +154,20 @@ class GamClient:
             raise GamError("gam_unavailable", "Could not fetch a file from the asset library") from exc
         return written
 
-    def upload(self, filename: str, stream: IO[bytes], content_type: Optional[str]) -> GamAssetRead:
-        """Store one file in the user's library and return it."""
+    def upload(self, filename: str, stream: IO[bytes], content_type: Optional[str], *,
+               fields: Optional[Dict[str, str]] = None,
+               timeout: Optional[float] = None) -> GamAssetRead:
+        """Store one file in the user's library and return it.
+
+        `fields` go along as form fields: a render's `source=gvc_export` and origin ids
+        (GAM-3). A GAM without GAM-3 ignores them and stores an ordinary upload.
+        """
         response = self._request(
             "POST",
             "/api/assets",
             files={"files": (filename, stream, content_type or "application/octet-stream")},
+            data=fields or None,
+            **({"timeout": timeout} if timeout else {}),
         )
         if response.status_code not in (200, 201):
             code, message = self._detail(response)
@@ -172,3 +180,13 @@ class GamClient:
             raise GamError(rejected.get("code") or "gam_error",
                            rejected.get("message") or "The asset library did not store the file")
         return to_asset(created[0])
+
+    def update(self, asset_id: str, changes: Dict[str, Any]) -> Optional[GamAssetRead]:
+        """Edit an asset's fields (its name, its description). None: it is gone."""
+        response = self._request("PATCH", f"/api/assets/{asset_id}", json=changes)
+        if response.status_code == 404:
+            return None
+        if response.status_code != 200:
+            code, message = self._detail(response)
+            raise GamError(code, message)
+        return to_asset(response.json()["data"])

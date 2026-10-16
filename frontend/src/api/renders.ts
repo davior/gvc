@@ -23,6 +23,11 @@ export interface Render {
   video_url: string | null
   subtitles_url: string | null
   poster_url: string | null
+  /** Chapters and credits, to paste where the video is published. */
+  description: string | null
+  /** Set once saved to GAM: the asset, and its page there. */
+  gam_asset_id: string | null
+  gam_asset_url: string | null
   created_at: string
   updated_at: string
 }
@@ -74,6 +79,12 @@ export const rendersApi = {
   cancel(id: string): Promise<Render> {
     return client
       .post<DataResponse<Render>>(`/renders/${id}/cancel`)
+      .then((r) => r.data.data)
+  },
+
+  saveToGam(id: string): Promise<Render> {
+    return client
+      .post<DataResponse<Render>>(`/renders/${id}/save-to-gam`)
       .then((r) => r.data.data)
   },
 

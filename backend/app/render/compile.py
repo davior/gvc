@@ -26,8 +26,8 @@ from typing import Dict, List, Optional, Sequence, Tuple, Union
 from app.render.ffmpeg import KENBURNS_CYCLE, MIN_TRANSITION_SECONDS, XFADE_MAX_SHOTS
 from app.render.options import XFADE_NAMES, is_crossfade
 from app.spec.model import (
-    AnchorRef, AudioTrack, Beat, Card, CodeOverlay, Motion, QuoteOverlay, Segment,
-    Transition, VideoSpec,
+    AnchorRef, AudioTrack, Beat, Card, CodeOverlay, ImageOverlay, LowerThirdOverlay, Motion,
+    QuoteOverlay, Segment, TextOverlay, Transition, VideoSpec,
 )
 
 UnitKind = str  # "still" | "card" | "video_muted" | "video_sound"
@@ -78,6 +78,8 @@ class Unit:
     speed: float = 1.0
     chrome: bool = True
     chapter: Optional[str] = None
+    # The end credits: a card drawn from these lines rather than from `card`.
+    credits: Optional[List[str]] = None
 
 
 def _transition_in(spec: VideoSpec, segment: Segment) -> Transition:
@@ -111,10 +113,8 @@ def _panel_beats(segment: Segment, warnings: List[str]) -> Tuple[Dict[str, Panel
     whole: Optional[Panel] = None
     for overlay in segment.overlays:
         if not isinstance(overlay, (QuoteOverlay, CodeOverlay)):
-            # Timed text, lower thirds and images are M2b: a second technique
-            # (overlay with enable=) on top of this one. Said, never silently lost.
-            warnings.append(f"Scene {segment.label or segment.id}: {overlay.type} overlays "
-                            "are not rendered yet")
+            # Timed text, lower thirds and images are drawn over the stitched video
+            # instead (`place_overlays`), since they may run across a join.
             continue
         anchor = overlay.show.from_ if overlay.show else None
         if isinstance(anchor, AnchorRef) and anchor.beat and anchor.segment in (None, segment.id):
@@ -204,6 +204,31 @@ def plan_units(spec: VideoSpec, media: Dict[str, Media], warnings: List[str]) ->
                 chapter=segment.chapter if position == 0 else None,
             ))
     return units
+
+
+CREDITS_SEGMENT = "__credits__"
+CREDIT_LINES_PER_CARD = 18
+
+
+def credits_units(spec: VideoSpec, lines: Sequence[str]) -> List[Unit]:
+    """The end credits as card units after everything else, one per screenful.
+
+    Not a segment in the spec: the lines come from GAM at render time (each asset's
+    credit), so the spec can't hold them, and a segment the user never made would
+    show up in the editor. Past a screenful they run over several cards rather than
+    shrinking to unreadable.
+    """
+    if not spec.credits or not spec.credits.card or not lines:
+        return []
+    pages = [list(lines[i:i + CREDIT_LINES_PER_CARD])
+             for i in range(0, len(lines), CREDIT_LINES_PER_CARD)]
+    return [
+        Unit(segment_id=CREDITS_SEGMENT, segment_index=len(spec.segments),
+             first_in_segment=position == 0, kind="card", media=None, credits=page,
+             transition_in=spec.style.transition, min_seconds=spec.style.cards.seconds,
+             chrome=False)
+        for position, page in enumerate(pages)
+    ]
 
 
 def unit_duration(unit: Unit, narration_seconds: float, cards_seconds: float) -> float:
@@ -429,3 +454,67 @@ def beat_pause_ms(spec: VideoSpec, beats: Sequence[Beat], position: int) -> int:
     if beat.kind == "heading" or beats[position + 1].kind == "heading":
         return pauses.heading_ms
     return pauses.paragraph_ms
+
+
+# ── timed overlays ──────────────────────────────────────────────────────────
+
+TimedKind = Union[TextOverlay, LowerThirdOverlay, ImageOverlay]
+
+DEFAULT_OVERLAY_FADE = 0.3
+MIN_OVERLAY_SECONDS = 0.2
+
+
+@dataclass
+class OverlayPlacement:
+    segment_id: str
+    overlay: TimedKind
+    start: float
+    end: float
+    fade: float
+    media: Optional[Media] = None   # an image overlay's picture
+
+
+def place_overlays(spec: VideoSpec, media: Dict[str, Media], where: Placement,
+                   warnings: List[str]) -> List[OverlayPlacement]:
+    """Text, lower thirds and images as windows on the finished timeline.
+
+    With no `show`, an overlay covers its scene. Its anchors default to its own scene,
+    so `{"edge": "start", "offset": 0.5}` means half a second into it. As with audio
+    tracks, one that can't be placed is dropped with a warning (§5.7): the render
+    still goes ahead.
+    """
+    placed: List[OverlayPlacement] = []
+    for segment in spec.segments:
+        span = where.segments.get(segment.id)
+        name = segment.label or segment.id
+        for overlay in segment.overlays:
+            if not isinstance(overlay, (TextOverlay, LowerThirdOverlay, ImageOverlay)):
+                continue
+            if span is None:
+                # The scene itself was left out (a clip with nothing to play).
+                continue
+            if overlay.show is None:
+                start, end = span
+            else:
+                try:
+                    start = resolve_anchor(overlay.show.from_, where, segment=segment.id)
+                    end = resolve_anchor(overlay.show.to, where, segment=segment.id)
+                except Orphaned as exc:
+                    warnings.append(f"Scene {name}: an overlay is anchored to {exc}, which is "
+                                    "not in the video; left out")
+                    continue
+            if end - start < MIN_OVERLAY_SECONDS:
+                warnings.append(f"Scene {name}: an overlay ends before it starts; left out")
+                continue
+            picture = None
+            if isinstance(overlay, ImageOverlay):
+                picture = media.get(overlay.asset)
+                if picture is None or picture.kind not in ("image", "slate"):
+                    warnings.append(f"Scene {name}: an image overlay needs a picture; left out")
+                    continue
+            fade = overlay.fade if overlay.fade is not None else DEFAULT_OVERLAY_FADE
+            # Never more than half the window each way, or the fades would cross.
+            fade = max(0.0, min(fade, (end - start) / 2))
+            placed.append(OverlayPlacement(segment_id=segment.id, overlay=overlay, start=start,
+                                           end=end, fade=fade, media=picture))
+    return placed

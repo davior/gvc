@@ -96,12 +96,31 @@ class FakeSiblings:
             new_id = f"gam-{len(self.uploads) + 1}"
             asset = gam_asset(new_id, filename, "image")
             self.assets[new_id] = asset
-            self.uploads.append({"filename": filename, "size": len(body)})
+            self.uploads.append({"filename": filename, "size": len(body),
+                                 "fields": _form_fields(body),
+                                 "authorization": request.headers.get("authorization")})
             return httpx.Response(201, json={"created": [asset], "rejected": []})
+        if path.startswith("/api/assets/") and request.method == "PATCH":
+            asset = self.assets.get(path.rsplit("/", 1)[-1])
+            if asset is None:
+                return httpx.Response(404, json={"detail": {"code": "not_found", "message": "gone"}})
+            asset.update(json.loads(request.content))
+            return httpx.Response(200, json={"data": asset})
         return httpx.Response(404)
 
     def gam_requests(self) -> List[httpx.Request]:
         return [r for r in self.requests if str(r.url).startswith(GAM)]
+
+
+def _form_fields(body: bytes) -> Dict[str, str]:
+    """The plain (non-file) fields of a multipart body."""
+    fields: Dict[str, str] = {}
+    for part in body.split(b"\r\n--"):
+        head, _, value = part.partition(b"\r\n\r\n")
+        if b'name="' in head and b"filename=" not in head:
+            name = head.split(b'name="', 1)[1].split(b'"', 1)[0].decode()
+            fields[name] = value.rsplit(b"\r\n", 1)[0].decode()
+    return fields
 
 
 def hit(asset: dict, *, start=None, end=None, snippet="") -> dict:

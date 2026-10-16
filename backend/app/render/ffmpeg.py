@@ -1120,3 +1120,56 @@ def build_mix_command(
         "-t", f"{max(0.1, duration):.3f}", "-movflags", "+faststart", output,
     ]
     return argv
+
+
+@dataclass(frozen=True)
+class TimedLayer:
+    """A full-frame RGBA PNG shown over the finished video for a window."""
+
+    path: str
+    start: float
+    end: float
+    fade: float = 0.0
+
+
+def build_overlay_pass(
+    source: str, layers: Sequence[TimedLayer], output: str,
+    *, options: RenderOptions, preview: bool, duration: float,
+) -> List[str]:
+    """Draw timed layers over the stitched picture, the sound untouched.
+
+    Per shot would have kept the shot cache, but an overlay may run across a join (a
+    title held through a dissolve), and a shot can't draw what lies past its end.
+    So this is one re-encode of the whole picture after the stitch, done only when a
+    video has timed overlays at all.
+
+    Each layer is a looped still. Its fades are alpha fades at absolute times, which
+    line up with the video's because a looped image input starts at zero too, and
+    `enable` keeps it off outside its window so nothing is composited where it isn't
+    shown.
+    """
+    fps = options.fps
+    total = max(0.1, duration)
+    argv = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", source]
+    chains: List[str] = []
+    stage = "0:v"
+    for position, layer in enumerate(layers, start=1):
+        argv += ["-loop", "1", "-framerate", str(fps), "-t", f"{total:.3f}", "-i", layer.path]
+        chain = f"[{position}:v]format=rgba"
+        if layer.fade > 0:
+            chain += (f",fade=t=in:st={layer.start:.3f}:d={layer.fade:.3f}:alpha=1"
+                      f",fade=t=out:st={layer.end - layer.fade:.3f}:d={layer.fade:.3f}:alpha=1")
+        chains.append(chain + f"[l{position}]")
+        chains.append(f"[{stage}][l{position}]overlay=0:0:eof_action=pass:"
+                      f"enable='between(t,{layer.start:.3f},{layer.end:.3f})'[v{position}]")
+        stage = f"v{position}"
+    # Only the video codec flags: the sound is copied, not re-encoded a second time.
+    shared = encode_args(options, preview)
+    video_args = shared[:shared.index("-c:a")]
+    argv += [
+        "-filter_complex", ";".join(chains),
+        "-map", f"[{stage}]", "-map", "0:a?",
+        *video_args, "-c:a", "copy",
+        "-t", f"{total:.3f}", "-movflags", "+faststart", output,
+    ]
+    return argv

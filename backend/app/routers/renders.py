@@ -9,7 +9,9 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, 
 from sqlmodel import Session, select
 
 from app.auth import CallerToken, CurrentUser, sign_media_key, verify_media_signature
+from app.config import settings
 from app.database import get_session
+from app.gam.client import GamClient, GamError
 from app.jobs.runner import ACTIVE_STATUSES
 from app.media.ranged import ranged_response
 from app.models.render import RenderJob
@@ -40,7 +42,10 @@ def _read(job: RenderJob) -> RenderRead:
         error=job.error_message, warnings=json.loads(job.warnings or "[]"),
         duration=job.duration, size_bytes=job.size_bytes, narration_chars=job.narration_chars,
         video_url=_signed(job, job.video_path), subtitles_url=_signed(job, job.subtitle_path),
-        poster_url=_signed(job, job.poster_path),
+        poster_url=_signed(job, job.poster_path), description=job.description,
+        gam_asset_id=job.gam_asset_id,
+        gam_asset_url=(f"{settings.gam_base_url.rstrip('/')}/a/{job.gam_asset_id}"
+                       if job.gam_asset_id else None),
         created_at=job.created_at, updated_at=job.updated_at,
     )
 
@@ -112,6 +117,64 @@ def cancel_render(render_id: str, user: CurrentUser,
             session.add(job)
             session.commit()
             session.refresh(job)
+    return DataResponse(data=_read(job))
+
+
+# Generous: the file is on local disk, but a long full-quality render is gigabytes,
+# and GAM probes and thumbnails it before it answers.
+SAVE_TIMEOUT_SECONDS = 900
+
+
+@router.post("/renders/{render_id}/save-to-gam", response_model=DataResponse[RenderRead])
+def save_to_gam(render_id: str, user: CurrentUser, token: CallerToken,
+                session: Session = Depends(get_session)) -> DataResponse[RenderRead]:
+    """File a finished render in the user's GAM library (GAM-3).
+
+    Labelled `gvc_export` with the project and render it came from, named after the
+    project, and described with its chapters and credits. Saving twice files it once;
+    if it was deleted in GAM since, it is filed again.
+    """
+    job = _owned(session, user, render_id)
+    if job.preview:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail={"code": "preview_not_saveable",
+                                    "message": "A preview is a small working copy. Render the "
+                                               "full video to save it to GAM."})
+    path = worker.renders_dir() / job.id / (job.video_path or "")
+    if job.status != "done" or not job.video_path or not path.is_file():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail={"code": "render_not_done",
+                                    "message": "This render has no finished video to save"})
+    project = project_service.get_owned(session, user, job.project_id)
+
+    gam = GamClient(token)
+    try:
+        if job.gam_asset_id and gam.get_asset(job.gam_asset_id) is not None:
+            return DataResponse(data=_read(job))
+        title = (project.title or "").strip() or "Untitled video"
+        with open(path, "rb") as stream:
+            asset = gam.upload(
+                f"{title}.mp4", stream, "video/mp4",
+                fields={"source": "gvc_export", "origin_project_id": project.id,
+                        "origin_reference_id": job.id},
+                timeout=SAVE_TIMEOUT_SECONDS,
+            )
+        changes = {"name": f"{title} (v{job.version_seq})"[:255]}
+        if job.description:
+            changes["description"] = job.description[:20_000]
+        # Best effort: the file is safely filed even if naming it fails, and saving
+        # again would only find it.
+        try:
+            gam.update(asset.id, changes)
+        except GamError:
+            pass
+    finally:
+        gam.close()
+
+    job.gam_asset_id = asset.id
+    session.add(job)
+    session.commit()
+    session.refresh(job)
     return DataResponse(data=_read(job))
 
 

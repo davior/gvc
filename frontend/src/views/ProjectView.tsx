@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router-dom'
 import type { NoteMediaCopy } from '@/api/projects'
 import FootageSearch from '@/components/FootageSearch'
 import HistoryPanel from '@/components/HistoryPanel'
+import CreditsSettings from '@/components/CreditsSettings'
 import RenderPanel from '@/components/RenderPanel'
 import SoundtrackPanel from '@/components/SoundtrackPanel'
 import IssueList from '@/components/IssueList'
@@ -262,7 +263,10 @@ export default function ProjectView() {
         <SoundtrackPanel spec={draft} gamAssets={gamAssets} onChange={edit} />
       )}
       {tab === 'render' && (
-        <RenderPanel projectId={project.id} dirty={dirty} version={project.version} />
+        <div className="space-y-4">
+          <CreditsSettings spec={draft} onChange={edit} />
+          <RenderPanel projectId={project.id} dirty={dirty} version={project.version} />
+        </div>
       )}
       {tab === 'history' && <HistoryPanel />}
     </div>
