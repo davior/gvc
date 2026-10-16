@@ -30,6 +30,11 @@ class RenderRead(BaseModel):
     video_url: Optional[str] = None
     subtitles_url: Optional[str] = None
     poster_url: Optional[str] = None
+    # Chapters and credits to paste where the video is published.
+    description: Optional[str] = None
+    # Set once the render is saved to GAM: the asset, and its page there.
+    gam_asset_id: Optional[str] = None
+    gam_asset_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

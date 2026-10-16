@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Music, Plus, Trash2 } from 'lucide-react'
 import type { GamAsset } from '@/api/gam'
-import type { Anchor, AudioTrack, VideoSpec } from '@/api/projects'
+import type { AudioTrack, VideoSpec } from '@/api/projects'
+import AnchorSelect from '@/components/AnchorSelect'
+import { sceneOptions } from '@/spec/anchors'
 import FootageSearch from '@/components/FootageSearch'
 import { addTrack, crossfadeInto, removeTrack, updateTrack } from '@/spec/soundtrack'
 
@@ -9,28 +11,6 @@ interface Props {
   spec: VideoSpec
   gamAssets: Record<string, GamAsset | null>
   onChange: (next: VideoSpec) => void
-}
-
-/** An anchor as one select value: `start:s_market`, `end:s_market`, or the two ends. */
-function anchorValue(anchor: Anchor | undefined): string {
-  if (anchor === undefined) return ''
-  if (typeof anchor === 'string') return anchor
-  return `${anchor.edge}:${anchor.segment ?? ''}`
-}
-
-function anchorFrom(value: string, offset?: number): Anchor | undefined {
-  if (value === '') return undefined
-  if (value === 'video_start' || value === 'video_end') return value
-  const [edge, segment] = value.split(':')
-  return {
-    segment,
-    edge: edge as 'start' | 'end',
-    ...(offset ? { offset } : {}),
-  }
-}
-
-function offsetOf(anchor: Anchor | undefined): number {
-  return anchor && typeof anchor !== 'string' ? (anchor.offset ?? 0) : 0
 }
 
 /**
@@ -44,10 +24,6 @@ export default function SoundtrackPanel({ spec, gamAssets, onChange }: Props) {
   const [adding, setAdding] = useState(false)
   const tracks = spec.audio_tracks ?? []
   const segments = spec.segments
-  const labels = (id: string) => {
-    const index = segments.findIndex((s) => s.id === id)
-    return segments[index]?.label || `Scene ${index + 1}`
-  }
   const nameOf = (track: AudioTrack) => {
     const ref = spec.assets?.[track.asset]
     const id = ref?.from === 'gam' ? ref.id : undefined
@@ -56,49 +32,7 @@ export default function SoundtrackPanel({ spec, gamAssets, onChange }: Props) {
   const set = (index: number, patch: Partial<AudioTrack>) =>
     onChange(updateTrack(spec, index, patch))
 
-  const anchorSelect = (
-    label: string,
-    value: Anchor | undefined,
-    onPick: (next: Anchor | undefined) => void,
-    allowNone: boolean
-  ) => (
-    <label className="flex items-center gap-1">
-      {label}
-      <select
-        className="input w-auto py-0.5"
-        aria-label={label}
-        value={anchorValue(value)}
-        onChange={(e) => onPick(anchorFrom(e.target.value, offsetOf(value)))}
-      >
-        {allowNone && <option value="">its own end</option>}
-        <option value="video_start">start of the video</option>
-        {segments.map((s) => (
-          <option key={`s-${s.id}`} value={`start:${s.id}`}>
-            start of {labels(s.id)}
-          </option>
-        ))}
-        {segments.map((s) => (
-          <option key={`e-${s.id}`} value={`end:${s.id}`}>
-            end of {labels(s.id)}
-          </option>
-        ))}
-        <option value="video_end">end of the video</option>
-      </select>
-      {value !== undefined && typeof value !== 'string' && (
-        <input
-          type="number"
-          step="0.5"
-          aria-label={`${label} offset in seconds`}
-          title="Seconds before (negative) or after the scene's edge"
-          className="input w-16 py-0.5"
-          value={value.offset ?? 0}
-          onChange={(e) =>
-            onPick({ ...value, offset: Number(e.target.value) || undefined })
-          }
-        />
-      )}
-    </label>
-  )
+  const options = useMemo(() => sceneOptions(segments), [segments])
 
   return (
     <div className="space-y-3">
@@ -143,13 +77,19 @@ export default function SoundtrackPanel({ spec, gamAssets, onChange }: Props) {
               </button>
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              {anchorSelect(
-                'From',
-                track.start,
-                (a) => a && set(index, { start: a }),
-                false
-              )}
-              {anchorSelect('Until', track.end, (a) => set(index, { end: a }), true)}
+              <AnchorSelect
+                label="From"
+                value={track.start}
+                options={options}
+                onPick={(a) => a && set(index, { start: a })}
+              />
+              <AnchorSelect
+                label="Until"
+                value={track.end}
+                options={options}
+                noneLabel="its own end"
+                onPick={(a) => set(index, { end: a })}
+              />
             </div>
             <div className="flex flex-wrap items-center gap-3">
               <label className="flex items-center gap-1">

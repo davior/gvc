@@ -29,9 +29,10 @@ from typing import Callable, Dict, List, Optional, Tuple
 from app.render import compose, shot_cache
 from app.render import ffmpeg as F
 from app.render.compile import (
-    Unit, beat_pause_ms, chapters, layout, place_tracks, placement, plan_units, unit_duration,
-    xfade_name,
+    OverlayPlacement, Unit, beat_pause_ms, chapters, credits_units, layout, place_overlays,
+    place_tracks, placement, plan_units, unit_duration, xfade_name,
 )
+from app.render.credits import credit_lines, description_text
 from app.render.media import MediaCache, resolve
 from app.render.narration import Cue, build_silence, shift_cues, synthesize_shot, write_srt
 from app.render.options import (
@@ -63,6 +64,9 @@ class RenderOutput:
     size_bytes: int
     narration_chars: int
     warnings: List[str] = field(default_factory=list)
+    # Text to paste where the video is published: chapters and credits. None: nothing
+    # to say.
+    description: Optional[str] = None
 
 
 def base_options(spec: VideoSpec) -> RenderOptions:
@@ -184,7 +188,9 @@ def _background(unit: Unit, spec: VideoSpec, options: RenderOptions, work_dir: s
         base = (compose.solid_background(width, height, fallback.colors[0])
                 if fallback.type == "solid"
                 else compose.gradient_background(width, height, fallback.colors, fallback.angle))
-    if unit.kind == "card" and unit.card:
+    if unit.kind == "card" and unit.credits:
+        image = compose.credits_card(width, height, lines=unit.credits, background=base)
+    elif unit.kind == "card" and unit.card:
         image = compose.card_image(
             width, height, title=unit.card.title or spec.title or "Untitled",
             subtitle=unit.card.subtitle or "", background=base,
@@ -220,6 +226,8 @@ def render(
     units = plan_units(spec, media, warnings)
     if not units:
         raise RenderRefused("This video has nothing in it to render yet.")
+    lines = credit_lines(spec, resolved.credits)
+    units += credits_units(spec, lines)
     if len(units) > max_segments:
         raise RenderRefused(f"This video has {len(units)} shots, above the limit of {max_segments}.")
     chars = sum(len(b.text) for u in units for b in u.beats if b.speak)
@@ -409,9 +417,20 @@ def render(
         F.write_concat_list(os.path.join(work_dir, "shots.txt"), shot_files)
         F.run(F.build_concat_command("shots.txt", stitched), cwd=work_dir, timeout=1800)
     final = stitched
+    where = placement(units, timeline, [n.beats for n in narrated])
+
+    # ── timed overlays ───────────────────────────────────────────────────────
+    timed = place_overlays(spec, media, where, warnings)
+    layers = _overlay_layers(timed, work_dir, width, height)
+    if layers:
+        progress("Drawing overlays", 88,
+                 f"{len(layers)} overlay{'s' if len(layers) != 1 else ''}")
+        F.run(F.build_overlay_pass(final, layers, "overlaid.mp4", options=options,
+                                   preview=preview, duration=timeline.total),
+              cwd=work_dir, timeout=F.shot_timeout(timeline.total))
+        final = "overlaid.mp4"
 
     # ── the soundtrack ───────────────────────────────────────────────────────
-    where = placement(units, timeline, [n.beats for n in narrated])
     tracks = place_tracks(spec, media, where, warnings)
     if tracks:
         progress("Mixing", 90, f"{len(tracks)} audio track{'s' if len(tracks) != 1 else ''}")
@@ -462,7 +481,33 @@ def render(
         video=video, subtitles=subtitles, poster=poster,
         duration=F.probe_duration(video) or timeline.total,
         size_bytes=os.path.getsize(video), narration_chars=speech.characters, warnings=warnings,
+        description=description_text(spec, lines, chapters(units, timeline)) or None,
     )
+
+
+def _overlay_layers(timed: List[OverlayPlacement], work_dir: str, width: int,
+                    height: int) -> List[F.TimedLayer]:
+    """Each placed overlay drawn to its own PNG."""
+    layers: List[F.TimedLayer] = []
+    for position, item in enumerate(timed):
+        overlay = item.overlay
+        if overlay.type == "text":
+            image = compose.text_layer(width, height, text=overlay.text,
+                                       position=overlay.position, size_pct=overlay.size_pct,
+                                       color=overlay.color)
+        elif overlay.type == "lower_third":
+            image = compose.lower_third_layer(width, height, title=overlay.title,
+                                              subtitle=overlay.subtitle or "")
+        else:
+            image = compose.image_layer(width, height, picture=item.media.path,
+                                        position=overlay.position, scale_pct=overlay.scale_pct,
+                                        opacity=overlay.opacity)
+        if image is None:
+            continue
+        name = f"timed_{position:03d}.png"
+        image.save(os.path.join(work_dir, name), "PNG")
+        layers.append(F.TimedLayer(path=name, start=item.start, end=item.end, fade=item.fade))
+    return layers
 
 
 def layout_without_overlaps(timeline):

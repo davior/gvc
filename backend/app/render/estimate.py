@@ -68,5 +68,10 @@ def estimate(spec: VideoSpec) -> Estimate:
             floor = (segment.duration.min if segment.duration and segment.duration.min
                      else spec.style.min_segment_seconds)
             out.seconds += max(floor, spoken)
+    credits = spec.credits
+    if credits and credits.card and (credits.extra or (credits.auto and used)):
+        # Whether GAM has credits for the assets is only known at render time; a card
+        # is the likelier outcome, and an estimate a few seconds long is the safer one.
+        out.seconds += spec.style.cards.seconds
     out.seconds = round(out.seconds, 1)
     return out

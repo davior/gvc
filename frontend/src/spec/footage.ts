@@ -83,7 +83,7 @@ export function assetKeyFor(spec: VideoSpec, asset: GamAsset): string {
   return key
 }
 
-function withGamAsset(spec: VideoSpec, asset: GamAsset): [VideoSpec, string] {
+export function withGamAsset(spec: VideoSpec, asset: GamAsset): [VideoSpec, string] {
   const key = assetKeyFor(spec, asset)
   if (spec.assets?.[key]) return [spec, key]
   const ref: AssetRef = {

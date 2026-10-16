@@ -45,8 +45,8 @@ def test_a_scene_is_cut_at_its_quote_and_cards_and_clips_are_one_unit_each():
         ("s_ruins", "still", ["b1", "b2"], None),
         ("s_outro", "video_sound", [], None),
     ]
-    # The lower third is M2b, and says so rather than vanishing.
-    assert any("lower_third" in w for w in warnings)
+    # The lower third doesn't cut the scene: it is drawn over the stitched video.
+    assert warnings == []
 
 
 def test_defaults_cascade_field_by_field():
@@ -207,3 +207,119 @@ def test_pauses_after_beats():
     assert beat_pause_ms(spec, beats, 0) == 800   # a heading
     assert beat_pause_ms(spec, beats, 1) == 350   # between paragraphs
     assert beat_pause_ms(spec, beats, 2) == 600   # the end of the scene
+
+
+# ── M2b: timed overlays and credits ─────────────────────────────────────────
+
+from app.render.compile import CREDIT_LINES_PER_CARD, credits_units, place_overlays  # noqa: E402
+from app.render.credits import credit_lines, description_text  # noqa: E402
+from app.render import ffmpeg as F  # noqa: E402
+from app.render.options import RenderOptions  # noqa: E402
+from app.spec.model import AnchorRef, Span, TextOverlay  # noqa: E402
+
+
+def _with_overlays(*overlays):
+    spec, media, units, timeline, where = _placed()
+    market = next(s for s in spec.segments if s.id == "s_market")
+    market.overlays = list(overlays)
+    return spec, media, where
+
+
+def test_an_overlay_with_no_span_covers_its_scene_with_a_default_fade():
+    spec, media, where = _with_overlays(TextOverlay(id="o", type="text", text="Hi"))
+    [placed] = [p for p in place_overlays(spec, media, where, []) if p.overlay.id == "o"]
+    assert (placed.start, placed.end) == where.segments["s_market"]
+    assert placed.fade == 0.3
+
+
+def test_overlay_anchors_default_to_their_own_scene_and_may_reach_into_the_next():
+    span = Span.model_validate({"from": {"edge": "start", "offset": 0.5},
+                                "to": {"segment": "s_ruins", "edge": "start", "offset": 1.0}})
+    beat = Span.model_validate({"from": {"beat": "b1", "edge": "start"},
+                                "to": {"beat": "b1", "edge": "end"}})
+    spec, media, where = _with_overlays(
+        TextOverlay(id="o1", type="text", text="Hi", show=span),
+        TextOverlay(id="o2", type="text", text="Hi", show=beat, fade=5),
+    )
+    placed = {p.overlay.id: p for p in place_overlays(spec, media, where, [])}
+    assert placed["o1"].start == pytest.approx(where.segments["s_market"][0] + 0.5)
+    assert placed["o1"].end == pytest.approx(where.segments["s_ruins"][0] + 1.0)
+    assert (placed["o2"].start, placed["o2"].end) == where.beats[("s_market", "b1")]
+    # A fade longer than half the window is held to half, so in and out never cross.
+    assert placed["o2"].fade == pytest.approx(2.0)
+
+
+def test_an_overlay_that_cannot_be_placed_is_dropped_with_a_warning():
+    orphan = Span.model_validate({"from": {"edge": "start"},
+                                  "to": {"segment": "gone", "edge": "end"}})
+    backwards = Span.model_validate({"from": {"edge": "end"}, "to": {"edge": "start"}})
+    spec, media, where = _with_overlays(
+        TextOverlay(id="o1", type="text", text="a", show=orphan),
+        TextOverlay(id="o2", type="text", text="b", show=backwards),
+    )
+    warnings = []
+    placed = place_overlays(spec, media, where, warnings)
+    assert not [p for p in placed if p.overlay.id in ("o1", "o2")]
+    assert any("'gone'" in w for w in warnings)
+    assert any("ends before it starts" in w for w in warnings)
+
+
+def test_an_image_overlay_needs_a_picture():
+    from app.spec.model import ImageOverlay
+    spec, media, where = _with_overlays(ImageOverlay(id="o", type="image", asset="a_theme"))
+    warnings = []
+    assert not [p for p in place_overlays(spec, media, where, warnings) if p.overlay.id == "o"]
+    assert any("needs a picture" in w for w in warnings)
+
+
+def test_credit_lines_follow_first_use_and_are_said_once():
+    spec, _ = salt_road()
+    assert credit_lines(spec, {}) == []          # no `credits`: none
+    spec = spec.model_copy(update={"credits": None})
+    from app.spec.model import Credits
+    spec.credits = Credits(extra=["  Narrated by Rex "])
+    keys = [s.visual.asset for s in spec.segments if s.visual]
+    credits = {keys[0]: "Footage: A", keys[1]: "Photo: B", keys[2]: "Footage: A"}
+    assert credit_lines(spec, credits) == ["Footage: A", "Photo: B", "Narrated by Rex"]
+    spec.credits = Credits(auto=False, extra=["Narrated by Rex"])
+    assert credit_lines(spec, credits) == ["Narrated by Rex"]
+
+
+def test_long_credits_run_over_several_cards_and_none_without_lines():
+    spec, _ = salt_road()
+    from app.spec.model import Credits
+    spec.credits = Credits()
+    assert credits_units(spec, []) == []
+    lines = [f"Line {i}" for i in range(CREDIT_LINES_PER_CARD + 3)]
+    cards = credits_units(spec, lines)
+    assert [len(u.credits) for u in cards] == [CREDIT_LINES_PER_CARD, 3]
+    assert all(u.kind == "card" and not u.chrome for u in cards)
+    spec.credits = Credits(card=False)
+    assert credits_units(spec, lines) == []
+
+
+def test_the_description_lists_chapters_from_zero_then_credits():
+    spec, _ = salt_road()
+    from app.spec.model import Credits
+    spec.credits = Credits()
+    spec.output.chapters = True
+    text = description_text(spec, ["Photo: B"], [(4.0, 70.0, "Market"), (70.0, 200.0, "Ruins")])
+    assert text == f"0:00 {spec.title}\n0:04 Market\n1:10 Ruins\n\nCredits\nPhoto: B"
+    spec.credits = Credits(description=False)
+    spec.output.chapters = False
+    assert description_text(spec, ["Photo: B"], [(0.0, 10.0, "x")]) == ""
+
+
+def test_the_overlay_pass_draws_each_layer_only_in_its_window_and_copies_the_sound():
+    argv = F.build_overlay_pass(
+        "stitched.mp4",
+        [F.TimedLayer("a.png", 1.0, 4.5, 0.3), F.TimedLayer("b.png", 2.0, 3.0, 0.0)],
+        "out.mp4", options=RenderOptions(), preview=True, duration=10.0)
+    graph = argv[argv.index("-filter_complex") + 1]
+    assert "fade=t=in:st=1.000:d=0.300:alpha=1" in graph
+    assert "fade=t=out:st=4.200:d=0.300:alpha=1" in graph
+    assert "enable='between(t,1.000,4.500)'" in graph
+    assert "enable='between(t,2.000,3.000)'" in graph
+    assert "[l2]" in graph and "fade" not in graph.split("[1:v]")[0]
+    assert argv[argv.index("-c:a") + 1] == "copy"
+    assert argv.count("-c:a") == 1 and argv[argv.index("-map") + 1] == "[v2]"

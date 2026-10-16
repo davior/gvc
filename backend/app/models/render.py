@@ -31,5 +31,9 @@ class RenderJob(SQLModel, table=True):
     duration: Optional[float] = None
     size_bytes: Optional[int] = None
     narration_chars: int = 0
+    # Chapters and credits, to paste where the video is published (M2b).
+    description: Optional[str] = None
+    # The GAM asset this render was saved as, once it has been (GAM-3).
+    gam_asset_id: Optional[str] = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)

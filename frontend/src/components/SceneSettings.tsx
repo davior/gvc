@@ -1,6 +1,7 @@
 import type { GamAsset } from '@/api/gam'
 import type { Segment, VideoSpec } from '@/api/projects'
 import FrameEditor from '@/components/FrameEditor'
+import OverlayEditor from '@/components/OverlayEditor'
 import {
   DEFAULT_PATH,
   MOTIONS,
@@ -147,6 +148,22 @@ export default function SceneSettings({
           }
         />
       )}
+      <details
+        open={(segment.overlays ?? []).some(
+          (o) => o.type !== 'quote' && o.type !== 'code'
+        )}
+      >
+        <summary className="cursor-pointer select-none">On screen</summary>
+        <div className="mt-1.5">
+          <OverlayEditor
+            spec={spec}
+            index={index}
+            segment={segment}
+            gamAssets={gamAssets}
+            onChange={onChange}
+          />
+        </div>
+      </details>
     </div>
   )
 }

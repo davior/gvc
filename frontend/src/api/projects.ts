@@ -95,6 +95,50 @@ export type AssetRef =
       label?: string
     }
 
+export type Position =
+  'top-left' | 'top-right' | 'center' | 'bottom-left' | 'bottom-right'
+
+/** When an overlay shows. Absent on the overlay: its whole scene. */
+export interface Span {
+  from: Anchor
+  to: Anchor
+}
+
+interface OverlayBase {
+  id: string
+  show?: Span
+  /** Seconds each way; absent: a short default. */
+  fade?: number
+  [key: string]: unknown
+}
+
+export type Overlay =
+  | (OverlayBase & { type: 'quote'; text: string; attribution?: string })
+  | (OverlayBase & { type: 'code'; text: string; language?: string })
+  | (OverlayBase & {
+      type: 'text'
+      text: string
+      position?: Position
+      size_pct?: number
+      color?: string
+    })
+  | (OverlayBase & { type: 'lower_third'; title: string; subtitle?: string })
+  | (OverlayBase & {
+      type: 'image'
+      asset: string
+      position?: Position
+      scale_pct?: number
+      opacity?: number
+    })
+
+/** The end credits. Lines come from each GAM asset's credit, then `extra`. */
+export interface Credits {
+  auto?: boolean
+  card?: boolean
+  description?: boolean
+  extra?: string[]
+}
+
 export interface Segment {
   id: string
   kind: 'scene' | 'card' | 'clip'
@@ -105,6 +149,7 @@ export interface Segment {
   visual?: Visual
   narration?: { beats: Beat[]; [key: string]: unknown }
   transition_in?: { style?: string; duration?: number }
+  overlays?: Overlay[]
   [key: string]: unknown
 }
 
@@ -116,6 +161,7 @@ export interface VideoSpec {
   assets?: Record<string, AssetRef>
   segments: Segment[]
   audio_tracks?: AudioTrack[]
+  credits?: Credits | null
   output?: { aspect?: '16:9' | '9:16' | '1:1'; [key: string]: unknown }
   style?: {
     transition?: { style?: string; duration?: number }

@@ -93,7 +93,7 @@ def _run(job_id: str) -> None:
                 video_path=rel(result.video), subtitle_path=rel(result.subtitles),
                 poster_path=rel(result.poster), duration=result.duration,
                 size_bytes=result.size_bytes, narration_chars=result.narration_chars,
-                warnings=json.dumps(result.warnings))
+                warnings=json.dumps(result.warnings), description=result.description)
     finally:
         gam.close()
         speech.close()

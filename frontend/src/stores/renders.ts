@@ -18,6 +18,8 @@ interface RenderState {
   renders: Render[]
   estimate: Estimate | null
   starting: boolean
+  /** The render being saved to GAM, if one is. */
+  saving: string | null
   error: string | null
 
   load: (projectId: string) => Promise<void>
@@ -25,6 +27,7 @@ interface RenderState {
   start: (preview: boolean) => Promise<void>
   cancel: (id: string) => Promise<void>
   remove: (id: string) => Promise<void>
+  saveToGam: (id: string) => Promise<void>
   reset: () => void
 }
 
@@ -62,6 +65,7 @@ export const useRenderStore = create<RenderState>((set, get) => {
     renders: [],
     estimate: null,
     starting: false,
+    saving: null,
     error: null,
 
     async load(projectId) {
@@ -130,10 +134,31 @@ export const useRenderStore = create<RenderState>((set, get) => {
       }
     },
 
+    async saveToGam(id) {
+      const mine = token
+      set({ saving: id, error: null })
+      try {
+        const render = await rendersApi.saveToGam(id)
+        if (mine !== token) return
+        replace(render)
+        set({ saving: null })
+      } catch (error) {
+        if (mine !== token) return
+        set({ saving: null, error: apiErrorMessage(error) })
+      }
+    },
+
     reset() {
       token += 1
       stopPolling()
-      set({ projectId: null, renders: [], estimate: null, starting: false, error: null })
+      set({
+        projectId: null,
+        renders: [],
+        estimate: null,
+        starting: false,
+        saving: null,
+        error: null,
+      })
     },
   }
 })

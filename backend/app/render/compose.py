@@ -195,6 +195,14 @@ def _anchor_xy(position: str, width: int, height: int, box_w: int, box_h: int, m
     return (width - box_w - margin, height - box_h - margin)
 
 
+def _card_base(width: int, height: int, background: Optional[Image.Image]) -> Image.Image:
+    base = (background.copy() if background is not None
+            else gradient_background(width, height, ["#1e293b", "#0f172a"], 135)).convert("RGB")
+    # Blur and darken whatever is behind so the text always has contrast.
+    base = base.filter(ImageFilter.GaussianBlur(radius=max(6, width // 90)))
+    return Image.blend(base, Image.new("RGB", (width, height), (0, 0, 0)), 0.45)
+
+
 def card_image(
     width: int, height: int, *,
     title: str, subtitle: str = "",
@@ -207,12 +215,7 @@ def card_image(
     one setting holds at every resolution and aspect ratio.
     """
     spec = sizes or CardTextSpec()
-    base = (background.copy() if background is not None
-            else gradient_background(width, height, ["#1e293b", "#0f172a"], 135)).convert("RGB")
-
-    # Blur and darken whatever is behind so the text always has contrast.
-    base = base.filter(ImageFilter.GaussianBlur(radius=max(6, width // 90)))
-    base = Image.blend(base, Image.new("RGB", (width, height), (0, 0, 0)), 0.45)
+    base = _card_base(width, height, background)
 
     layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
@@ -551,3 +554,126 @@ def overlay_layer(
         layer.alpha_composite(mark, (max(0, x), max(0, y)))
 
     return layer
+
+
+# ── timed overlays (GVC) ────────────────────────────────────────────────────
+# Each is a full-frame RGBA layer, like `overlay_layer`, so the video pass that shows
+# it for its window is one plain `overlay=0:0` per layer with nothing to position.
+
+OVERLAY_MARGIN_PCT = 5.0
+
+
+def text_layer(width: int, height: int, *, text: str, position: str = "center",
+               size_pct: Optional[float] = None, color: Optional[str] = None) -> Image.Image:
+    """On-screen text, wrapped, with a soft shadow so it reads over any picture."""
+    layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    margin = int(min(width, height) * OVERLAY_MARGIN_PCT / 100)
+    max_width = width - 2 * margin if position == "center" else int(width * 0.6)
+    start = max(8, int(height * (size_pct or 6.0) / 100))
+    font = fit_font(draw, text, SEMIBOLD, start, max_width)
+    lines = wrap_text(draw, text, font, max_width)[:8]
+    line_h = int(font.size * 1.25)
+    box_w = int(max((draw.textlength(line, font=font) for line in lines), default=0))
+    x, y = _anchor_xy(position, width, height, box_w, line_h * len(lines), margin)
+    colour = parse_colour(color or "#ffffff")
+
+    shadow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    shadow_draw = ImageDraw.Draw(shadow)
+    for position_in_block, line in enumerate(lines):
+        lw = draw.textlength(line, font=font)
+        lx = x + (box_w - lw) / 2 if position == "center" else (
+            x + box_w - lw if position.endswith("right") else x)
+        ly = y + position_in_block * line_h
+        shadow_draw.text((lx, ly + max(1, font.size // 16)), line, font=font, fill=(0, 0, 0, 190))
+        draw.text((lx, ly), line, font=font, fill=(*colour, 255))
+    shadow = shadow.filter(ImageFilter.GaussianBlur(radius=max(2, font.size // 10)))
+    return Image.alpha_composite(shadow, layer)
+
+
+def lower_third_layer(width: int, height: int, *, title: str,
+                      subtitle: str = "") -> Image.Image:
+    """A name and a role, bottom left, on a translucent bar with an accent rule.
+
+    The bar is sized to its text rather than the frame, so a short name doesn't sit
+    in a long empty strip. Its colours match the title cards' rule.
+    """
+    layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    margin = int(min(width, height) * OVERLAY_MARGIN_PCT / 100)
+    max_text = int(width * 0.7)
+    title_font = fit_font(draw, title, SEMIBOLD, max(10, int(height * 0.052)), max_text)
+    sub_font = load_font(REGULAR, max(8, int(height * 0.034)))
+    title = truncate_to_width(draw, title.strip(), title_font, max_text)
+    subtitle = truncate_to_width(draw, (subtitle or "").strip(), sub_font, max_text)
+
+    pad_x, pad_y = int(title_font.size * 0.6), int(title_font.size * 0.4)
+    rule_w = max(3, height // 160)
+    text_w = int(max(draw.textlength(title, font=title_font),
+                     draw.textlength(subtitle, font=sub_font) if subtitle else 0))
+    title_h = int(title_font.size * 1.2)
+    sub_h = int(sub_font.size * 1.3) if subtitle else 0
+    box_w = rule_w + pad_x * 2 + text_w
+    box_h = pad_y * 2 + title_h + sub_h
+    x0 = margin
+    y0 = height - margin - box_h - int(height * 0.04)
+
+    draw.rectangle([x0, y0, x0 + box_w, y0 + box_h], fill=(15, 23, 42, 190))
+    draw.rectangle([x0, y0, x0 + rule_w, y0 + box_h], fill=(129, 140, 248, 255))
+    tx = x0 + rule_w + pad_x
+    draw.text((tx, y0 + pad_y), title, font=title_font, fill=(255, 255, 255, 255))
+    if subtitle:
+        draw.text((tx, y0 + pad_y + title_h), subtitle, font=sub_font, fill=(203, 213, 225, 255))
+    return layer
+
+
+def image_layer(width: int, height: int, *, picture: str, position: str = "center",
+                scale_pct: Optional[float] = None,
+                opacity: Optional[float] = None) -> Optional[Image.Image]:
+    """A picture over the video: a logo, a map, an inset. `scale_pct` is its width as
+    a share of the frame's; its aspect is kept."""
+    try:
+        with Image.open(picture) as raw:
+            image = ImageOps.exif_transpose(raw).convert("RGBA")
+    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        logger.warning("Could not load overlay picture %s: %s", picture, exc)
+        return None
+    margin = int(min(width, height) * OVERLAY_MARGIN_PCT / 100)
+    target_w = max(1, int(width * (scale_pct or 30.0) / 100))
+    target_h = max(1, int(image.height * target_w / max(1, image.width)))
+    # Never taller than the frame allows, whatever the width asked for.
+    if target_h > height - 2 * margin:
+        target_h = max(1, height - 2 * margin)
+        target_w = max(1, int(image.width * target_h / max(1, image.height)))
+    image = image.resize((target_w, target_h), Image.LANCZOS)
+    if opacity is not None and opacity < 1:
+        alpha = image.getchannel("A").point(lambda a: int(a * max(0.0, opacity)))
+        image.putalpha(alpha)
+    layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    layer.alpha_composite(image, _anchor_xy(position, width, height, target_w, target_h, margin))
+    return layer
+
+
+def credits_card(width: int, height: int, *, lines: Sequence[str],
+                 background: Optional[Image.Image] = None) -> Image.Image:
+    """The end credits: a heading over centred lines, smaller as there are more."""
+    base = _card_base(width, height, background)
+    layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    max_width = int(width * 0.82)
+    heading = load_font(SEMIBOLD, max(10, int(height * 0.06)))
+    # Sized so the whole page fits: a three-line page reads large, eighteen still fit.
+    size = max(8, min(int(height * 0.042), int(height * 0.7 / max(1, len(lines)) / 1.35)))
+    body = load_font(REGULAR, size)
+    wrapped = [truncate_to_width(draw, line, body, max_width) for line in lines]
+    head_h = int(heading.size * 1.6)
+    line_h = int(body.size * 1.35)
+    y = (height - head_h - line_h * len(wrapped)) // 2
+    w = draw.textlength("Credits", font=heading)
+    draw.text(((width - w) / 2, y), "Credits", font=heading, fill=(255, 255, 255, 255))
+    y += head_h
+    for line in wrapped:
+        w = draw.textlength(line, font=body)
+        draw.text(((width - w) / 2, y), line, font=body, fill=(226, 232, 240, 240))
+        y += line_h
+    return Image.alpha_composite(base.convert("RGBA"), layer).convert("RGB")
