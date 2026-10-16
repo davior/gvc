@@ -1,0 +1,152 @@
+import type { GamAsset } from '@/api/gam'
+import type { Segment, VideoSpec } from '@/api/projects'
+import FrameEditor from '@/components/FrameEditor'
+import {
+  DEFAULT_PATH,
+  MOTIONS,
+  TRANSITIONS,
+  setMotion,
+  setTransition,
+} from '@/spec/scene'
+
+interface Props {
+  spec: VideoSpec
+  index: number
+  segment: Segment
+  gamAssets: Record<string, GamAsset | null>
+  onChange: (next: VideoSpec) => void
+}
+
+const ASPECTS: Record<string, number> = { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1 }
+
+/** The GAM asset a scene shows, if the spec's ref resolves to one. */
+function pictureOf(spec: VideoSpec, segment: Segment, gamAssets: Props['gamAssets']) {
+  const key = segment.visual?.asset
+  const ref = key ? spec.assets?.[key] : undefined
+  const id =
+    ref?.from === 'gam' ? ref.id : ref?.from === 'search' ? ref.result?.id : undefined
+  return id ? (gamAssets[id] ?? null) : null
+}
+
+/**
+ * How a scene comes in and how its picture moves. "Project default" removes the
+ * scene's own setting, so changing the project's default later changes this scene too.
+ */
+export default function SceneSettings({
+  spec,
+  index,
+  segment,
+  gamAssets,
+  onChange,
+}: Props) {
+  const transition = segment.transition_in
+  const picture = pictureOf(spec, segment, gamAssets)
+  const isStill = picture?.asset_type === 'image'
+  const motion = segment.visual?.motion
+  const outputAspect = ASPECTS[spec.output?.aspect ?? '16:9'] ?? 16 / 9
+  const pictureAspect =
+    picture?.width && picture?.height ? picture.width / picture.height : outputAspect
+
+  return (
+    <div className="space-y-2 text-xs text-gray-600 dark:text-gray-300">
+      <div className="flex flex-wrap items-center gap-2">
+        {index > 0 && (
+          <label className="flex items-center gap-1">
+            In with
+            <select
+              className="input w-auto py-0.5"
+              aria-label="Transition into this scene"
+              value={transition?.style ?? ''}
+              onChange={(e) =>
+                onChange(
+                  setTransition(
+                    spec,
+                    index,
+                    e.target.value
+                      ? {
+                          style: e.target.value,
+                          ...(transition?.duration !== undefined
+                            ? { duration: transition.duration }
+                            : {}),
+                        }
+                      : undefined
+                  )
+                )
+              }
+            >
+              <option value="">Project default</option>
+              {TRANSITIONS.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+            {transition?.style && transition.style !== 'none' && (
+              <input
+                type="number"
+                min="0.1"
+                max="3"
+                step="0.1"
+                aria-label="Transition length in seconds"
+                className="input w-16 py-0.5"
+                placeholder={String(spec.style?.transition?.duration ?? 0.6)}
+                value={transition.duration ?? ''}
+                onChange={(e) =>
+                  onChange(
+                    setTransition(spec, index, {
+                      style: transition.style,
+                      ...(e.target.value ? { duration: Number(e.target.value) } : {}),
+                    })
+                  )
+                }
+              />
+            )}
+          </label>
+        )}
+        {isStill && (
+          <label className="flex items-center gap-1">
+            Camera
+            <select
+              className="input w-auto py-0.5"
+              aria-label="Ken Burns move"
+              value={motion?.effect ?? ''}
+              onChange={(e) => {
+                const effect = e.target.value
+                onChange(
+                  setMotion(
+                    spec,
+                    index,
+                    !effect
+                      ? undefined
+                      : effect === 'path'
+                        ? { effect: 'path', ...DEFAULT_PATH }
+                        : { effect }
+                  )
+                )
+              }}
+            >
+              <option value="">Project default</option>
+              {MOTIONS.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </div>
+      {isStill && motion?.effect === 'path' && motion.from && motion.to && (
+        <FrameEditor
+          imageUrl={picture?.file_url ?? picture?.thumb_url ?? null}
+          pictureAspect={pictureAspect}
+          outputAspect={outputAspect}
+          from={motion.from}
+          to={motion.to}
+          onChange={(frames) =>
+            onChange(setMotion(spec, index, { ...motion, ...frames }))
+          }
+        />
+      )}
+    </div>
+  )
+}

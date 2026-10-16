@@ -20,9 +20,13 @@ There are three ways to start one:
 
 ## Status
 
-**M0 (Genesis).** Sign in through Gecko Notes, create projects, build their structure
-by hand or as JSON, validate them against the schema, keep a version history and import
-a spec pushed from Notes. Nothing renders yet. That's M2.
+**M2 (the renderer).** Build a video by hand, or push one in from Notes. Find footage in
+GAM by what is said in it. Then preview and render it:
+- per-scene transitions and Ken Burns moves between two frames of a picture;
+- any number of soundtrack tracks, crossfading between scenes;
+- trimmed clips, and narration read through Gecko Notes.
+
+Timed overlays, saving renders to GAM and credits are next (M2b).
 
 ## Read first
 

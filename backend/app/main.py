@@ -22,6 +22,7 @@ from app.database import engine, get_session
 from app.gam.client import GamError
 from app.routers import gam as gam_router
 from app.routers import projects as projects_router
+from app.routers import renders as renders_router
 from app.routers import spec as spec_router
 from app.schemas import ClientConfig, DataResponse, HealthResponse
 
@@ -37,14 +38,19 @@ def ffmpeg_available() -> bool:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    # Nothing renders until M2, so a missing ffmpeg is noted rather than warned about.
     if not ffmpeg_available():
-        logger.info("ffmpeg/ffprobe not found on PATH; rendering (M2) will need them.")
+        logger.warning("ffmpeg/ffprobe not found on PATH: renders will fail.")
     # One line here beats the same fact arriving as a traceback on whichever request
     # first touches a table that does not exist yet.
     from app.schema_check import log_if_behind
 
     log_if_behind(engine)
+
+    # Picks up nothing a restart interrupted (a render runs as its requester, whose
+    # token is gone), and starts the render workers.
+    from app.render import worker
+
+    worker.start()
     yield
 
 
@@ -138,3 +144,6 @@ def me(user: CurrentUser, session: Session = Depends(get_session)) -> DataRespon
 app.include_router(projects_router.router, prefix="/api/projects", tags=["projects"])
 app.include_router(spec_router.router, prefix="/api/spec", tags=["spec"])
 app.include_router(gam_router.router, prefix="/api/gam", tags=["gam"])
+app.include_router(renders_router.router, prefix="/api", tags=["renders"])
+# Not under /api: these URLs go straight into <video src>, authorised by signature.
+app.include_router(renders_router.media_router, prefix="/media/renders", tags=["media"])

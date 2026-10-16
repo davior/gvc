@@ -4,19 +4,23 @@ import { Link, useParams } from 'react-router-dom'
 import type { NoteMediaCopy } from '@/api/projects'
 import FootageSearch from '@/components/FootageSearch'
 import HistoryPanel from '@/components/HistoryPanel'
+import RenderPanel from '@/components/RenderPanel'
+import SoundtrackPanel from '@/components/SoundtrackPanel'
 import IssueList from '@/components/IssueList'
 import JsonPanel from '@/components/JsonPanel'
 import SceneList from '@/components/SceneList'
 import { gamIdsIn, placeHit, resolveSearch, unresolvedSearches } from '@/spec/footage'
 import { useProjectStore } from '@/stores/projects'
 
-type Tab = 'scenes' | 'json' | 'history'
+type Tab = 'scenes' | 'soundtrack' | 'render' | 'json' | 'history'
 
 /** What the footage search is open for: one scene, or a placeholder to resolve. */
 type Finding = { kind: 'scene'; index: number } | { kind: 'resolve'; key: string }
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'scenes', label: 'Scenes' },
+  { id: 'soundtrack', label: 'Soundtrack' },
+  { id: 'render', label: 'Render' },
   { id: 'json', label: 'JSON' },
   { id: 'history', label: 'History' },
 ]
@@ -253,6 +257,12 @@ export default function ProjectView() {
           replaces the box's contents instead of leaving a stale copy in it. */}
       {tab === 'json' && (
         <JsonPanel key={JSON.stringify(draft)} spec={draft} onApply={edit} />
+      )}
+      {tab === 'soundtrack' && (
+        <SoundtrackPanel spec={draft} gamAssets={gamAssets} onChange={edit} />
+      )}
+      {tab === 'render' && (
+        <RenderPanel projectId={project.id} dirty={dirty} version={project.version} />
       )}
       {tab === 'history' && <HistoryPanel />}
     </div>

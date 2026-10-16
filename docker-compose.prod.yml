@@ -11,6 +11,17 @@
 #   COMPOSE_FILE=docker-compose.yml:docker-compose.prod.yml
 
 services:
+  # GVC's server calls GAM and Notes at their public names (GAM_BASE_URL,
+  # NOTES_BASE_URL). On the suite's server all three run on one machine, and from
+  # inside a container those names resolve to the machine's own public address,
+  # which the host does not route back in (hairpin NAT): every search failed with
+  # `gam_unavailable`. Pointing them at the Docker host reaches Caddy directly,
+  # with the same names and so the same TLS certificates.
+  gvc-backend:
+    extra_hosts:
+      - "assets.geckopico.com:host-gateway"
+      - "notes.geckopico.com:host-gateway"
+
   frontend:
     networks:
       - default

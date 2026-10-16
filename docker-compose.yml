@@ -5,7 +5,9 @@ services:
     build: ./backend
     restart: unless-stopped
     volumes:
-      - ./data/db:/app/data/db
+      # All of data/: the database, finished renders, and the cache of GAM files a
+      # render fetched, so a rebuild keeps all three.
+      - ./data:/app/data
     environment:
       - DATABASE_URL=sqlite:////app/data/db/gvc.db
       # Must match gecko-notes'. GVC verifies the sessions Notes issues; a different
@@ -13,9 +15,14 @@ services:
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       - CORS_ORIGIN=${CORS_ORIGIN:-}
       - NOTES_BASE_URL=${NOTES_BASE_URL:-https://notes.geckopico.com}
-      - GAM_BASE_URL=${GAM_BASE_URL:-https://gam.geckopico.com}
+      - GAM_BASE_URL=${GAM_BASE_URL:-https://assets.geckopico.com}
       - GAM_TIMEOUT_SECONDS=${GAM_TIMEOUT_SECONDS:-30}
       - NOTE_MEDIA_MAX_MB=${NOTE_MEDIA_MAX_MB:-4096}
+      - RENDER_CONCURRENCY=${RENDER_CONCURRENCY:-1}
+      - RENDER_MAX_SEGMENTS=${RENDER_MAX_SEGMENTS:-200}
+      - RENDER_MAX_NARRATION_CHARS=${RENDER_MAX_NARRATION_CHARS:-60000}
+      - RENDER_CACHE_MAX_GB=${RENDER_CACHE_MAX_GB:-20}
+      - MEDIA_URL_TTL_SECONDS=${MEDIA_URL_TTL_SECONDS:-3600}
       - ADMIN_USERS=${ADMIN_USERS:-}
       - ENVIRONMENT=${ENVIRONMENT:-production}
     # Never published to the host: the frontend proxies it, and ProxyHeadersMiddleware
@@ -41,7 +48,7 @@ services:
       # The CSP's connect-src; must agree with the backend's value.
       - NOTES_BASE_URL=${NOTES_BASE_URL:-https://notes.geckopico.com}
       # The CSP's img-src and media-src, for GAM thumbnails and previews; same rule.
-      - GAM_BASE_URL=${GAM_BASE_URL:-https://gam.geckopico.com}
+      - GAM_BASE_URL=${GAM_BASE_URL:-https://assets.geckopico.com}
     depends_on:
       - gvc-backend
     networks:

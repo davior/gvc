@@ -26,11 +26,50 @@ export interface Trim {
   out?: number
 }
 
+/** A crop of a picture, as fractions of it. Its height follows from the output's
+ *  aspect ratio, so there is no `h`. */
+export interface Frame {
+  x: number
+  y: number
+  w: number
+}
+
+export interface Motion {
+  effect: string
+  amount?: number
+  from?: Frame
+  to?: Frame
+  ease?: 'linear' | 'in_out'
+}
+
 export interface Visual {
   asset: string
   trim?: Trim
   audio?: 'mute' | 'play'
   loop?: boolean
+  fit?: string
+  motion?: Motion
+  [key: string]: unknown
+}
+
+export type Anchor =
+  | 'video_start'
+  | 'video_end'
+  | { segment?: string; beat?: string; edge: 'start' | 'end'; offset?: number }
+
+export interface AudioTrack {
+  id: string
+  kind?: 'music' | 'sfx' | 'voiceover'
+  asset: string
+  start: Anchor
+  /** Absent: play once to its natural end. */
+  end?: Anchor
+  trim?: Trim
+  loop?: boolean
+  volume?: number
+  duck_under_narration?: boolean
+  fade_in?: number
+  fade_out?: number
   [key: string]: unknown
 }
 
@@ -76,6 +115,13 @@ export interface VideoSpec {
   source?: { kind: 'note' | 'brief'; [key: string]: unknown }
   assets?: Record<string, AssetRef>
   segments: Segment[]
+  audio_tracks?: AudioTrack[]
+  output?: { aspect?: '16:9' | '9:16' | '1:1'; [key: string]: unknown }
+  style?: {
+    transition?: { style?: string; duration?: number }
+    motion?: Motion
+    [key: string]: unknown
+  }
   [key: string]: unknown
 }
 

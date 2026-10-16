@@ -51,6 +51,7 @@ def to_asset(raw: Dict[str, Any]) -> GamAssetRead:
         file_url=_absolute(raw.get("file_url")),
         thumb_url=_absolute(raw.get("thumb_url")),
         credit=raw.get("credit") or "",
+        size_bytes=raw.get("size_bytes") or 0,
         parent_asset_id=raw.get("parent_asset_id"),
         in_point=raw.get("in_point"),
         out_point=raw.get("out_point"),
@@ -135,6 +136,23 @@ class GamClient:
             code, message = self._detail(response)
             raise GamError(code, message)
         return to_asset(response.json()["data"])
+
+    def download(self, file_url: str, sink, *, max_bytes: int) -> int:
+        """Stream one of GAM's signed media URLs into `sink`. Returns the bytes written."""
+        written = 0
+        try:
+            with self._http.stream("GET", file_url, timeout=600) as response:
+                if response.status_code != 200:
+                    raise GamError("gam_media_unavailable",
+                                   f"The asset library would not hand over a file ({response.status_code})")
+                for chunk in response.iter_bytes(1024 * 1024):
+                    written += len(chunk)
+                    if written > max_bytes:
+                        raise GamError("gam_media_too_large", "A file in this video is too large to render")
+                    sink.write(chunk)
+        except httpx.HTTPError as exc:
+            raise GamError("gam_unavailable", "Could not fetch a file from the asset library") from exc
+        return written
 
     def upload(self, filename: str, stream: IO[bytes], content_type: Optional[str]) -> GamAssetRead:
         """Store one file in the user's library and return it."""

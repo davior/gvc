@@ -21,6 +21,8 @@ class GamAssetRead(BaseModel):
     file_url: Optional[str] = None
     thumb_url: Optional[str] = None
     credit: str = ""
+    # The file's size, which is what tells the render cache a copy is still current.
+    size_bytes: int = 0
     # A GAM clip has no file of its own: it is its parent's bytes between these points.
     parent_asset_id: Optional[str] = None
     in_point: Optional[float] = None
