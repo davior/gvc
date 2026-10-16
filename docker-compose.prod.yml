@@ -1,0 +1,21 @@
+# Overlay for reverse-proxy deployments.
+#
+# Caddy (from the infra repo) terminates TLS and routes gvc.geckopico.com to the
+# frontend over the shared external `web` network. This joins the frontend to it;
+# without it, every request through the proxy is a 502.
+#
+# Only the frontend, unlike GAM: the backend has no reason to be on a network the other
+# apps share, and its nginx reaches it over `gvc_default`.
+#
+# Set this in .env so a plain `docker compose up -d` cannot forget it:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.prod.yml
+
+services:
+  frontend:
+    networks:
+      - default
+      - web
+
+networks:
+  web:
+    external: true

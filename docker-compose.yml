@@ -1,0 +1,48 @@
+services:
+  # `gvc-backend`, not `backend`: Notes and GAM each already have a service called
+  # `backend`, and nginx here resolves its upstream by name (frontend/nginx.conf).
+  gvc-backend:
+    build: ./backend
+    restart: unless-stopped
+    volumes:
+      - ./data/db:/app/data/db
+    environment:
+      - DATABASE_URL=sqlite:////app/data/db/gvc.db
+      # Must match gecko-notes'. GVC verifies the sessions Notes issues; a different
+      # secret means every token is rejected. No default — the app refuses to start.
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - CORS_ORIGIN=${CORS_ORIGIN:-}
+      - NOTES_BASE_URL=${NOTES_BASE_URL:-https://notes.geckopico.com}
+      - GAM_BASE_URL=${GAM_BASE_URL:-https://gam.geckopico.com}
+      - ADMIN_USERS=${ADMIN_USERS:-}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+    # Never published to the host: the frontend proxies it, and ProxyHeadersMiddleware
+    # trusts X-Forwarded-* from any peer that can reach it.
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # Generous: the container runs migrations before uvicorn binds a port.
+      start_period: 30s
+    networks:
+      - default
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-18083}:80"
+    environment:
+      # The CSP's connect-src; must agree with the backend's value.
+      - NOTES_BASE_URL=${NOTES_BASE_URL:-https://notes.geckopico.com}
+    depends_on:
+      - gvc-backend
+    networks:
+      - default
+
+networks:
+  default:
+    name: gvc_default
