@@ -20,10 +20,13 @@ from app.auth import CurrentUser, is_admin
 from app.config import settings
 from app.database import engine, get_session
 from app.gam.client import GamError
+from app.routers import assistant as assistant_router
 from app.routers import gam as gam_router
 from app.routers import projects as projects_router
+from app.routers import providers as providers_router
 from app.routers import renders as renders_router
 from app.routers import spec as spec_router
+from app.routers import usage as usage_router
 from app.schemas import ClientConfig, DataResponse, HealthResponse
 
 logging.basicConfig(level=logging.INFO)
@@ -48,9 +51,13 @@ async def lifespan(_app: FastAPI):
 
     # Picks up nothing a restart interrupted (a render runs as its requester, whose
     # token is gone), and starts the render workers.
+    from app.assistant import worker as assistant_worker
     from app.render import worker
 
     worker.start()
+    # The same rule for the assistant: a turn interrupted by a restart is ended and
+    # said so, never rerun without the token it needs.
+    assistant_worker.start()
     yield
 
 
@@ -145,5 +152,8 @@ app.include_router(projects_router.router, prefix="/api/projects", tags=["projec
 app.include_router(spec_router.router, prefix="/api/spec", tags=["spec"])
 app.include_router(gam_router.router, prefix="/api/gam", tags=["gam"])
 app.include_router(renders_router.router, prefix="/api", tags=["renders"])
+app.include_router(providers_router.router, prefix="/api/providers", tags=["providers"])
+app.include_router(assistant_router.router, prefix="/api/assistant", tags=["assistant"])
+app.include_router(usage_router.router, prefix="/api/usage", tags=["usage"])
 # Not under /api: these URLs go straight into <video src>, authorised by signature.
 app.include_router(renders_router.media_router, prefix="/media/renders", tags=["media"])

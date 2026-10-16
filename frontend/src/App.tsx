@@ -4,6 +4,7 @@ import AppShell from '@/components/AppShell'
 import RequireAuth from '@/components/RequireAuth'
 import ProjectListView from '@/views/ProjectListView'
 import ProjectView from '@/views/ProjectView'
+import SettingsView from '@/views/SettingsView'
 import { loadConfig } from '@/api/config'
 import { setUnauthorizedHandler } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
@@ -44,6 +45,7 @@ export default function App() {
       <Route path="/" element={<Navigate to="/projects" replace />} />
       <Route path="/projects" element={page(<ProjectListView />)} />
       <Route path="/p/:id" element={page(<ProjectView />)} />
+      <Route path="/settings" element={page(<SettingsView />)} />
       <Route path="*" element={<Navigate to="/projects" replace />} />
     </Routes>
   )

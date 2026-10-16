@@ -102,7 +102,8 @@ def _commit_spec(
 
 
 def create(
-    session: Session, user: UserCtx, spec: VideoSpec, *, origin: str, message: str
+    session: Session, user: UserCtx, spec: VideoSpec, *, origin: str, message: str,
+    author: str = "user",
 ) -> Project:
     # The project row has a foreign key to the shadow user, which `/api/me` normally
     # writes first. A Notes push may well be the first request this user ever makes.
@@ -110,7 +111,7 @@ def create(
     now = utcnow()
     project = Project(id=str(uuid.uuid4()), user_id=user.id, origin=origin,
                       created_at=now, updated_at=now)
-    _commit_spec(session, project, spec, author="user", message=message)
+    _commit_spec(session, project, spec, author=author, message=message)
     return project
 
 
@@ -178,6 +179,12 @@ def delete(session: Session, project: Project) -> None:
     for job in session.exec(select(RenderJob).where(RenderJob.project_id == project.id)).all():
         shutil.rmtree(renders_dir() / job.id, ignore_errors=True)
     session.exec(sa_delete(RenderJob).where(RenderJob.project_id == project.id))
+    # The assistant's conversations about it go too (their spend stays in UsageEvent).
+    # Turns before sessions, for the same foreign-key reason as versions.
+    from app.models.assistant import AssistantSession, AssistantTurn
+
+    session.exec(sa_delete(AssistantTurn).where(AssistantTurn.project_id == project.id))
+    session.exec(sa_delete(AssistantSession).where(AssistantSession.project_id == project.id))
     session.exec(sa_delete(ProjectVersion).where(ProjectVersion.project_id == project.id))
     session.delete(project)
     session.commit()

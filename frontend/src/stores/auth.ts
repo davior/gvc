@@ -3,6 +3,7 @@ import { authApi, redirectToLogin, type User } from '@/api/auth'
 import { apiErrorCode, apiErrorMessage, clearToken } from '@/api/client'
 import { useProjectStore } from '@/stores/projects'
 import { useRenderStore } from '@/stores/renders'
+import { useAssistantStore } from '@/stores/assistant'
 
 /**
  * Who is signed in.
@@ -70,6 +71,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     useProjectStore.getState().reset()
     // Also stops the poll, which would otherwise keep asking as the old user.
     useRenderStore.getState().reset()
+    useAssistantStore.getState().reset()
     void redirectToLogin()
   },
 

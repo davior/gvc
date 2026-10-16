@@ -119,6 +119,11 @@ def no_render_workers(monkeypatch, tmp_path):
     monkeypatch.setattr(worker.queue, "start", lambda: None)
     monkeypatch.setattr(worker.queue, "enqueue", lambda job_id: None)
     monkeypatch.setattr(settings, "data_dir", str(tmp_path / "data"))
+    # The assistant's queue, the same way: a test runs a turn with `worker._run`.
+    from app.assistant import worker as assistant_worker
+
+    monkeypatch.setattr(assistant_worker.queue, "start", lambda: None)
+    monkeypatch.setattr(assistant_worker.queue, "enqueue", lambda job_id: None)
 
 
 # ── media a render can really encode ─────────────────────────────────────────

@@ -12,6 +12,7 @@ import {
   updateSegment,
   withNarrationText,
 } from '@/spec/edits'
+import { useAssistantStore } from '@/stores/assistant'
 
 interface Props {
   spec: VideoSpec
@@ -43,6 +44,7 @@ export default function SceneList({
   onFindFootage,
 }: Props) {
   const segments = spec.segments
+  const setFocus = useAssistantStore((s) => s.setFocus)
   const edit = (index: number, change: (s: Segment) => Segment) =>
     onChange(updateSegment(spec, index, change))
 
@@ -51,8 +53,11 @@ export default function SceneList({
       {segments.map((segment, index) => (
         <section
           key={segment.id}
+          id={`scene-${segment.id}`}
           aria-label={segment.label || segment.id}
           className="card space-y-2 p-3"
+          // The scene being worked on is what "this scene" means to the assistant.
+          onFocusCapture={() => setFocus(segment.id)}
         >
           <div className="flex items-center gap-2">
             <span className="w-6 text-right text-xs text-gray-400">{index + 1}</span>

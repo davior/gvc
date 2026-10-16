@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
-import { LogOut, Moon, Sun } from 'lucide-react'
+import { LogOut, Moon, Settings, Sun } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import AssistantMarker from '@/components/AssistantMarker'
+import AssistantPanel from '@/components/AssistantPanel'
 import { useAuthStore } from '@/stores/auth'
 import { useThemeStore } from '@/stores/theme'
 
@@ -29,6 +31,15 @@ export default function AppShell({ children }: Props) {
           </Link>
 
           <div className="ml-auto flex items-center gap-3">
+            {user && <AssistantMarker />}
+            <Link
+              to="/settings"
+              className="btn btn-ghost p-2"
+              aria-label="Settings"
+              title="Settings"
+            >
+              <Settings className="h-4 w-4" />
+            </Link>
             <button
               type="button"
               onClick={toggleTheme}
@@ -63,7 +74,11 @@ export default function AppShell({ children }: Props) {
         </div>
       </header>
 
-      <main className="flex-1 overflow-auto">{children}</main>
+      {/* The assistant sits beside every page, so it can follow you around the app. */}
+      <div className="flex min-h-0 flex-1">
+        <main className="min-w-0 flex-1 overflow-auto">{children}</main>
+        {user && <AssistantPanel />}
+      </div>
     </div>
   )
 }
