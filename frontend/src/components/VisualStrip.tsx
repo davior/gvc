@@ -1,7 +1,10 @@
-import { Film, ImageOff, Search, X } from 'lucide-react'
+import { Film, ImageOff, Search, Sparkles, Square, X } from 'lucide-react'
 import type { GamAsset } from '@/api/gam'
+import { RUNNING, type Generation } from '@/api/generations'
 import type { Segment, VideoSpec } from '@/api/projects'
 import { clock } from '@/spec/footage'
+import { latestByKey } from '@/spec/generation'
+import { useGenerationStore } from '@/stores/generations'
 
 interface Props {
   spec: VideoSpec
@@ -9,6 +12,8 @@ interface Props {
   gamAssets: Record<string, GamAsset | null>
   onFind: () => void
   onRemove: () => void
+  /** Open the Generate dialog for a placeholder; absent, nothing offers to. */
+  onGenerate?: (key: string) => void
 }
 
 interface Shown {
@@ -45,12 +50,20 @@ function describe(spec: VideoSpec, key: string, gamAssets: Props['gamAssets']): 
         note: 'Still in the note',
       }
     case 'generate':
-      return {
-        name: ref.label ?? 'To generate',
-        thumb: null,
-        note: `To generate: “${ref.prompt}”`,
-      }
+      return ref.result
+        ? fromGam(ref.result.id, ref.label)
+        : {
+            name: ref.label ?? 'To generate',
+            thumb: null,
+            note: `To generate: “${ref.prompt}”`,
+          }
   }
+}
+
+/** Where a running generation has got to, in a few words. */
+function progressOf(row: Generation): string {
+  const stage = row.stage || (row.status === 'queued' ? 'Waiting to start' : 'Generating')
+  return row.detail ? `${stage} · ${row.detail}` : stage
 }
 
 /**
@@ -63,7 +76,11 @@ export default function VisualStrip({
   gamAssets,
   onFind,
   onRemove,
+  onGenerate,
 }: Props) {
+  const rows = useGenerationStore((s) => s.rows)
+  const cancel = useGenerationStore((s) => s.cancel)
+  const choose = useGenerationStore((s) => s.choose)
   const visual = segment.visual
   if (!visual) {
     return (
@@ -73,7 +90,18 @@ export default function VisualStrip({
       </button>
     )
   }
+  const ref = spec.assets?.[visual.asset]
+  const generated = ref?.from === 'generate' ? ref : undefined
+  const row = generated ? latestByKey(rows)[visual.asset] : undefined
+  const running = row && RUNNING.includes(row.status)
   const shown = describe(spec, visual.asset, gamAssets)
+  if (running) shown.note = progressOf(row)
+  else if (generated && !generated.result && row?.status === 'error')
+    shown.note = row.error ?? 'The generation failed'
+  const outputs =
+    generated?.result && row?.status === 'done' && row.result_ids.length > 1
+      ? row.result_ids
+      : []
   const trim = visual.trim
   return (
     <div
@@ -103,6 +131,56 @@ export default function VisualStrip({
           {visual.audio === 'play' && ' · with its sound'}
         </span>
       </span>
+      {outputs.length > 0 && (
+        <span className="flex gap-1" aria-label="Other outputs">
+          {outputs.map((id, n) => (
+            <button
+              key={id}
+              type="button"
+              aria-label={`Output ${n + 1}`}
+              aria-pressed={generated?.result?.id === id}
+              className={`h-8 w-12 overflow-hidden rounded ${
+                generated?.result?.id === id ? 'ring-2 ring-primary-600' : ''
+              }`}
+              onClick={() => row && void choose(row.id, id)}
+            >
+              {gamAssets[id]?.thumb_url ? (
+                <img
+                  src={gamAssets[id]?.thumb_url ?? ''}
+                  alt=""
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <span className="block h-full w-full bg-gray-200 dark:bg-gray-700" />
+              )}
+            </button>
+          ))}
+        </span>
+      )}
+      {running && row ? (
+        <button
+          type="button"
+          className="btn btn-ghost text-xs"
+          onClick={() => void cancel(row.id)}
+        >
+          <Square className="mr-1 inline h-3 w-3" />
+          Stop
+        </button>
+      ) : (
+        generated &&
+        !generated.result &&
+        onGenerate &&
+        (generated.type === 'image' || generated.type === 'video') && (
+          <button
+            type="button"
+            className="btn btn-secondary text-xs"
+            onClick={() => onGenerate(visual.asset)}
+          >
+            <Sparkles className="mr-1 inline h-3 w-3" />
+            {row?.status === 'error' ? 'Try again' : 'Generate…'}
+          </button>
+        )
+      )}
       <button type="button" className="btn btn-ghost text-xs" onClick={onFind}>
         <Search className="mr-1 inline h-3 w-3" />
         Change

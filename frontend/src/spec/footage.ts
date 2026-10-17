@@ -200,7 +200,7 @@ export function gamIdsIn(spec: VideoSpec): string[] {
   const ids = Object.values(spec.assets ?? {}).flatMap((ref) =>
     ref.from === 'gam'
       ? [ref.id]
-      : ref.from === 'search' && ref.result
+      : (ref.from === 'search' || ref.from === 'generate') && ref.result
         ? [ref.result.id]
         : []
   )

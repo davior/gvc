@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, CloudUpload, Save, Search, Undo2 } from 'lucide-react'
+import { ArrowLeft, CloudUpload, Save, Search, Sparkles, Undo2 } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
 import type { NoteMediaCopy } from '@/api/projects'
 import FootageSearch from '@/components/FootageSearch'
+import GenerateDialog from '@/components/GenerateDialog'
 import HistoryPanel from '@/components/HistoryPanel'
 import CreditsSettings from '@/components/CreditsSettings'
 import RenderPanel from '@/components/RenderPanel'
@@ -10,7 +11,10 @@ import SoundtrackPanel from '@/components/SoundtrackPanel'
 import IssueList from '@/components/IssueList'
 import JsonPanel from '@/components/JsonPanel'
 import SceneList from '@/components/SceneList'
+import { RUNNING } from '@/api/generations'
 import { gamIdsIn, placeHit, resolveSearch, unresolvedSearches } from '@/spec/footage'
+import { canGenerate, latestByKey, unmadeGenerates } from '@/spec/generation'
+import { useGenerationStore } from '@/stores/generations'
 import { useProjectStore } from '@/stores/projects'
 
 type Tab = 'scenes' | 'soundtrack' | 'render' | 'json' | 'history'
@@ -47,10 +51,21 @@ export default function ProjectView() {
   const [tab, setTab] = useState<Tab>('scenes')
   const [finding, setFinding] = useState<Finding | null>(null)
   const [copyResult, setCopyResult] = useState<NoteMediaCopy | null>(null)
+  const [generating, setGenerating] = useState<string | null>(null)
+  const loadGenerations = useGenerationStore((s) => s.load)
+  const generations = useGenerationStore((s) => s.rows)
+  const generationError = useGenerationStore((s) => s.error)
 
   useEffect(() => {
     if (id) void open(id)
   }, [id, open])
+
+  // After the project, not with it: a finished generation is put into the draft, and
+  // there is no draft until the project is open.
+  const openId = project?.id
+  useEffect(() => {
+    if (openId) void loadGenerations(openId)
+  }, [openId, loadGenerations])
 
   // Keyed on the ids as a string, so typing narration does not re-ask GAM; only a
   // newly placed asset does, and the store fetches just the ones it lacks.
@@ -78,6 +93,8 @@ export default function ProjectView() {
 
   const source = draft.source
   const toFind = unresolvedSearches(draft)
+  const toMake = unmadeGenerates(draft)
+  const latest = latestByKey(generations)
   const placeholder =
     finding?.kind === 'resolve'
       ? toFind.find((p) => p.key === finding.key)?.ref
@@ -212,6 +229,54 @@ export default function ProjectView() {
           </ul>
         </section>
       )}
+      {tab === 'scenes' && toMake.length > 0 && (
+        <section aria-label="To make" className="card space-y-2 p-3">
+          <h2 className="text-sm font-medium text-gray-900 dark:text-gray-100">
+            Still to make
+          </h2>
+          <ul className="space-y-1">
+            {toMake.map(({ key, ref }) => {
+              const row = latest[key]
+              const running = row && RUNNING.includes(row.status)
+              return (
+                <li key={key} className="flex items-center gap-2 text-sm">
+                  <span className="flex-1 text-gray-700 dark:text-gray-300">
+                    <span className="text-xs text-gray-500">{ref.type}</span> “
+                    {ref.prompt}”
+                    {running && (
+                      <span className="ml-2 text-xs text-gray-500">
+                        {row.stage || 'Generating'}…
+                      </span>
+                    )}
+                    {row?.status === 'error' && (
+                      <span className="ml-2 text-xs text-red-600 dark:text-red-400">
+                        {row.error}
+                      </span>
+                    )}
+                  </span>
+                  {canGenerate(ref) ? (
+                    !running && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost text-xs"
+                        onClick={() => setGenerating(key)}
+                      >
+                        <Sparkles className="mr-1 inline h-3 w-3" />
+                        Generate…
+                      </button>
+                    )
+                  ) : (
+                    <span className="text-xs text-gray-500">Find it in your library</span>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      )}
+      {tab === 'scenes' && generationError && !generating && (
+        <p className="text-xs text-red-600 dark:text-red-400">{generationError}</p>
+      )}
       {tab === 'scenes' && gamError && (
         <p className="text-xs text-amber-700 dark:text-amber-300">
           Could not show pictures from the asset library: {gamError}
@@ -223,7 +288,11 @@ export default function ProjectView() {
           onChange={edit}
           gamAssets={gamAssets}
           onFindFootage={(index) => setFinding({ kind: 'scene', index })}
+          onGenerate={setGenerating}
         />
+      )}
+      {generating && (
+        <GenerateDialog assetKey={generating} onClose={() => setGenerating(null)} />
       )}
       {finding?.kind === 'scene' && (
         <FootageSearch

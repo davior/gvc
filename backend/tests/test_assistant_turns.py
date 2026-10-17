@@ -294,3 +294,43 @@ def test_deleting_a_project_deletes_its_conversations(auth_client, session, prov
     assert auth_client.delete(f"/api/projects/{project['id']}").status_code == 204
     assert session.query(AssistantTurn).count() == 0
     assert session.query(AssistantSession).count() == 0
+
+
+def test_a_draft_generates_its_pictures_but_never_its_video(
+        auth_client, session, provider, library, engine_for_worker):
+    from sqlmodel import select
+
+    from app.models.generation import Generation
+
+    draft = json.loads(json.dumps(VALID))
+    draft["segments"].append({"id": "s_flood", "kind": "scene", "label": "Flood",
+                              "narration": {"beats": [{"id": "b1", "text": "Then it rose."}]}})
+    provider.script += [
+        says("", call("replace_spec", spec=draft)),
+        says("", call("generate_image", prompt="An illustration of the dam, wide",
+                      segment_id="s_title", use_as="overlay", label="Dam")),
+        says("", call("add_placeholder", segment_id="s_flood", kind="generate",
+                      media_type="video", text="Water rising over the valley floor")),
+        says("The dam picture is generating; press Generate on the flood scene for its clip."),
+    ]
+    res = auth_client.post("/api/assistant/turns",
+                           json={"prompt": "Water wars, with an illustration of the dam"},
+                           headers={"Authorization": "Bearer user-token"})
+    turn = res.json()["data"]
+    worker._run(turn["id"])
+    done = auth_client.get(f"/api/assistant/turns/{turn['id']}").json()["data"]
+    assert done["status"] == "done", done
+    # One job, for the picture, as the user, against the turn.
+    [sent] = library.generations
+    assert sent["prompt"] == "An illustration of the dam, wide"
+    assert sent["authorization"] == "Bearer user-token"
+    [row] = session.exec(select(Generation)).all()
+    assert (row.turn_id, row.project_id, row.asset_key) == (turn["id"], None, "a_dam")
+    assets = done["proposed_spec"]["assets"]
+    flood = done["proposed_spec"]["segments"][2]["visual"]["asset"]
+    assert assets[flood]["type"] == "video" and assets[flood]["from"] == "generate"
+    assert any("Generating a picture" in c for c in done["changes"])
+
+    made = auth_client.post(f"/api/assistant/turns/{turn['id']}/new-project").json()["data"]
+    listed = auth_client.get(f"/api/projects/{made['project_id']}/generations").json()["data"]
+    assert [g["asset_key"] for g in listed] == ["a_dam"]

@@ -20,6 +20,7 @@ import { Link, useMatch, useNavigate } from 'react-router-dom'
 import { ACTIVE_TURN, type Turn, type TurnStep } from '@/api/assistant'
 import { formatCost } from '@/api/usage'
 import { MAX_WIDTH, MIN_WIDTH, useAssistantStore } from '@/stores/assistant'
+import { useGenerationStore } from '@/stores/generations'
 import { useProjectStore } from '@/stores/projects'
 
 /**
@@ -126,8 +127,10 @@ function Proposal({ turn, projectVersion }: ProposalProps) {
   const discard = useAssistantStore((s) => s.discard)
   const newProject = useAssistantStore((s) => s.newProject)
   const edit = useProjectStore((s) => s.edit)
+  const loadGenerations = useGenerationStore((s) => s.load)
   const navigate = useNavigate()
   const [busy, setBusy] = useState(false)
+  const generates = turn.changes.some((c) => c.startsWith('Generating a picture'))
 
   if (turn.outcome === 'applied')
     return (
@@ -137,7 +140,11 @@ function Proposal({ turn, projectVersion }: ProposalProps) {
       </p>
     )
   if (turn.outcome === 'discarded')
-    return <p className="text-xs text-gray-500">Discarded</p>
+    return (
+      <p className="text-xs text-gray-500">
+        Discarded{generates && '. The pictures it generated stay in your library.'}
+      </p>
+    )
   if (turn.outcome !== 'pending' || !turn.proposed_spec) return null
 
   const stale =
@@ -157,6 +164,9 @@ function Proposal({ turn, projectVersion }: ProposalProps) {
     // on it exactly as they do on a change made by hand.
     edit(turn.proposed_spec!)
     await markApplied(turn.id)
+    // The pictures it started are followed by the generations store, which has not
+    // seen them: reading the list now picks them up, and fills in any already done.
+    if (generates && turn.project_id) void loadGenerations(turn.project_id)
     setBusy(false)
   }
 
@@ -170,6 +180,11 @@ function Proposal({ turn, projectVersion }: ProposalProps) {
           <li key={i}>{c}</li>
         ))}
       </ul>
+      {generates && (
+        <p className="text-gray-500">
+          Generated pictures fill in by themselves once this is applied.
+        </p>
+      )}
       {stale && (
         <p className="text-amber-700 dark:text-amber-300">
           Based on version {turn.base_version}; the project has been saved since (now

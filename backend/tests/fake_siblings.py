@@ -46,6 +46,12 @@ class FakeSiblings:
     # Filenames GAM should refuse on upload.
     refuse_uploads: List[str] = field(default_factory=list)
     uploads: List[dict] = field(default_factory=list)
+    # GAM's generation (M8): its catalogue, the jobs started (by id), and whether the
+    # user has a fal.ai key.
+    gen_models: List[dict] = field(default_factory=lambda: [dict(m) for m in GEN_MODELS])
+    gen_jobs: Dict[str, dict] = field(default_factory=dict)
+    generations: List[dict] = field(default_factory=list)
+    fal_key: bool = True
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -100,6 +106,27 @@ class FakeSiblings:
                                  "fields": _form_fields(body),
                                  "authorization": request.headers.get("authorization")})
             return httpx.Response(201, json={"created": [asset], "rejected": []})
+        if path == "/api/generate/models":
+            return httpx.Response(200, json={"data": self.gen_models, "total": len(self.gen_models)})
+        if path == "/api/generate" and request.method == "POST":
+            if not self.fal_key:
+                return httpx.Response(400, json={"detail": {
+                    "code": "fal_key_missing", "message": "Add a fal.ai API key in Settings to generate"}})
+            body = json.loads(request.content)
+            self.generations.append({**body, "authorization": request.headers.get("authorization")})
+            job_id = f"job-{len(self.generations)}"
+            self.gen_jobs[job_id] = {"id": job_id, "kind": "enrichment", "action": "generate",
+                                     "status": "queued", "stage": "Queued", "progress": 0,
+                                     "detail": "", "result_asset_id": None,
+                                     "result_asset_ids": [], "error_message": None}
+            return httpx.Response(202, json={"data": self.gen_jobs[job_id]})
+        if path.startswith("/api/activity/enrichment/"):
+            job = self.gen_jobs.get(path.rsplit("/", 1)[-1])
+            if job is None:
+                return httpx.Response(404, json={"detail": {"code": "not_found", "message": "gone"}})
+            if request.method == "DELETE":
+                job["status"] = "cancelled"
+            return httpx.Response(200, json={"data": job})
         if path.startswith("/api/assets/") and request.method == "PATCH":
             asset = self.assets.get(path.rsplit("/", 1)[-1])
             if asset is None:
@@ -121,6 +148,33 @@ def _form_fields(body: bytes) -> Dict[str, str]:
             name = head.split(b'name="', 1)[1].split(b'"', 1)[0].decode()
             fields[name] = value.rsplit(b"\r\n", 1)[0].decode()
     return fields
+
+
+GEN_MODELS = [
+    {"id": "m-flux", "endpoint_id": "fal-ai/flux/schnell", "kind": "text_to_image",
+     "label": "FLUX.1 [schnell]", "is_active": True, "unit_price": 0.003, "price_unit": "megapixel",
+     "options": {"aspect_ratios": [], "image_sizes": ["square_hd", "square", "portrait_4_3",
+                 "portrait_16_9", "landscape_4_3", "landscape_16_9"], "durations": [],
+                 "resolutions": [], "supports_seed": True, "supports_negative_prompt": False,
+                 "supports_audio": False, "max_outputs": 4}},
+    {"id": "m-edit", "endpoint_id": "fal-ai/nano-banana/edit", "kind": "image_to_image",
+     "label": "Nano Banana edit", "is_active": True, "unit_price": 0.039, "price_unit": "image",
+     "options": {"aspect_ratios": ["21:9", "16:9", "1:1", "9:16"], "image_sizes": [],
+                 "durations": [], "resolutions": [], "supports_seed": False,
+                 "supports_negative_prompt": False, "supports_audio": False, "max_outputs": 4}},
+    {"id": "m-kling", "endpoint_id": "fal-ai/kling-video/v2.5-turbo/pro/image-to-video",
+     "kind": "image_to_video", "label": "Kling 2.5", "is_active": True, "unit_price": 0.07,
+     "price_unit": "second",
+     "options": {"aspect_ratios": [], "image_sizes": [], "durations": ["5", "10"],
+                 "resolutions": [], "supports_seed": False, "supports_negative_prompt": True,
+                 "supports_audio": False, "max_outputs": 1}},
+    {"id": "m-veo", "endpoint_id": "fal-ai/veo3.1/fast/image-to-video", "kind": "image_to_video",
+     "label": "Veo 3.1 Fast", "is_active": True, "unit_price": 0.10, "price_unit": "second",
+     "options": {"aspect_ratios": ["auto", "16:9", "9:16"], "image_sizes": [],
+                 "durations": ["4s", "6s", "8s"], "resolutions": ["720p", "1080p"],
+                 "supports_seed": False, "supports_negative_prompt": True,
+                 "supports_audio": True, "max_outputs": 1}},
+]
 
 
 def hit(asset: dict, *, start=None, end=None, snippet="") -> dict:

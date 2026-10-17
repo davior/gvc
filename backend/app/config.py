@@ -95,6 +95,9 @@ class Settings(BaseSettings):
     # Earlier messages a turn is given, newest kept. Older ones are still in the
     # session; the spec itself, not the chat, is the record of what was decided.
     assistant_history_messages: int = 20
+    # Pictures one request may generate on its own (each is a paid call to fal.ai through
+    # GAM). Past it the assistant leaves placeholders for the user to generate.
+    assistant_max_generations: int = 6
     job_heartbeat_seconds: int = 30
     job_stale_minutes: int = 40
 

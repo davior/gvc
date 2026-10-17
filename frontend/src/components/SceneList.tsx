@@ -21,6 +21,7 @@ interface Props {
   gamAssets?: Record<string, GamAsset | null>
   /** Open the footage search for the segment at this index. */
   onFindFootage?: (index: number) => void
+  onGenerate?: (key: string) => void
 }
 
 const KIND_LABEL: Record<Segment['kind'], string> = {
@@ -42,6 +43,7 @@ export default function SceneList({
   onChange,
   gamAssets = {},
   onFindFootage,
+  onGenerate,
 }: Props) {
   const segments = spec.segments
   const setFocus = useAssistantStore((s) => s.setFocus)
@@ -120,6 +122,7 @@ export default function SceneList({
               gamAssets={gamAssets}
               onFind={() => onFindFootage(index)}
               onRemove={() => onChange(removeVisual(spec, index))}
+              onGenerate={onGenerate}
             />
           )}
 

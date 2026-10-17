@@ -24,6 +24,7 @@ from app.assistant.tools import Working
 from app.clock import utcnow
 from app.config import settings
 from app.gam.client import GamClient
+from app.generation import service as generation_service
 from app.jobs.runner import JobQueue, readable_error, set_fields
 from app.models.assistant import AssistantSession, AssistantTurn
 from app.providers import build_provider
@@ -113,7 +114,19 @@ def _run(turn_id: str) -> None:
             provider = build_provider(session, user_id)
         if provider is None:
             raise ProviderError("No AI provider is set up. Add one in Settings first.")
-        working = Working(base, gam=gam)
+        working = Working(base, gam=gam, max_generations=settings.assistant_max_generations)
+
+        def generate(data, key, image_prompt, base_ids, outputs):
+            with queue.session() as session:
+                row = generation_service.start(
+                    session, gam, user_id=user_id, project_id=project_id, turn_id=turn_id,
+                    spec=data, key=key, prompt=image_prompt, outputs=outputs,
+                    base_gam_ids=base_ids)
+                # Read inside the session: the commit expired the row, and a detached
+                # row can't reload.
+                return row.model_label, row.estimate
+
+        working.generate = generate
         system = [REFERENCE, context(base, focus=focus, from_scratch=project_id is None)]
         outcome = loop.run(provider, working, system=system, history=history, prompt=prompt,
                            on_step=on_step, on_reply=on_reply,
