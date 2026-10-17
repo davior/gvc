@@ -256,6 +256,13 @@ def apply_as_new_project(turn_id: str, user: CurrentUser,
     project = project_service.create(session, user, spec, origin="brief",
                                      message="Drafted by the assistant", author="ai")
     turn.outcome, turn.project_id, turn.updated_at = "applied", project.id, utcnow()
+    # Pictures the draft started generating belong to the new project now, so opening it
+    # finds them and fills them in.
+    from app.models.generation import Generation
+
+    for row in session.exec(select(Generation).where(Generation.turn_id == turn.id)).all():
+        row.project_id = project.id
+        session.add(row)
     chat = session.get(AssistantSession, turn.session_id)
     if chat is not None:
         chat.project_id = project.id

@@ -22,6 +22,7 @@ from app.database import engine, get_session
 from app.gam.client import GamError
 from app.routers import assistant as assistant_router
 from app.routers import gam as gam_router
+from app.routers import generations as generations_router
 from app.routers import projects as projects_router
 from app.routers import providers as providers_router
 from app.routers import renders as renders_router
@@ -154,6 +155,7 @@ app.include_router(gam_router.router, prefix="/api/gam", tags=["gam"])
 app.include_router(renders_router.router, prefix="/api", tags=["renders"])
 app.include_router(providers_router.router, prefix="/api/providers", tags=["providers"])
 app.include_router(assistant_router.router, prefix="/api/assistant", tags=["assistant"])
+app.include_router(generations_router.router, prefix="/api", tags=["generations"])
 app.include_router(usage_router.router, prefix="/api/usage", tags=["usage"])
 # Not under /api: these URLs go straight into <video src>, authorised by signature.
 app.include_router(renders_router.media_router, prefix="/media/renders", tags=["media"])

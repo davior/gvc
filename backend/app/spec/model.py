@@ -111,6 +111,14 @@ class GeneratedAsset(_Model):
     status: Literal["pending", "running", "ready", "failed"] = "pending"
     result: Optional[GeneratedResult] = None
     label: Optional[str] = None
+    # "16:9" etc.; unset, the video's own aspect. Only read when generating.
+    aspect: Optional[Aspect] = None
+
+    @model_validator(mode="after")
+    def _ready_has_result(self) -> "GeneratedAsset":
+        if self.status == "ready" and self.result is None:
+            raise ValueError('a generated asset marked "ready" needs its result')
+        return self
 
 
 class Moment(_Model):

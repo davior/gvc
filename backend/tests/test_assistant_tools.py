@@ -179,3 +179,37 @@ def test_estimate_reads_the_working_copy():
     w = Working(spec())
     result = run(w, "estimate")
     assert '"narration_chars":' in result.content and not result.is_error
+
+
+def test_a_generated_picture_is_a_placeholder_started_at_once_up_to_the_cap():
+    started = []
+
+    def generate(data, key, prompt, base_ids, outputs):
+        assert data["assets"][key] == {"from": "generate", "type": "image", "prompt": prompt}
+        started.append((key, base_ids, outputs))
+        return "FLUX.1 [schnell]", 0.003
+
+    w = Working(spec(), max_generations=2)
+    w.generate = generate
+    result = run(w, "generate_image", prompt="The dam at dusk, wide", segment_id="s_valley")
+    assert not result.is_error and "about $0.003" in result.content
+    assert w.data["segments"][1]["visual"] == {"asset": started[0][0]}
+    run(w, "generate_image", prompt="A gauge", segment_id="s_valley", use_as="overlay",
+        outputs=9, base_gam_ids=["p"])
+    assert w.data["segments"][1]["overlays"][0]["asset"] == started[1][0]
+    assert started[1][1:] == (["p"], 4)
+    capped = run(w, "generate_image", prompt="One more", use_as="none")
+    assert capped.is_error and "add_placeholder" in capped.content and len(started) == 2
+    assert w.valid
+
+
+def test_a_generation_that_cannot_start_leaves_the_placeholder():
+    def generate(*_):
+        raise RuntimeError("no fal.ai key")
+
+    w = Working(spec())
+    w.generate = generate
+    result = run(w, "generate_image", prompt="A dam", segment_id="s_valley")
+    assert not result.is_error and "no fal.ai key" in result.content
+    key = w.data["segments"][1]["visual"]["asset"]
+    assert w.data["assets"][key]["from"] == "generate" and w.generated == 0

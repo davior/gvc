@@ -130,6 +130,27 @@ mistake. A turn ends with one proposal (the whole spec, plus a line per change) 
 or discarded as a whole, rather than suggestions accepted one by one: the user chose
 that, and the editor's draft, Save and History already give per-change undo.
 
+**AI generation.** A `generate` placeholder for a picture or a clip is made by GAM's M8,
+on fal.ai with the user's own key (set in GAM's Settings). GVC has no fal code and no
+worker for it:
+- GVC keeps a `generation` row per run (placeholder, GAM job, model, params, estimate,
+  outputs, the output in use). Reading a project's generations refreshes the unfinished
+  ones from GAM with the reader's token, so a run started and left is caught up the next
+  time anyone opens the project. Nothing in GVC has to stay running, and no token is
+  stored.
+- A finished run's first output goes into the editor's draft as an unsaved edit (the
+  placeholder's `result`, `status: ready`); the others stay offered beside it. That is
+  recorded on the row, so it lands once: Discard drops it like any other edit.
+- Options are the model's own (`aspect_ratios` or FLUX's `image_sizes` from the video's
+  aspect, `durations` as the catalogue spells them), and the price shown is GAM's list
+  price; what fal.ai charged is in GAM's usage.
+- Images and clips only: GAM has no audio models, so music and sound placeholders stay
+  "find it in your library".
+- **The assistant generates pictures, never video** (the user's call: video costs far
+  more). `generate_image` adds the placeholder and starts it at once, at most
+  `ASSISTANT_MAX_GENERATIONS` (6) per turn; for footage it leaves a video placeholder for
+  the user's Generate button. Its rows follow the turn into a new project.
+
 ### D3. GVC stands by itself: three ways in, one project
 
 GVC is a complete tool on its own. There are three ways to start a video, and all of
@@ -298,7 +319,7 @@ Each milestone ends with something you can use, not just with code merged.
 | **M2** | **Native renderer** | **Built (M2a).** Engine copied from Notes (`app/render/`: ffmpeg, compose, narration, pause markup, shot cache, with Notes' 359 tests). `compile.py` is the §5.8 compile step, done natively: scenes cut at quote/code beats, defaults cascading field by field, per-join transitions (blends overlap, dips draw in-shot, cuts cut), anchors resolved to seconds. Ken Burns paths between two frames (S1), trimmed and held clips, N audio tracks with fades, crossfades and ducking. Media fetched from GAM into a cache keyed on GAM id and size; placeholders drawn as slates in a preview, refusing a full render. Narration read per beat through Notes (GN-V4), so beat anchors are exact. Render jobs on GAM's runner; the requester's token held in memory only, so a restart ends a render rather than storing a credential. Finished files at signed, ranged URLs. Editor: per-scene transition and Ken Burns (with a frame editor), a Soundtrack tab, a Render tab with estimate, progress and the result. **M2b:** timed text, lower thirds and pictures, drawn over the stitched video in one extra pass (`enable=` windows with alpha fades) so they can be held across a join, anchored to a scene's edges or lines; end credits from each GAM asset's credit plus extra lines, as cards and in a description (chapters + credits) to paste where the video is published; Save to GAM (GAM-3) for full renders, once per render. | A spec with two music tracks crossfading at a scene cut, a dissolve into one scene, and a Ken Burns path over a chosen part of a picture renders correctly |
 | **M3** | **Editor** | The M0 scene list grows into the storyboard: a card per segment (thumbnail, label, first line), lanes for audio tracks and overlays against the segments, a per-scene panel (visual, trim, transition, motion with a drag-a-box framing tool, voice), a project defaults panel. Sliders take their ranges from the schema (the Notes spec doc, open decision 12). Undo/redo over `ProjectVersion`. | You can build and fix a whole video by hand without opening the JSON tab |
 | **M4** | **AI drafting** | **Built, with M5, as one assistant.** Providers, usage and pricing copied from GAM's M6, with the clients made multi-turn and tool-calling (Anthropic and OpenAI-compatible, Ollama over `/v1`). A panel beside every page, collapsible as in Notes. From the project list, "describe a video" drafts one: GAM search as a tool, moments said in videos cut in as trims, placeholders for gaps, the draft repaired from its validation issues, applied as a new project with `source: brief` and `author: ai`. Each turn's estimated cost is shown, and usage recorded per project and turn. Turns are background jobs: they finish with the page closed, and wait for Apply. | "Make a 3-minute video about *X* using clips where people talk about it" produces a spec that previews immediately |
-| **M5** | **AI editing** | **Built, with M4.** The §8.2 operations as tools, addressed by id: segments, visuals, placeholders, overlays, tracks and project settings by merge patch. The turn starts from the editor's draft (unsaved edits included) and the focused scene; it ends with one proposal applied into the draft, warned about if the project was saved in between. Not yet: generate placeholders sent to GAM's M8, and `split`/`merge` of segments as their own tools (`update_segment` and `add_segment` cover them). | "Change the music after the second chapter to something calmer, and dissolve into the last scene" becomes reviewed, applied edits |
+| **M5** | **AI editing** | **Built, with M4.** The §8.2 operations as tools, addressed by id: segments, visuals, placeholders, overlays, tracks and project settings by merge patch. The turn starts from the editor's draft (unsaved edits included) and the focused scene; it ends with one proposal applied into the draft, warned about if the project was saved in between. Generate placeholders are sent to GAM's M8 (see "AI generation" below). Not yet: `split`/`merge` of segments as their own tools (`update_segment` and `add_segment` cover them). | "Change the music after the second chapter to something calmer, and dissolve into the last scene" becomes reviewed, applied edits |
 | **M6** | **Notes hands over** | GN-V1 to GN-V3: "Make video" in Notes pushes to GVC, and Notes' render pipeline is retired (the Notes spec doc §10, Phase 4). | No render code left in Notes |
 
 **M1 before M2** is the user's call: real media from GAM from the first render, with

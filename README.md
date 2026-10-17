@@ -36,6 +36,11 @@ one open. What it would change is listed for you to apply or discard. It runs in
 background, so a request finishes with the page closed. Set up its AI provider
 (Anthropic, OpenAI, DeepSeek, Ollama or a custom endpoint) under Settings.
 
+**Generated pictures and clips.** A placeholder for a picture or a clip has a Generate
+button: GAM makes it on fal.ai with your key (set in GAM's Settings), and it drops into
+the video when done, even if you closed the page meanwhile. The assistant may generate
+pictures itself; clips cost more, so it leaves those for you to start.
+
 The full storyboard editor is next (M3).
 
 ## Read first

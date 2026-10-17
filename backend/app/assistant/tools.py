@@ -86,6 +86,13 @@ class Working:
     changes: List[str] = field(default_factory=list)
     hits: Dict[str, Hit] = field(default_factory=dict)
     issues: List[SpecIssue] = field(default_factory=list)
+    # Starts one image generation in GAM for a placeholder in `data` and says what it
+    # cost: (model label, estimated cost). Set by the worker; None in a turn that can't
+    # generate (no GAM), and then the tool says so.
+    generate: Optional[Callable[[Dict[str, Any], str, str, List[str], int],
+                                Tuple[str, Optional[float]]]] = None
+    max_generations: int = 6
+    generated: int = 0
 
     def __post_init__(self) -> None:
         self.data = copy.deepcopy(self.data)
@@ -415,6 +422,61 @@ def add_placeholder(w: Working, segment_id: str, kind: str, text: str,
                                f"{'find' if kind == 'search' else 'generate'}: {text!r}")
 
 
+def generate_image(w: Working, prompt: str, segment_id: Optional[str] = None,
+                   use_as: str = "visual", base_gam_ids: Optional[List[str]] = None,
+                   outputs: int = 1, label: Optional[str] = None) -> str:
+    """A picture made for the video, started now in GAM and filled in when it's done.
+
+    Images only. Video costs far more and takes minutes, so the user starts that
+    themselves from the placeholder (their call, recorded in the plan of attack).
+    """
+    if w.generate is None:
+        raise ToolFailed("Generating isn't available in this turn.")
+    if w.generated >= w.max_generations:
+        raise ToolFailed(f"That's the {w.max_generations} pictures this request may generate. "
+                         "Leave the rest as placeholders with add_placeholder; the user can "
+                         "generate them from the video.")
+    if not prompt or not prompt.strip():
+        raise ToolFailed("Describe the picture to generate.")
+    if use_as not in ("visual", "overlay", "none"):
+        raise ToolFailed('use_as is "visual", "overlay" or "none".')
+    if use_as != "none" and not segment_id:
+        raise ToolFailed("Say which segment the picture is for, or use_as \"none\".")
+    candidate = copy.deepcopy(w.data)
+    assets = candidate.setdefault("assets", {})
+    base = f"a_{_slug(label or prompt) or 'generated'}"
+    key, n = base, 2
+    while key in assets:
+        key, n = f"{base}_{n}", n + 1
+    ref: Dict[str, Any] = {"from": "generate", "type": "image", "prompt": prompt.strip()}
+    if label:
+        ref["label"] = label
+    assets[key] = ref
+    where = "kept in the registry"
+    if segment_id:
+        segment = candidate["segments"][w.index_of(segment_id)]
+        if use_as == "visual":
+            segment["visual"] = {"asset": key}
+            where = f"as the picture of {w.name_of(segment)}"
+        elif use_as == "overlay":
+            taken = w.all_overlay_ids()
+            segment.setdefault("overlays", []).append(
+                {"id": w.new_id("o_", taken), "type": "image", "asset": key,
+                 "position": "top-right", "scale_pct": 30})
+            where = f"on screen over {w.name_of(segment)}"
+    result = w.commit(candidate, f"Generating a picture {where}: {prompt.strip()[:80]!r}")
+    try:
+        model, cost = w.generate(w.data, key, prompt.strip(), list(base_gam_ids or []),
+                                 max(1, min(4, outputs)))
+    except Exception as exc:  # noqa: BLE001 - said to the model; the placeholder stays
+        return (f"{result} But the generation couldn't start ({exc}); the placeholder "
+                f"{key} is there for the user to generate later.")
+    w.generated += 1
+    price = f", about ${cost:.3f}" if cost is not None else ""
+    return (f"{result} Started with {model}{price}; it fills placeholder {key} by itself "
+            "in a few seconds.")
+
+
 def add_overlay(w: Working, segment_id: str, overlay: Dict[str, Any],
                 gam_id: Optional[str] = None) -> str:
     if not isinstance(overlay, dict):
@@ -607,6 +669,19 @@ TOOLS: List[Tuple[ToolSpec, Callable[..., str]]] = [
               "motion, background, cards…), output, voice, chrome, credits.",
               {"type": "object", "properties": {"changes": _OBJ}, "required": ["changes"]}),
      set_project),
+    (ToolSpec("generate_image",
+              "Generate a still picture with AI and put it in the video (as a segment's "
+              "picture, an image overlay, or just in the registry). It starts at once and "
+              "costs money, so search the library first and generate only what a library "
+              "can't have. base_gam_ids: library pictures to edit or restyle. Never use "
+              "this for video; leave video as a placeholder for the user.",
+              {"type": "object", "properties": {
+                  "prompt": _STR, "segment_id": _STR,
+                  "use_as": {"type": "string", "enum": ["visual", "overlay", "none"]},
+                  "base_gam_ids": {"type": "array", "items": _STR},
+                  "outputs": {"type": "integer", "minimum": 1, "maximum": 4},
+                  "label": _STR},
+               "required": ["prompt"]}), generate_image),
     (ToolSpec("estimate", "How long the video runs, its narration length, and what would "
               "stop a full render.", {"type": "object", "properties": {}}), run_estimate),
 ]

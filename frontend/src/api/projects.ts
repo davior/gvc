@@ -79,9 +79,13 @@ export type AssetRef =
   | { from: 'notes'; url: string; type: string; label?: string }
   | {
       from: 'generate'
-      type: string
+      type: 'image' | 'video' | 'music' | 'sfx' | string
       prompt: string
-      status?: string
+      status?: 'pending' | 'running' | 'ready' | 'failed'
+      /** What was made, once one is chosen; other outputs stay with the generation. */
+      result?: { from: 'gam'; id: string }
+      /** Registry keys of the pictures a clip is made from. */
+      base_assets?: string[]
       label?: string
       [key: string]: unknown
     }

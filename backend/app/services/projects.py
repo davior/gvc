@@ -182,6 +182,10 @@ def delete(session: Session, project: Project) -> None:
     # The assistant's conversations about it go too (their spend stays in UsageEvent).
     # Turns before sessions, for the same foreign-key reason as versions.
     from app.models.assistant import AssistantSession, AssistantTurn
+    from app.models.generation import Generation
+
+    # Its generations' rows; the pictures themselves stay in the library (GAM's).
+    session.exec(sa_delete(Generation).where(Generation.project_id == project.id))
 
     session.exec(sa_delete(AssistantTurn).where(AssistantTurn.project_id == project.id))
     session.exec(sa_delete(AssistantSession).where(AssistantSession.project_id == project.id))

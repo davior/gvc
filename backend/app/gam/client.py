@@ -12,7 +12,7 @@ point of view GVC is the server, and GVC's upstream failed.
 from __future__ import annotations
 
 import logging
-from typing import IO, Any, Dict, Optional
+from typing import IO, Any, Dict, List, Optional
 
 import httpx
 
@@ -190,3 +190,43 @@ class GamClient:
             code, message = self._detail(response)
             raise GamError(code, message)
         return to_asset(response.json()["data"])
+
+    # ── generation (GAM's M8) ────────────────────────────────────────────────
+    # GAM runs the generation on fal.ai with the user's own key and keeps the outputs in
+    # their library. A job is followed by its id; GVC never talks to fal.
+
+    def _generation_error(self, response: httpx.Response) -> GamError:
+        code, message = self._detail(response)
+        if code == "fal_key_missing":
+            message = ("Generating needs a fal.ai API key in the asset library's settings: "
+                       f"{settings.gam_base_url.rstrip('/')}/settings")
+        return GamError(code, message, status_code=400 if response.status_code < 500 else 502)
+
+    def generation_models(self) -> List[Dict[str, Any]]:
+        response = self._request("GET", "/api/generate/models")
+        if response.status_code != 200:
+            raise self._generation_error(response)
+        return list(response.json().get("data") or [])
+
+    def start_generation(self, *, model_id: str, prompt: str, base_ids: List[str],
+                         params: Dict[str, Any]) -> Dict[str, Any]:
+        response = self._request("POST", "/api/generate", json={
+            "model_id": model_id, "prompt": prompt, "base_asset_ids": base_ids,
+            "params": params,
+        })
+        if response.status_code not in (200, 201, 202):
+            raise self._generation_error(response)
+        return response.json()["data"]
+
+    def generation_job(self, job_id: str) -> Optional[Dict[str, Any]]:
+        response = self._request("GET", f"/api/activity/enrichment/{job_id}")
+        if response.status_code == 404:
+            return None
+        if response.status_code != 200:
+            raise self._generation_error(response)
+        return response.json()["data"]
+
+    def cancel_generation(self, job_id: str) -> None:
+        response = self._request("DELETE", f"/api/activity/enrichment/{job_id}")
+        if response.status_code not in (200, 204, 404):
+            raise self._generation_error(response)

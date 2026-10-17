@@ -98,6 +98,20 @@ different phrasings when the first finds little. Prefer real assets; when nothin
 `add_placeholder` with a clear description of what to find or generate. Never invent a \
 gam_id or an asset key that isn't in the registry.
 
+## Generating pictures
+`generate_image` makes a still with AI (through the user's asset library) and puts it in \
+the video; it fills in by itself a few seconds later. It costs money, so:
+- Search the library first. Generate only what a library can't have: an illustration, a \
+reconstruction of something never photographed, an abstract or title background, a \
+picture to fill a gap the user asked you to fill.
+- Write the prompt for one frame of video: the subject, the composition, the light and \
+the style, matched to the video's aspect (16:9 is wide). No text in the picture; put \
+words in an overlay instead.
+- Never generate video. When a scene needs footage the library doesn't have, leave an \
+`add_placeholder` of kind generate with media_type video and a good prompt, and tell \
+the user they can generate it from the scene with the Generate button.
+- Music and sound effects can't be generated; find them in the library.
+
 ## Pacing
 Narration reads at about 15 characters a second. A 3-minute video is about 2,500 characters \
 of narration over 10-20 segments. Keep beats to one or two sentences each so pictures can \
