@@ -119,6 +119,35 @@ describe('GenerateDialog', () => {
     })
   })
 
+  it('makes a clip from the prompt alone, its picture generated first', async () => {
+    const start = vi.spyOn(generationsApi, 'start').mockResolvedValue({} as never)
+    render(<GenerateDialog assetKey="a_flood" onClose={vi.fn()} />)
+    await screen.findByRole('option', { name: /Veo/ })
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: 'Made from' }),
+      'new'
+    )
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: 'Picture model' }),
+      'm-edit'
+    )
+    await userEvent.type(
+      screen.getByRole('textbox', { name: 'Picture prompt' }),
+      'A flooded valley'
+    )
+    // Nano's $0.039 picture plus four seconds of Veo at $0.10.
+    expect(screen.getByText(/About \$0\.44/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /Generate/ }))
+    const [, body] = start.mock.calls[0]
+    expect(body).toMatchObject({
+      model_id: 'm-veo',
+      make_picture: true,
+      picture_model_id: 'm-edit',
+      picture_prompt: 'A flooded valley',
+    })
+    expect(body.base_gam_ids).toBeUndefined()
+  })
+
   it('says why it could not start, and stays open', async () => {
     vi.spyOn(generationsApi, 'start').mockRejectedValue(new Error('no key'))
     const onClose = vi.fn()
