@@ -28,6 +28,8 @@ export interface Generation {
   used_id: string | null
   /** List price × units, before it runs; what fal.ai charged is in GAM's usage. */
   estimate: number | null
+  /** The picture a clip was made from, when it was generated for it first. */
+  picture_id: string | null
   created_at: string
   updated_at: string
 }
@@ -58,6 +60,11 @@ export interface GenerationStart {
   outputs?: number
   duration?: string
   base_gam_ids?: string[]
+  /** A clip from the prompt alone: GAM makes its picture first, then animates it. */
+  make_picture?: boolean
+  /** What the picture shows, when that differs from the clip's prompt. */
+  picture_prompt?: string
+  picture_model_id?: string
   /** The editor's unsaved draft, so a placeholder added since the last save counts. */
   draft_spec?: VideoSpec
 }

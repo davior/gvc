@@ -110,6 +110,7 @@ describe('VisualStrip', () => {
       result_ids: [],
       used_id: null,
       estimate: null,
+      picture_id: null,
       created_at: '',
       updated_at: '',
       ...over,

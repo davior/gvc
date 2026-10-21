@@ -16,6 +16,9 @@ interface Props {
   onClose: () => void
 }
 
+/** "Made from" when the clip's picture is to be generated from the prompt first. */
+const NEW_PICTURE = 'new'
+
 /** The project's pictures, as GAM ids: what a clip can be made from. */
 function picturesIn(spec: VideoSpec): { id: string; name: string }[] {
   const seen = new Set<string>()
@@ -50,6 +53,7 @@ export default function GenerateDialog({ assetKey, onClose }: Props) {
   const draft = useProjectStore((s) => s.draft)
   const edit = useProjectStore((s) => s.edit)
   const models = useGenerationStore((s) => s.models)
+  const rows = useGenerationStore((s) => s.rows)
   const loadModels = useGenerationStore((s) => s.loadModels)
   const start = useGenerationStore((s) => s.start)
   const starting = useGenerationStore((s) => s.starting)
@@ -57,14 +61,28 @@ export default function GenerateDialog({ assetKey, onClose }: Props) {
 
   const ref = draft?.assets?.[assetKey] as GenerateRef | undefined
   const isVideo = ref?.type === 'video'
-  const pictures = useMemo(() => (draft ? picturesIn(draft) : []), [draft])
+  const pictures = useMemo(() => {
+    const inVideo = draft ? picturesIn(draft) : []
+    // A picture made for this clip before, so trying again doesn't pay for it twice.
+    const made = rows
+      .filter((r) => r.asset_key === assetKey && r.picture_id)
+      .map((r) => r.picture_id as string)
+      .filter((id, i, all) => all.indexOf(id) === i && !inVideo.some((p) => p.id === id))
+      .map((id, i) => ({
+        id,
+        name: `Picture made for this clip${i ? ` (${i + 1})` : ''}`,
+      }))
+    return [...made.reverse(), ...inVideo]
+  }, [draft, rows, assetKey])
   const [prompt, setPrompt] = useState(ref?.prompt ?? '')
+  const [picturePrompt, setPicturePrompt] = useState('')
   const [base, setBase] = useState(
     () =>
       (draft && ref?.base_assets?.map((k) => gamIdOf(draft, k)).find(Boolean)) ??
       pictures[0]?.id ??
-      ''
+      NEW_PICTURE
   )
+  const makePicture = isVideo && base === NEW_PICTURE
   const imageBases =
     !isVideo && draft
       ? (ref?.base_assets ?? []).flatMap((k) => gamIdOf(draft, k) ?? [])
@@ -73,6 +91,11 @@ export default function GenerateDialog({ assetKey, onClose }: Props) {
   const choices = (models ?? []).filter((m) => m.kind === kind)
   const [modelId, setModelId] = useState('')
   const model = choices.find((m) => m.id === modelId) ?? choices[0]
+  const pictureModels = (models ?? []).filter((m) => m.kind === 'text_to_image')
+  const [pictureModelId, setPictureModelId] = useState('')
+  const pictureModel = makePicture
+    ? (pictureModels.find((m) => m.id === pictureModelId) ?? pictureModels[0])
+    : undefined
   const [outputs, setOutputs] = useState(1)
   const [duration, setDuration] = useState('')
 
@@ -84,7 +107,11 @@ export default function GenerateDialog({ assetKey, onClose }: Props) {
   const maxOutputs = isVideo ? 1 : Math.min(4, model?.options.max_outputs ?? 4)
   const durations = (model?.options.durations ?? []).map(String)
   const seconds = duration || durations[0]
-  const cost = model ? estimateCost(model, Math.min(outputs, maxOutputs), seconds) : null
+  const runCost = model
+    ? estimateCost(model, Math.min(outputs, maxOutputs), seconds)
+    : null
+  const pictureCost = pictureModel ? estimateCost(pictureModel, 1) : 0
+  const cost = runCost === null || pictureCost === null ? null : runCost + pictureCost
 
   async function generate() {
     if (!draft || !ref) return
@@ -103,14 +130,26 @@ export default function GenerateDialog({ assetKey, onClose }: Props) {
       model_id: model?.id,
       outputs: Math.min(outputs, maxOutputs),
       ...(isVideo && seconds ? { duration: seconds.replace(/s$/, '') } : {}),
-      ...(isVideo && base ? { base_gam_ids: [base] } : {}),
+      ...(makePicture
+        ? {
+            make_picture: true,
+            picture_model_id: pictureModel?.id,
+            ...(picturePrompt.trim() ? { picture_prompt: picturePrompt.trim() } : {}),
+          }
+        : isVideo && base
+          ? { base_gam_ids: [base] }
+          : {}),
       draft_spec: next,
     })
     if (ok) onClose()
   }
 
   const ready =
-    canGenerate(ref) && prompt.trim() !== '' && !!model && (!isVideo || !!base)
+    canGenerate(ref) &&
+    prompt.trim() !== '' &&
+    !!model &&
+    (!isVideo || !!base) &&
+    (!makePicture || !!pictureModel)
 
   return (
     <div
@@ -179,27 +218,61 @@ export default function GenerateDialog({ assetKey, onClose }: Props) {
             {isVideo && (
               <label className="space-y-1 text-sm">
                 <span className="text-gray-700 dark:text-gray-300">Made from</span>
-                {pictures.length === 0 ? (
-                  <p className="text-amber-700 dark:text-amber-300">
-                    A clip is made from a picture. Add one to the video first: find one,
-                    or generate one.
-                  </p>
-                ) : (
-                  <select
-                    className="input w-full"
-                    aria-label="Made from"
-                    value={base}
-                    onChange={(e) => setBase(e.target.value)}
-                  >
-                    {pictures.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                )}
+                <select
+                  className="input w-full"
+                  aria-label="Made from"
+                  value={base}
+                  onChange={(e) => setBase(e.target.value)}
+                >
+                  <option value={NEW_PICTURE}>A new picture, made from the prompt</option>
+                  {pictures.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
               </label>
             )}
+
+            {makePicture &&
+              (pictureModels.length === 0 ? (
+                <p className="text-sm text-amber-700 dark:text-amber-300">
+                  The asset library has no picture models switched on, so the clip needs a
+                  picture from the video.
+                </p>
+              ) : (
+                <>
+                  <label className="space-y-1 text-sm">
+                    <span className="text-gray-700 dark:text-gray-300">
+                      The picture it starts from
+                    </span>
+                    <textarea
+                      className="input min-h-[4rem] w-full"
+                      aria-label="Picture prompt"
+                      placeholder="Leave empty to use the prompt above"
+                      value={picturePrompt}
+                      onChange={(e) => setPicturePrompt(e.target.value)}
+                    />
+                  </label>
+                  <label className="space-y-1 text-sm">
+                    <span className="text-gray-700 dark:text-gray-300">
+                      Picture model
+                    </span>
+                    <select
+                      className="input w-full"
+                      aria-label="Picture model"
+                      value={pictureModel?.id}
+                      onChange={(e) => setPictureModelId(e.target.value)}
+                    >
+                      {pictureModels.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.label} ({m.price})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </>
+              ))}
 
             <div className="flex gap-3">
               {maxOutputs > 1 && (
@@ -251,7 +324,9 @@ export default function GenerateDialog({ assetKey, onClose }: Props) {
             {model &&
               (cost !== null
                 ? `About ${dollars(cost)} on your fal.ai account`
-                : `${model.price}, on your fal.ai account`)}
+                : pictureModel
+                  ? `${pictureModel.price} + ${model.price}, on your fal.ai account`
+                  : `${model.price}, on your fal.ai account`)}
           </span>
           <button
             type="button"

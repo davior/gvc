@@ -31,6 +31,10 @@ class GenerationCreate(BaseModel):
     outputs: int = Field(default=1, ge=1, le=4)
     duration: Optional[str] = None
     base_gam_ids: List[str] = []
+    # A clip from the prompt alone: generate its picture first, then animate that.
+    make_picture: bool = False
+    picture_prompt: Optional[str] = Field(default=None, max_length=4000)
+    picture_model_id: Optional[str] = None
     # The editor's draft: a placeholder made by hand is generated before it is saved.
     draft_spec: Optional[Dict[str, Any]] = None
 
@@ -55,6 +59,8 @@ class GenerationRead(BaseModel):
     used_id: Optional[str] = None
     # A list price from GAM's catalogue: an estimate, never a bill.
     estimate: Optional[float] = None
+    # The picture a clip was made from, when it was generated for it.
+    picture_id: Optional[str] = None
 
 
 class GenerationModelRead(BaseModel):
@@ -74,7 +80,7 @@ def read(row: Generation) -> GenerationRead:
         prompt=row.prompt, model_label=row.model_label, status=row.status, stage=row.stage,
         progress=row.progress, detail=row.detail, error=row.error,
         result_ids=json.loads(row.result_ids or "[]"), used_id=row.used_id,
-        estimate=row.estimate,
+        estimate=row.estimate, picture_id=row.picture_id,
     )
 
 
@@ -122,7 +128,9 @@ def start_generation(project_id: str, body: GenerationCreate, user: CurrentUser,
         row = service.start(session, gam, user_id=user.id, project_id=project.id, turn_id=None,
                             spec=spec, key=body.asset_key, prompt=body.prompt,
                             model_id=body.model_id, outputs=body.outputs, duration=body.duration,
-                            base_gam_ids=body.base_gam_ids)
+                            base_gam_ids=body.base_gam_ids, make_picture=body.make_picture,
+                            picture_prompt=body.picture_prompt,
+                            picture_model_id=body.picture_model_id)
     except service.GenerationRefused as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                             detail={"code": exc.code, "message": exc.message})

@@ -36,6 +36,7 @@ function generation(overrides: Partial<Generation> = {}): Generation {
     result_ids: ['x1', 'x2'],
     used_id: null,
     estimate: 0.006,
+    picture_id: null,
     created_at: '2026-10-16T00:00:00',
     updated_at: '2026-10-16T00:00:00',
     ...overrides,

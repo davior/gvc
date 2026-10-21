@@ -37,5 +37,10 @@ class Generation(SQLModel, table=True):
     # The output in the placeholder now; None until one has been put there.
     used_id: Optional[str] = None
     estimate: Optional[float] = None   # list price, USD
+    # A clip made from a picture generated for it: while the picture is being made,
+    # the clip's run (JSON: model_id, model_label, prompt, params), started from the
+    # picture by `refresh` and then cleared. `picture_id` is the picture, once made.
+    then: Optional[str] = None
+    picture_id: Optional[str] = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)

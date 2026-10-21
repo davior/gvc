@@ -182,3 +182,77 @@ def test_deleting_the_project_deletes_its_generations(auth_client, session, proj
     start(auth_client, project["id"], asset_key="a_dam")
     assert auth_client.delete(f"/api/projects/{project['id']}").status_code == 204
     assert session.exec(select(Generation)).all() == []
+
+
+# ── a clip from the prompt alone: picture, then animate ──────────────────────
+
+NO_BASE = {**SPEC, "assets": {**SPEC["assets"], "a_flood": {
+    "from": "generate", "type": "video", "prompt": "Water rising"}}}
+
+
+def _list(client, project_id):
+    return client.get(f"/api/projects/{project_id}/generations").json()["data"]
+
+
+def test_a_clip_from_a_prompt_makes_its_picture_first_then_animates_it(
+        auth_client, project, siblings):
+    res = start(auth_client, project["id"], asset_key="a_flood", draft_spec=NO_BASE,
+                make_picture=True, picture_prompt="A flooded valley", model_id="m-veo",
+                duration="8")
+    assert res.status_code == 202, res.text
+    row = res.json()["data"]
+    [picture] = siblings.generations
+    assert picture["model_id"] == "m-flux" and picture["prompt"] == "A flooded valley"
+    assert picture["base_asset_ids"] == []
+    assert picture["params"] == {"image_size": "landscape_16_9", "num_outputs": 1}
+    assert row["stage"].startswith("Making the picture")
+    assert row["model_label"] == "FLUX.1 [schnell] → Veo 3.1 Fast"
+    # Both runs, priced together.
+    assert row["estimate"] == pytest.approx(0.1 * 8 + 0.003 * 1024 * 576 / 1e6, abs=1e-3)
+
+    siblings.gen_jobs["job-1"].update(status="processing", stage="Generating", progress=50)
+    listed = _list(auth_client, project["id"])[0]
+    assert listed["stage"] == "Making the picture · Generating"
+    assert listed["result_ids"] == [] and listed["status"] == "processing"
+
+    # The picture is done: its output is never offered for the clip's placeholder.
+    siblings.gen_jobs["job-1"].update(status="done", result_asset_ids=["pic-1"])
+    listed = _list(auth_client, project["id"])[0]
+    assert listed["status"] == "queued" and listed["result_ids"] == []
+    assert listed["picture_id"] == "pic-1"
+    clip = siblings.generations[1]
+    assert clip["model_id"] == "m-veo" and clip["prompt"] == "Water rising"
+    assert clip["base_asset_ids"] == ["pic-1"]
+    assert clip["params"]["duration"] == "8s"
+
+    siblings.gen_jobs["job-2"].update(status="done", result_asset_ids=["clip-1"])
+    listed = _list(auth_client, project["id"])[0]
+    assert listed["status"] == "done" and listed["result_ids"] == ["clip-1"]
+    assert len(siblings.generations) == 2
+
+
+def test_a_failed_picture_says_so_and_starts_no_clip(auth_client, project, siblings):
+    start(auth_client, project["id"], asset_key="a_flood", draft_spec=NO_BASE, make_picture=True)
+    siblings.gen_jobs["job-1"].update(status="error", error_message="Content refused")
+    listed = _list(auth_client, project["id"])[0]
+    assert listed["status"] == "error"
+    assert listed["error"] == "Making the picture failed: Content refused"
+    assert len(siblings.generations) == 1
+
+
+def test_a_clip_that_cannot_start_keeps_its_picture(auth_client, project, siblings):
+    start(auth_client, project["id"], asset_key="a_flood", draft_spec=NO_BASE, make_picture=True)
+    siblings.gen_jobs["job-1"].update(status="done", result_asset_ids=["pic-1"])
+    siblings.fal_key = False
+    listed = _list(auth_client, project["id"])[0]
+    assert listed["status"] == "error" and listed["picture_id"] == "pic-1"
+    assert listed["error"].startswith("The picture was made, but the clip couldn't be started")
+
+
+def test_stopping_while_the_picture_is_made_starts_no_clip(auth_client, project, siblings):
+    row = start(auth_client, project["id"], asset_key="a_flood", draft_spec=NO_BASE,
+                make_picture=True).json()["data"]
+    auth_client.delete(f"/api/generations/{row['id']}")
+    siblings.gen_jobs["job-1"].update(status="done", result_asset_ids=["pic-1"])
+    assert _list(auth_client, project["id"])[0]["status"] == "cancelled"
+    assert len(siblings.generations) == 1

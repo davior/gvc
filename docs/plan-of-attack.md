@@ -146,6 +146,13 @@ worker for it:
   price; what fal.ai charged is in GAM's usage.
 - Images and clips only: GAM has no audio models, so music and sound placeholders stay
   "find it in your library".
+- **A clip from the prompt alone.** GAM's video models all start from a picture, and it
+  has no text-to-video. So "Made from: a new picture" generates the picture first and
+  animates it: one `generation` row follows both runs. It holds the clip's run in `then`
+  until the picture is done, and `refresh` then starts the clip from it. The picture is
+  kept on the row (`picture_id`) and offered again on "Try again", so a failed clip
+  doesn't pay for its picture twice. The picture's output is never put in the
+  placeholder; only the clip's is.
 - **The assistant generates pictures, never video** (the user's call: video costs far
   more). `generate_image` adds the placeholder and starts it at once, at most
   `ASSISTANT_MAX_GENERATIONS` (6) per turn; for footage it leaves a video placeholder for
