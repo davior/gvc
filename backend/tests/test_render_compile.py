@@ -139,6 +139,40 @@ def test_a_blend_never_covers_more_than_half_a_short_unit():
     assert timeline.total == 20.5
 
 
+def _clip_then(style):
+    spec = spec_of({
+        "assets": {"v": {"from": "gam", "id": "g1", "type": "video"}},
+        "segments": [
+            {"id": "a", "kind": "clip", "visual": {"asset": "v", "audio": "play",
+                                                    "trim": {"in": 10, "out": 16}}},
+            {"id": "b", "kind": "scene", "transition_in": {"style": style, "duration": 0.6}},
+            {"id": "c", "kind": "scene", "transition_in": {"style": "dissolve",
+                                                          "duration": 0.6}},
+        ]})
+    return plan_units(spec, {"v": VIDEO}, [])
+
+
+def test_a_blend_out_of_a_clip_lengthens_it_rather_than_cutting_its_last_words():
+    units = _clip_then("dissolve")
+    durations = [6.0, 10.0, 10.0]
+    timeline = layout(units, durations, [])
+    assert units[0].tail == pytest.approx(0.6)
+    assert timeline.durations[0] == pytest.approx(6.6)
+    # The blend starts once the clip has reached its out point.
+    assert timeline.starts[1] == pytest.approx(6.0)
+    # A muted scene into a blend is overlapped as before.
+    assert units[1].tail == 0.0 and timeline.durations[1] == 10.0
+    assert timeline.starts[2] == pytest.approx(15.4)
+    assert durations == [6.0, 10.0, 10.0]
+
+
+def test_a_cut_out_of_a_clip_adds_nothing():
+    units = _clip_then("none")
+    timeline = layout(units, [6.0, 10.0, 10.0], [])
+    assert units[0].tail == 0.0
+    assert timeline.durations[0] == 6.0 and timeline.starts[1] == 6.0
+
+
 def _placed():
     spec, media = salt_road()
     units = plan_units(spec, media, [])
