@@ -19,6 +19,7 @@ import {
 import { Link, useMatch, useNavigate } from 'react-router-dom'
 import { ACTIVE_TURN, type Turn, type TurnStep } from '@/api/assistant'
 import { formatCost } from '@/api/usage'
+import { AttachControls, AttachmentList } from '@/components/AssistantAttachments'
 import { MAX_WIDTH, MIN_WIDTH, useAssistantStore } from '@/stores/assistant'
 import { useGenerationStore } from '@/stores/generations'
 import { useProjectStore } from '@/stores/projects'
@@ -272,6 +273,7 @@ export default function AssistantPanel() {
   const send = useAssistantStore((s) => s.send)
   const stop = useAssistantStore((s) => s.stop)
   const newChat = useAssistantStore((s) => s.newChat)
+  const attach = useAssistantStore((s) => s.attach)
   const focus = useAssistantStore((s) => s.focus)
   const project = useProjectStore((s) => s.project)
   const draft = useProjectStore((s) => s.draft)
@@ -326,6 +328,14 @@ export default function AssistantPanel() {
     window.addEventListener('mouseup', up)
   }
 
+  async function drop(e: React.DragEvent) {
+    if (!e.dataTransfer.files.length) return
+    e.preventDefault()
+    for (const file of Array.from(e.dataTransfer.files)) {
+      if (!(await attach({ file }))) break
+    }
+  }
+
   if (!open) {
     return (
       <button
@@ -347,6 +357,9 @@ export default function AssistantPanel() {
       className="relative flex shrink-0 flex-col border-l border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800"
       style={{ width }}
       aria-label="Assistant"
+      // A file dropped anywhere on the panel is attached, as the paperclip would.
+      onDragOver={(e) => e.dataTransfer.types.includes('Files') && e.preventDefault()}
+      onDrop={(e) => void drop(e)}
     >
       <div
         role="separator"
@@ -416,7 +429,10 @@ export default function AssistantPanel() {
                   project.
                 </p>
               )}
-              <p>It keeps working if you close this page.</p>
+              <p>
+                Attach a script, a note or a web page with the paperclip and it works from
+                that. It keeps working if you close this page.
+              </p>
             </div>
           )}
           {chat?.messages.map((m, i) => {
@@ -488,12 +504,14 @@ export default function AssistantPanel() {
       )}
 
       <footer className="space-y-1 border-t border-gray-200 p-2 dark:border-gray-700">
+        <AttachmentList />
         {focusLabel && (
           <p className="truncate text-[11px] text-gray-500">
             &ldquo;This scene&rdquo; means {focusLabel}
           </p>
         )}
         <div className="flex items-end gap-2">
+          <AttachControls />
           <textarea
             className="input max-h-40 min-h-[2.5rem] flex-1 resize-y text-sm"
             aria-label="Ask the assistant"

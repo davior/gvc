@@ -9,19 +9,24 @@ import json
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from sqlmodel import Session, col, select
 
+from app import web_fetch
+from app.assistant import attachments as attach
 from app.assistant import worker
 from app.auth import CallerToken, CurrentUser
 from app.clock import utcnow
+from app.config import settings
 from app.database import get_session
 from app.jobs.runner import ACTIVE_STATUSES
 from app.models.assistant import AssistantSession, AssistantTurn
+from app.notes.client import NotesClient, NotesError
 from app.providers import active_provider
 from app.schemas import DataResponse, ListResponse
 from app.schemas_assistant import (
-    Message, NewProjectRead, SessionRead, SessionSummary, Step, TurnCreate, TurnRead,
+    AttachmentRead, Message, NewProjectRead, NoteAttach, NoteChoice, SessionCreate,
+    SessionRead, SessionSummary, Step, TurnCreate, TurnRead, UrlAttach,
 )
 from app.services import projects as project_service
 from app.services.users import ensure_user
@@ -48,6 +53,14 @@ def _turn_read(turn: AssistantTurn) -> TurnRead:
 def _summary(row: AssistantSession) -> SessionSummary:
     return SessionSummary(id=row.id, project_id=row.project_id, title=row.title or "New chat",
                           created_at=row.created_at, updated_at=row.updated_at)
+
+
+def _attachment_read(item: dict) -> AttachmentRead:
+    return AttachmentRead(id=item["id"], kind=item["kind"], title=item["title"],
+                          source=item["source"], chars=item.get("chars", 0),
+                          truncated=bool(item.get("truncated")),
+                          preview=(item.get("text") or "")[:280],
+                          added_at=item.get("added_at"))
 
 
 def _not_found(what: str) -> HTTPException:
@@ -87,18 +100,38 @@ def list_sessions(user: CurrentUser, project_id: Optional[str] = None,
     return ListResponse(data=[_summary(r) for r in rows], total=len(rows), limit=limit, offset=0)
 
 
+def _session_read(session: Session, row: AssistantSession) -> SessionRead:
+    turns = session.exec(select(AssistantTurn).where(AssistantTurn.session_id == row.id)
+                         .order_by(AssistantTurn.created_at)).all()
+    return SessionRead(
+        **_summary(row).model_dump(),
+        messages=[Message(**m) for m in json.loads(row.messages or "[]")],
+        attachments=[_attachment_read(a) for a in json.loads(row.attachments or "[]")],
+        turns=[_turn_read(t) for t in turns],
+        cost=round(sum(t.cost or 0.0 for t in turns), 6),
+    )
+
+
+@router.post("/sessions", response_model=DataResponse[SessionRead],
+             status_code=status.HTTP_201_CREATED)
+def create_chat(body: SessionCreate, user: CurrentUser,
+                session: Session = Depends(get_session)) -> DataResponse[SessionRead]:
+    """An empty conversation, for material to be attached to before the first request.
+    Asking without one (`POST /turns` with no session) still makes one as it goes."""
+    if body.project_id:
+        project_service.get_owned(session, user, body.project_id)
+    ensure_user(session, user)
+    row = AssistantSession(id=str(uuid.uuid4()), user_id=user.id, project_id=body.project_id)
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return DataResponse(data=_session_read(session, row))
+
+
 @router.get("/sessions/{session_id}", response_model=DataResponse[SessionRead])
 def get_chat(session_id: str, user: CurrentUser,
              session: Session = Depends(get_session)) -> DataResponse[SessionRead]:
-    row = _owned_session(session, user, session_id)
-    turns = session.exec(select(AssistantTurn).where(AssistantTurn.session_id == row.id)
-                         .order_by(AssistantTurn.created_at)).all()
-    return DataResponse(data=SessionRead(
-        **_summary(row).model_dump(),
-        messages=[Message(**m) for m in json.loads(row.messages or "[]")],
-        turns=[_turn_read(t) for t in turns],
-        cost=round(sum(t.cost or 0.0 for t in turns), 6),
-    ))
+    return DataResponse(data=_session_read(session, _owned_session(session, user, session_id)))
 
 
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -115,6 +148,117 @@ def delete_chat(session_id: str, user: CurrentUser,
     session.delete(row)
     session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ── attachments ───────────────────────────────────────────────────────────────
+#
+# Material to work from, turned into text as it is attached and kept on the
+# conversation; see assistant/attachments.py for why it is a copy. Attaching while a
+# turn runs is allowed: that turn has already read its prompt, and the next one sees it.
+
+def _refused(code: str, message: str, status_code: int) -> HTTPException:
+    return HTTPException(status_code=status_code, detail={"code": code, "message": message})
+
+
+def _attach(session: Session, row: AssistantSession, item: dict) -> AttachmentRead:
+    existing = json.loads(row.attachments or "[]")
+    try:
+        attach.admit(existing, item)
+    except attach.Unreadable as exc:
+        raise _refused(exc.code, exc.message, exc.status_code) from exc
+    existing.append(item)
+    row.attachments = json.dumps(existing, ensure_ascii=False)
+    row.updated_at = utcnow()
+    session.add(row)
+    session.commit()
+    return _attachment_read(item)
+
+
+@router.post("/sessions/{session_id}/attachments/file", response_model=DataResponse[AttachmentRead],
+             status_code=status.HTTP_201_CREATED)
+def attach_file(session_id: str, user: CurrentUser, file: UploadFile = File(...),
+                session: Session = Depends(get_session)) -> DataResponse[AttachmentRead]:
+    row = _owned_session(session, user, session_id)
+    limit = settings.assistant_attachment_max_mb * 1024 * 1024
+    # One byte past the cap is enough to know it's over, without reading the rest.
+    data = file.file.read(limit + 1)
+    if len(data) > limit:
+        raise _refused("too_large", f"Attach a file under {settings.assistant_attachment_max_mb} MB",
+                       status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
+    name = (file.filename or "file").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    try:
+        item = attach.make("file", name, name, attach.file_text(name, data, file.content_type or ""))
+    except attach.Unreadable as exc:
+        raise _refused(exc.code, exc.message, exc.status_code) from exc
+    return DataResponse(data=_attach(session, row, item))
+
+
+@router.post("/sessions/{session_id}/attachments/note", response_model=DataResponse[AttachmentRead],
+             status_code=status.HTTP_201_CREATED)
+def attach_note(session_id: str, body: NoteAttach, user: CurrentUser, token: CallerToken,
+                session: Session = Depends(get_session)) -> DataResponse[AttachmentRead]:
+    row = _owned_session(session, user, session_id)
+    try:
+        with NotesClient(token) as notes:
+            note = notes.get(body.note_id)
+        item = attach.from_note(note.id, note.title, note.content)
+    except NotesError as exc:
+        raise _refused(exc.code, exc.message, exc.status_code) from exc
+    except attach.Unreadable as exc:
+        raise _refused(exc.code, "That note is empty" if exc.code == "no_text" else exc.message,
+                       exc.status_code) from exc
+    return DataResponse(data=_attach(session, row, item))
+
+
+@router.post("/sessions/{session_id}/attachments/url", response_model=DataResponse[AttachmentRead],
+             status_code=status.HTTP_201_CREATED)
+def attach_url(session_id: str, body: UrlAttach, user: CurrentUser,
+               session: Session = Depends(get_session)) -> DataResponse[AttachmentRead]:
+    row = _owned_session(session, user, session_id)
+    url = body.url.strip()
+    if "://" not in url:
+        url = "https://" + url
+    try:
+        page = web_fetch.fetch(url, max_bytes=settings.assistant_attachment_max_mb * 1024 * 1024,
+                               accept=attach.URL_TYPES)
+        title, text = attach.url_text(page.content_type, page.charset, page.body)
+        item = attach.make("url", title or page.url, page.url, text)
+    except web_fetch.FetchError as exc:
+        raise _refused(exc.code, exc.message, exc.status_code) from exc
+    except attach.Unreadable as exc:
+        raise _refused(exc.code, "That page has no text to read" if exc.code == "no_text"
+                       else exc.message, exc.status_code) from exc
+    return DataResponse(data=_attach(session, row, item))
+
+
+@router.delete("/sessions/{session_id}/attachments/{attachment_id}",
+               status_code=status.HTTP_204_NO_CONTENT)
+def detach(session_id: str, attachment_id: str, user: CurrentUser,
+           session: Session = Depends(get_session)) -> Response:
+    row = _owned_session(session, user, session_id)
+    existing = json.loads(row.attachments or "[]")
+    kept = [a for a in existing if a.get("id") != attachment_id]
+    if len(kept) == len(existing):
+        raise _not_found("Attachment")
+    row.attachments = json.dumps(kept, ensure_ascii=False)
+    row.updated_at = utcnow()
+    session.add(row)
+    session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/notes", response_model=ListResponse[NoteChoice])
+def find_notes(user: CurrentUser, token: CallerToken, q: str = "",
+               limit: int = Query(default=20, ge=1, le=50)) -> ListResponse[NoteChoice]:
+    """The user's notes in Gecko Notes, to pick one to attach."""
+    try:
+        with NotesClient(token) as notes:
+            found = notes.search(q, limit=limit)
+    except NotesError as exc:
+        raise _refused(exc.code, exc.message, exc.status_code) from exc
+    return ListResponse(data=[NoteChoice(id=n.id, title=n.title, preview=n.preview,
+                                         modified_at=n.modified_at) for n in found],
+                        total=len(found), limit=limit, offset=0)
 
 
 # ── turns ─────────────────────────────────────────────────────────────────────

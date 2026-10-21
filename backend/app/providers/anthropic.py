@@ -58,7 +58,8 @@ class AnthropicConversation:
         self._provider = provider
         self._api_key = api_key
         # Each system block is a cache breakpoint: the reference first (never changes),
-        # then the project context (fixed for the whole turn). Anthropic allows four.
+        # the attached material (fixed for the conversation), then the project context
+        # (fixed for the whole turn). Anthropic allows four.
         self._system = [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}
                         for text in system[:3] if text]
         self._tools = [{"name": t.name, "description": t.description, "input_schema": t.parameters}

@@ -98,6 +98,14 @@ class Settings(BaseSettings):
     # Pictures one request may generate on its own (each is a paid call to fal.ai through
     # GAM). Past it the assistant leaves placeholders for the user to generate.
     assistant_max_generations: int = 6
+    # Material attached to a conversation (files, notes, web pages), as text. Each turn
+    # reads all of it on every round, so the limits are about cost as much as context
+    # length: 150k characters is roughly 40k tokens, cached after the first round.
+    assistant_attachment_max_chars: int = 60_000
+    assistant_attachments_max_chars: int = 150_000
+    assistant_max_attachments: int = 12
+    # The largest file, or web page, read for an attachment.
+    assistant_attachment_max_mb: int = 20
     job_heartbeat_seconds: int = 30
     job_stale_minutes: int = 40
 

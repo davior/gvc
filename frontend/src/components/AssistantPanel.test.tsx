@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { assistantApi, type Chat, type Turn } from '@/api/assistant'
+import { assistantApi, type Attachment, type Chat, type Turn } from '@/api/assistant'
 import type { Project, VideoSpec } from '@/api/projects'
 import AssistantPanel from '@/components/AssistantPanel'
 import { useAssistantStore } from '@/stores/assistant'
@@ -57,6 +57,7 @@ function chat(t: Turn): Chat {
     created_at: '',
     updated_at: '',
     cost: t.cost ?? 0,
+    attachments: [],
     turns: [t],
     messages: [
       { role: 'user', text: t.prompt, turn_id: t.id, at: null },
@@ -174,6 +175,87 @@ describe('AssistantPanel', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Close the assistant' }))
     expect(screen.getByRole('button', { name: 'Open the assistant' })).toBeInTheDocument()
     expect(localStorage.getItem('gvc-assistant-open')).toBe('0')
+  })
+
+  it('attaches a web page to a new conversation, lists it and removes it', async () => {
+    vi.spyOn(assistantApi, 'sessions').mockResolvedValue([])
+    const empty: Chat = { ...chat(turn()), turns: [], messages: [], title: '' }
+    const page: Attachment = {
+      id: 'a1',
+      kind: 'url',
+      title: 'The dry river',
+      source: 'https://news.example/river',
+      chars: 12000,
+      truncated: false,
+      preview: 'It last reached the sea in 1998.',
+      added_at: null,
+    }
+    const created = vi.spyOn(assistantApi, 'createSession').mockResolvedValue(empty)
+    const attached = vi.spyOn(assistantApi, 'attachUrl').mockResolvedValue(page)
+    vi.spyOn(assistantApi, 'session')
+      .mockResolvedValueOnce({ ...empty, attachments: [page] })
+      .mockResolvedValue(empty)
+    const detached = vi.spyOn(assistantApi, 'detach').mockResolvedValue()
+    at('/p/p1')
+    await waitFor(() => expect(assistantApi.sessions).toHaveBeenCalledWith('p1'))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Attach' }))
+    await userEvent.click(screen.getByRole('menuitem', { name: /A web page/ }))
+    await userEvent.type(
+      screen.getByLabelText('Web page address'),
+      'news.example/river{Enter}'
+    )
+    expect(created).toHaveBeenCalledWith('p1')
+    expect(attached).toHaveBeenCalledWith('c1', 'news.example/river')
+    expect(await screen.findByText('The dry river')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Remove The dry river' }))
+    expect(detached).toHaveBeenCalledWith('c1', 'a1')
+    await waitFor(() =>
+      expect(screen.queryByText('The dry river')).not.toBeInTheDocument()
+    )
+  })
+
+  it('finds a note in Gecko Notes and attaches it', async () => {
+    const open = chat(turn({ outcome: 'applied', proposed_spec: null }))
+    vi.spyOn(assistantApi, 'sessions').mockResolvedValue([open])
+    vi.spyOn(assistantApi, 'session').mockResolvedValue(open)
+    const find = vi
+      .spyOn(assistantApi, 'findNotes')
+      .mockResolvedValue([
+        {
+          id: 'n1',
+          title: 'Colorado research',
+          preview: 'The compact of 1922',
+          modified_at: null,
+        },
+      ])
+    const attached = vi.spyOn(assistantApi, 'attachNote').mockResolvedValue({
+      id: 'a2',
+      kind: 'note',
+      title: 'Colorado research',
+      source: 'n1',
+      chars: 300,
+      truncated: false,
+      preview: '',
+      added_at: null,
+    })
+    at('/p/p1')
+    await screen.findByText('Dissolve into the valley now.')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Attach' }))
+    await userEvent.click(
+      screen.getByRole('menuitem', { name: /A note from Gecko Notes/ })
+    )
+    await userEvent.type(screen.getByLabelText('Search your notes'), 'colorado')
+    // Typing searches once it pauses, not per keystroke.
+    await waitFor(() => expect(find).toHaveBeenLastCalledWith('colorado'))
+    expect(find).not.toHaveBeenCalledWith('c')
+    await userEvent.click(
+      await screen.findByRole('button', { name: /Colorado research/ })
+    )
+    // An open conversation takes it; no new one is made.
+    expect(attached).toHaveBeenCalledWith('c1', 'n1')
   })
 
   it('points at Settings when no provider is set up', async () => {

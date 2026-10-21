@@ -19,6 +19,7 @@ from typing import Dict, List, Optional, Tuple
 from sqlmodel import Session
 
 from app.assistant import loop
+from app.assistant.attachments import material
 from app.assistant.prompt import REFERENCE, context
 from app.assistant.tools import Working
 from app.clock import utcnow
@@ -82,6 +83,7 @@ def _run(turn_id: str) -> None:
         prompt, focus = turn.prompt, turn.focus
         base = json.loads(turn.base_spec or "{}")
         history = history_for(chat, turn_id) if chat else []
+        attached = material(json.loads(chat.attachments or "[]")) if chat else ""
 
     token = _tokens.get(turn_id)
     gam = GamClient(token)
@@ -127,7 +129,8 @@ def _run(turn_id: str) -> None:
                 return row.model_label, row.estimate
 
         working.generate = generate
-        system = [REFERENCE, context(base, focus=focus, from_scratch=project_id is None)]
+        system = [REFERENCE, attached,
+                  context(base, focus=focus, from_scratch=project_id is None)]
         outcome = loop.run(provider, working, system=system, history=history, prompt=prompt,
                            on_step=on_step, on_reply=on_reply,
                            cancelled=lambda: queue.is_cancelled(turn_id),
