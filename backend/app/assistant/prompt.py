@@ -1,8 +1,10 @@
-"""What the assistant is told, in two blocks.
+"""What the assistant is told, in three blocks.
 
 1. `REFERENCE`: who it is and how a VideoSpec works. Fixed text, so a provider that caches
    prompts reads it at the cached rate on every turn of every session.
-2. `context(...)`: this project as it stands. Fixed for one turn, so the rounds of a turn
+2. The material attached to the conversation (`attachments.material`), when there is
+   any. Fixed until something is attached or removed, so it caches across turns.
+3. `context(...)`: this project as it stands. Fixed for one turn, so the rounds of a turn
    share its cache too.
 
 The reference is written for a capable model: it says what the format means and what

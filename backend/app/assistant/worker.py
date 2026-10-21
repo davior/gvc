@@ -19,6 +19,7 @@ from typing import Dict, List, Optional, Tuple
 from sqlmodel import Session
 
 from app.assistant import loop
+from app.assistant.attachments import images_of, material
 from app.assistant.prompt import REFERENCE, context
 from app.assistant.tools import Working
 from app.clock import utcnow
@@ -27,7 +28,7 @@ from app.gam.client import GamClient
 from app.generation import service as generation_service
 from app.jobs.runner import JobQueue, readable_error, set_fields
 from app.models.assistant import AssistantSession, AssistantTurn
-from app.providers import build_provider
+from app.providers import active_provider, build_provider
 from app.providers.base import ProviderError, Reply
 from app.spec.model import dump_spec
 from app.spec.validation import parse_spec
@@ -82,6 +83,8 @@ def _run(turn_id: str) -> None:
         prompt, focus = turn.prompt, turn.focus
         base = json.loads(turn.base_spec or "{}")
         history = history_for(chat, turn_id) if chat else []
+        attachments = json.loads(chat.attachments or "[]") if chat else []
+        chat_id = chat.id if chat else ""
 
     token = _tokens.get(turn_id)
     gam = GamClient(token)
@@ -112,8 +115,12 @@ def _run(turn_id: str) -> None:
     try:
         with queue.session() as session:
             provider = build_provider(session, user_id)
+            row = active_provider(session, user_id)
+            sees_images = bool(row and row.supports_images)
         if provider is None:
             raise ProviderError("No AI provider is set up. Add one in Settings first.")
+        attached = material(attachments, sees_images=sees_images)
+        images = images_of(chat_id, attachments) if sees_images else []
         working = Working(base, gam=gam, max_generations=settings.assistant_max_generations)
 
         def generate(data, key, image_prompt, base_ids, outputs):
@@ -127,8 +134,10 @@ def _run(turn_id: str) -> None:
                 return row.model_label, row.estimate
 
         working.generate = generate
-        system = [REFERENCE, context(base, focus=focus, from_scratch=project_id is None)]
+        system = [REFERENCE, attached,
+                  context(base, focus=focus, from_scratch=project_id is None)]
         outcome = loop.run(provider, working, system=system, history=history, prompt=prompt,
+                           images=images,
                            on_step=on_step, on_reply=on_reply,
                            cancelled=lambda: queue.is_cancelled(turn_id),
                            max_rounds=settings.assistant_max_rounds)

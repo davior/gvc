@@ -10,3 +10,5 @@ python-dotenv>=1.0.0
 # Drawing cards, slates, panels and overlays for renders. The version GAM pins, which
 # ships a wheel for Python 3.13.
 Pillow==10.4.0
+# Reading PDFs attached to the assistant. Pure Python, so no wheel to match.
+pypdf==5.1.0

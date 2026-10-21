@@ -50,6 +50,8 @@ interface AssistantState {
   sessions: ChatSummary[]
   chat: Chat | null
   sending: boolean
+  /** A file, note or page is being read in. */
+  attaching: boolean
   error: string | null
   /** Turns running, or waiting for Apply, anywhere: the header's marker. */
   attention: Turn[]
@@ -63,6 +65,8 @@ interface AssistantState {
   openChat: (id: string) => Promise<void>
   newChat: () => void
   send: (request: Omit<TurnRequest, 'session_id' | 'project_id'>) => Promise<boolean>
+  attach: (what: AttachRequest) => Promise<boolean>
+  detach: (attachmentId: string) => Promise<void>
   stop: (turnId: string) => Promise<void>
   markApplied: (turnId: string) => Promise<void>
   discard: (turnId: string) => Promise<void>
@@ -71,6 +75,8 @@ interface AssistantState {
   removeChat: (id: string) => Promise<void>
   reset: () => void
 }
+
+export type AttachRequest = { file: File } | { noteId: string } | { url: string }
 
 let token = 0
 let timer: ReturnType<typeof setTimeout> | null = null
@@ -122,6 +128,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => {
     sessions: [],
     chat: null,
     sending: false,
+    attaching: false,
     error: null,
     attention: [],
     focus: null,
@@ -144,7 +151,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => {
     async enter(scope) {
       const mine = ++token
       stopPolling()
-      set({ scope, sessions: [], chat: null, error: null, focus: null })
+      set({ scope, sessions: [], chat: null, error: null, focus: null, attaching: false })
       try {
         const sessions = await assistantApi.sessions(scope)
         if (mine !== token) return
@@ -172,7 +179,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => {
     newChat() {
       token += 1
       stopPolling()
-      set({ chat: null, error: null })
+      set({ chat: null, error: null, attaching: false })
     },
 
     async send(request) {
@@ -247,6 +254,44 @@ export const useAssistantStore = create<AssistantState>((set, get) => {
       }
     },
 
+    async attach(what) {
+      const mine = token
+      set({ attaching: true, error: null })
+      try {
+        let chat = get().chat
+        // Material can come before the first request, so a new conversation is made
+        // to hold it; the first request then continues it.
+        if (!chat) {
+          chat = await assistantApi.createSession(get().scope)
+          if (mine !== token) return false
+          set({ chat, sessions: [chat, ...get().sessions] })
+        }
+        if ('file' in what) await assistantApi.attachFile(chat.id, what.file)
+        else if ('noteId' in what) await assistantApi.attachNote(chat.id, what.noteId)
+        else await assistantApi.attachUrl(chat.id, what.url)
+        if (mine !== token) return false
+        await reload(mine, chat.id)
+        return mine === token
+      } catch (error) {
+        if (mine === token) set({ error: apiErrorMessage(error) })
+        return false
+      } finally {
+        if (mine === token) set({ attaching: false })
+      }
+    },
+
+    async detach(attachmentId) {
+      const mine = token
+      const chat = get().chat
+      if (!chat) return
+      try {
+        await assistantApi.detach(chat.id, attachmentId)
+        if (mine === token) await reload(mine, chat.id)
+      } catch (error) {
+        if (mine === token) set({ error: apiErrorMessage(error) })
+      }
+    },
+
     async refreshAttention() {
       try {
         set({ attention: await assistantApi.attention() })
@@ -279,6 +324,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => {
         sessions: [],
         chat: null,
         sending: false,
+        attaching: false,
         error: null,
         attention: [],
         focus: null,

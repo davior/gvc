@@ -26,6 +26,10 @@ class AssistantSession(SQLModel, table=True):
     title: str = ""
     # JSON: [{"role": "user"|"assistant", "text", "turn_id", "at"}]
     messages: str = "[]"
+    # JSON: [{"id", "kind": "file"|"note"|"url", "title", "source", "text", "chars",
+    # "truncated", "added_at"}]: material attached to work from, as text taken when it
+    # was attached (assistant/attachments.py).
+    attachments: str = "[]"
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

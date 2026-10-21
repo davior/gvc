@@ -12,7 +12,7 @@ import pytest
 from app.models.provider import AIProvider
 from app.providers import _upstream
 from app.providers.anthropic import AnthropicProvider
-from app.providers.base import ProviderError, ToolResult, ToolSpec
+from app.providers.base import Image, ProviderError, ToolResult, ToolSpec
 from app.providers.openai import OpenAIProvider
 
 SEARCH = ToolSpec(name="search_assets", description="Search GAM",
@@ -195,3 +195,39 @@ def test_a_provider_error_names_the_provider(monkeypatch):
     with pytest.raises(ProviderError, match="Test"):
         OpenAIProvider(row(provider_type="openai"), "sk").conversation(
             system=[], tools=[], history=[], prompt="x").ask()
+
+
+# ── pictures ─────────────────────────────────────────────────────────────────
+
+PICTURE = Image(media_type="image/png", data=b"\x89PNG", label="Image 1: board.png")
+
+
+def test_anthropic_opens_with_the_pictures_and_folds_the_first_message_into_them(wire):
+    sent, queue = wire
+    queue.append({"content": [{"type": "text", "text": "A storyboard."}], "stop_reason": "end_turn",
+                  "usage": {"input_tokens": 1, "output_tokens": 1}})
+    conversation = AnthropicProvider(row(), "sk").conversation(
+        system=["ref"], tools=[], history=[("user", "earlier"), ("assistant", "ok")],
+        prompt="what is this?", images=[PICTURE])
+    conversation.ask()
+    first, second, third = sent[0]["body"]["messages"]
+    # Still alternating: the first history message joins the pictures' own message.
+    assert first["role"] == "user" and second["role"] == "assistant" and third["role"] == "user"
+    assert first["content"][0] == {"type": "text", "text": "Image 1: board.png"}
+    assert first["content"][1] == {"type": "image", "source": {
+        "type": "base64", "media_type": "image/png", "data": "iVBORw=="}}
+    assert first["content"][2] == {"type": "text", "text": "earlier"}
+
+
+def test_openai_sends_pictures_as_data_url_parts(wire):
+    sent, queue = wire
+    queue.append({"choices": [{"message": {"role": "assistant", "content": "A board."},
+                               "finish_reason": "stop"}],
+                  "usage": {"prompt_tokens": 1, "completion_tokens": 1}})
+    OpenAIProvider(row(provider_type="openai", model="gpt-5"), "sk").conversation(
+        system=["ref"], tools=[], history=[], prompt="what is this?", images=[PICTURE]).ask()
+    system, pictures, prompt = sent[0]["body"]["messages"]
+    assert pictures["role"] == "user"
+    assert pictures["content"][1] == {"type": "image_url",
+                                      "image_url": {"url": "data:image/png;base64,iVBORw=="}}
+    assert prompt == {"role": "user", "content": "what is this?"}

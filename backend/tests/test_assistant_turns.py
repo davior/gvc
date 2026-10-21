@@ -99,7 +99,7 @@ def test_a_video_from_a_prompt_searches_drafts_repairs_and_becomes_a_project(
     replace_result = provider.results()[1]
     assert "transition_in" in replace_result.content and "to fix" in replace_result.content
     # Told it is a new video, given the reference and the tools.
-    assert "new video" in provider.started["system"][1]
+    assert "new video" in provider.started["system"][-1]
     assert "set_visual" in provider.started["tools"]
 
     # Spend: one row per call, the turn's total on the turn.
@@ -153,7 +153,7 @@ def test_an_edit_is_proposed_on_the_draft_and_waits_to_be_applied(
     assert valley["transition_in"] == {"style": "dissolve"}
     assert valley["label"] == "Valley (unsaved)"
     assert done["base_version"] == project["version"]
-    assert "Focused segment" in provider.started["system"][1]
+    assert "Focused segment" in provider.started["system"][-1]
     # Nothing reached the project.
     saved = auth_client.get(f"/api/projects/{project['id']}").json()["data"]
     assert saved["version"] == project["version"]

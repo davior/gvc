@@ -52,6 +52,10 @@ class FakeSiblings:
     gen_jobs: Dict[str, dict] = field(default_factory=dict)
     generations: List[dict] = field(default_factory=list)
     fal_key: bool = True
+    # Notes' notes by id ({"id", "title", "content"}), for attaching one to the assistant.
+    notes: Dict[str, dict] = field(default_factory=dict)
+    # Anywhere else on the web, by full URL: (status, headers, body).
+    pages: Dict[str, tuple] = field(default_factory=dict)
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -67,13 +71,34 @@ class FakeSiblings:
                     else self.speech_provider
                 headers["x-speech-voice"] = body.get("voice") or "Rex"
             return httpx.Response(200, content=self.speech or b"", headers=headers)
+        if url.startswith(NOTES) and request.url.path.startswith("/api/notes"):
+            return self._notes(request)
         if url.startswith(NOTES):
             path = request.url.path
             if path in self.notes_files:
                 return httpx.Response(200, content=self.notes_files[path],
                                       headers={"content-type": "image/png"})
             return httpx.Response(404)
+        if url in self.pages:
+            status, headers, body = self.pages[url]
+            return httpx.Response(status, headers=headers, content=body)
         raise AssertionError(f"unexpected outbound request to {url}")
+
+    def _notes(self, request: httpx.Request) -> httpx.Response:
+        if not request.headers.get("authorization"):
+            return httpx.Response(401, json={"error": {"code": "unauthorized", "message": "no"}})
+        path = request.url.path
+        if path == "/api/notes":
+            q = (request.url.params.get("search") or "").lower()
+            found = [n for n in self.notes.values()
+                     if not q or q in n["title"].lower() or q in n["content"].lower()]
+            items = [{"id": n["id"], "title": n["title"], "content_preview": n["content"][:50],
+                      "modified_at": "2026-10-20T10:00:00Z"} for n in found]
+            return httpx.Response(200, json={"data": items, "total": len(items)})
+        note = self.notes.get(path.rsplit("/", 1)[-1])
+        if note is None:
+            return httpx.Response(404, json={"detail": {"code": "not_found", "message": "gone"}})
+        return httpx.Response(200, json={"data": note})
 
     def _gam(self, request: httpx.Request) -> httpx.Response:
         if self.gam_down:

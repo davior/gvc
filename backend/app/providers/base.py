@@ -14,6 +14,7 @@ what the provider sent and only ever appends to it.
 
 from __future__ import annotations
 
+from base64 import b64encode
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol, Sequence, Tuple
 
@@ -84,6 +85,19 @@ class Conversation(Protocol):
         ...
 
 
+@dataclass
+class Image:
+    """A picture the model is shown, as bytes it can read (JPEG, PNG, WebP or GIF)."""
+
+    media_type: str
+    data: bytes
+    # How the text refers to it ("image 1: diagram.png"), said beside it.
+    label: str
+
+    def base64(self) -> str:
+        return b64encode(self.data).decode("ascii")
+
+
 class ChatProvider(Protocol):
     @property
     def model(self) -> str: ...
@@ -93,12 +107,15 @@ class ChatProvider(Protocol):
 
     def conversation(
         self, *, system: Sequence[str], tools: Sequence[ToolSpec],
-        history: Sequence[Tuple[str, str]], prompt: str,
+        history: Sequence[Tuple[str, str]], prompt: str, images: Sequence[Image] = (),
     ) -> Conversation:
         """A new conversation.
 
         `system` is a list of blocks, most stable first: a provider that caches prompts
         breaks after each. `history` is earlier (role, text) turns, roles "user" and
-        "assistant"; `prompt` is the user's new message.
+        "assistant"; `prompt` is the user's new message. `images` open the conversation,
+        ahead of the history: system prompts take text only, and at the start they stay
+        part of the same cached prefix on every turn. Only passed to a provider marked
+        as able to see images.
         """
         ...

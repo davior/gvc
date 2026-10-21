@@ -61,8 +61,47 @@ class SessionSummary(BaseModel):
     updated_at: datetime
 
 
+class AttachmentRead(BaseModel):
+    """An attachment as listed: what it is and how much of it, not its whole text."""
+
+    id: str
+    kind: str
+    title: str
+    source: str
+    chars: int
+    truncated: bool = False
+    # The start of the text, so a person can see what was read.
+    preview: str = ""
+    # Images only: a small data URL to show, and the size the model is sent.
+    thumb: Optional[str] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    added_at: Optional[str] = None
+
+
+class SessionCreate(BaseModel):
+    # None: a conversation about a video not yet made (from the project list).
+    project_id: Optional[str] = None
+
+
+class NoteAttach(BaseModel):
+    note_id: str = Field(min_length=1, max_length=200)
+
+
+class UrlAttach(BaseModel):
+    url: str = Field(min_length=1, max_length=2000)
+
+
+class NoteChoice(BaseModel):
+    id: str
+    title: str
+    preview: str = ""
+    modified_at: Optional[str] = None
+
+
 class SessionRead(SessionSummary):
     messages: List[Message] = []
+    attachments: List[AttachmentRead] = []
     # Every turn of the session, newest last, so the panel can show each one's steps,
     # change card and cost beside its message.
     turns: List[TurnRead] = []

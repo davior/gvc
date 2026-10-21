@@ -51,8 +51,37 @@ export interface ChatSummary {
   updated_at: string
 }
 
+export type AttachmentKind = 'file' | 'note' | 'url' | 'image'
+
+/** Material the conversation works from: text read when it was attached, or a picture. */
+export interface Attachment {
+  id: string
+  kind: AttachmentKind
+  title: string
+  /** The file name, the note's id, or the page's URL after redirects. */
+  source: string
+  chars: number
+  /** Longer than one attachment may be, so only its beginning was kept. */
+  truncated: boolean
+  preview: string
+  /** Pictures only: a small data URL to show, and the size the model is sent. */
+  thumb?: string | null
+  width?: number | null
+  height?: number | null
+  added_at: string | null
+}
+
+/** A note in Gecko Notes, to pick one to attach. */
+export interface NoteChoice {
+  id: string
+  title: string
+  preview: string
+  modified_at: string | null
+}
+
 export interface Chat extends ChatSummary {
   messages: ChatMessage[]
+  attachments: Attachment[]
   turns: Turn[]
   cost: number
 }
@@ -89,6 +118,62 @@ export const assistantApi = {
   session(id: string): Promise<Chat> {
     return client
       .get<DataResponse<Chat>>(`/assistant/sessions/${id}`)
+      .then((r) => r.data.data)
+  },
+
+  /** An empty conversation, to attach material to before the first request. */
+  createSession(projectId: string | null): Promise<Chat> {
+    return client
+      .post<DataResponse<Chat>>('/assistant/sessions', { project_id: projectId })
+      .then((r) => r.data.data)
+  },
+
+  attachFile(sessionId: string, file: File): Promise<Attachment> {
+    const form = new FormData()
+    form.append('file', file)
+    // The client's JSON default would make axios serialise the form as JSON; this
+    // makes it send multipart, with the browser filling in the boundary.
+    return client
+      .post<DataResponse<Attachment>>(
+        `/assistant/sessions/${sessionId}/attachments/file`,
+        form,
+        { headers: { 'Content-Type': 'multipart/form-data' } }
+      )
+      .then((r) => r.data.data)
+  },
+
+  attachNote(sessionId: string, noteId: string): Promise<Attachment> {
+    return client
+      .post<DataResponse<Attachment>>(
+        `/assistant/sessions/${sessionId}/attachments/note`,
+        {
+          note_id: noteId,
+        }
+      )
+      .then((r) => r.data.data)
+  },
+
+  attachUrl(sessionId: string, url: string): Promise<Attachment> {
+    return client
+      .post<DataResponse<Attachment>>(
+        `/assistant/sessions/${sessionId}/attachments/url`,
+        {
+          url,
+        }
+      )
+      .then((r) => r.data.data)
+  },
+
+  detach(sessionId: string, attachmentId: string): Promise<void> {
+    return client
+      .delete(`/assistant/sessions/${sessionId}/attachments/${attachmentId}`)
+      .then(() => undefined)
+  },
+
+  /** The user's notes in Gecko Notes, newest first, matching `q` when given. */
+  findNotes(q: string): Promise<NoteChoice[]> {
+    return client
+      .get<ListResponse<NoteChoice>>('/assistant/notes', { params: q ? { q } : {} })
       .then((r) => r.data.data)
   },
 
