@@ -430,8 +430,8 @@ export default function AssistantPanel() {
                 </p>
               )}
               <p>
-                Attach a script, a note or a web page with the paperclip and it works from
-                that. It keeps working if you close this page.
+                Attach a script, a picture, a note or a web page with the paperclip and it
+                works from that. It keeps working if you close this page.
               </p>
             </div>
           )}

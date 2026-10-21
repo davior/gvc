@@ -131,18 +131,25 @@ or discarded as a whole, rather than suggestions accepted one by one: the user c
 that, and the editor's draft, Save and History already give per-change undo.
 
 **Attachments: material to work from.** A conversation can be given files (text,
-Markdown, subtitles, CSV, PDF, Word, HTML), notes from Gecko Notes, or web pages, from
-the panel's paperclip or by dropping files on it. Each is read as text once, when
-attached, and kept on the conversation (`assistant_session.attachments`), so every turn
-reads the same thing the user saw listed, and nothing re-reads a note or a page later
-(D3's rule, applied to attached notes). Notes are read with the caller's own token, as
-GAM is. A URL is fetched with every hop checked against private address space after DNS
-resolution (`app/web_fetch.py`, ported from Notes). The text is its own system block
-between the reference and the project context, so it caches across turns, and is fenced
-and labelled as data rather than instructions. Per item and per conversation size caps
-(`ASSISTANT_ATTACHMENT*` settings) refuse rather than silently drop. Not done: images as
-context (the chat clients send text), and YouTube or other video URLs, whose captions
-are GAM's URL import's job.
+Markdown, subtitles, CSV, PDF, Word, HTML), pictures (JPEG, PNG, WebP, GIF, by file or by
+URL), notes from Gecko Notes, or web pages, from the panel's paperclip or by dropping
+files on it. Each is read once, when attached, and kept on the conversation
+(`assistant_session.attachments`), so every turn reads the same thing the user saw
+listed, and nothing re-reads a note or a page later (D3's rule, applied to attached
+notes). Notes are read with the caller's own token, as GAM is. A URL is fetched with
+every hop checked against private address space after DNS resolution
+(`app/web_fetch.py`, ported from Notes). Text is its own system block between the
+reference and the project context, so it caches across turns, and is fenced and
+labelled as data rather than instructions. Pictures are scaled to at most 1568 px,
+kept as files under `data/assistant/<session>/` (not in the database), and sent as
+image blocks opening the conversation, ahead of the history, so they stay in the
+cached prefix too. They go only to a provider marked "can look at images": attaching
+one for a text-only model is refused with that reason, and a conversation whose
+provider is switched to one later lists its pictures as not shown. An attached picture
+is something to look at, not a visual for the video; that has to be in GAM. Per item
+and per conversation caps (`ASSISTANT_ATTACHMENT*`, `ASSISTANT_MAX_IMAGES`) refuse
+rather than silently drop. Not done: YouTube or other video URLs, whose captions are
+GAM's URL import's job.
 
 **AI generation.** A `generate` placeholder for a picture or a clip is made by GAM's M8,
 on fal.ai with the user's own key (set in GAM's Settings). GVC has no fal code and no

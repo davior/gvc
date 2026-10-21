@@ -19,7 +19,9 @@ import logging
 from typing import Any, Dict, List, Sequence, Tuple
 
 from app.providers import PROVIDER_ANTHROPIC, _upstream
-from app.providers.base import ProviderError, Reply, ToolCall, ToolResult, ToolSpec, Usage
+from app.providers.base import (
+    Image, ProviderError, Reply, ToolCall, ToolResult, ToolSpec, Usage,
+)
 from app.providers.endpoints import anthropic_base, anthropic_headers
 from app.providers.params import parse_extra_params
 
@@ -48,13 +50,15 @@ class AnthropicProvider:
         return self._provider.provider_type
 
     def conversation(self, *, system: Sequence[str], tools: Sequence[ToolSpec],
-                     history: Sequence[Tuple[str, str]], prompt: str) -> "AnthropicConversation":
-        return AnthropicConversation(self._provider, self._api_key, system, tools, history, prompt)
+                     history: Sequence[Tuple[str, str]], prompt: str,
+                     images: Sequence[Image] = ()) -> "AnthropicConversation":
+        return AnthropicConversation(self._provider, self._api_key, system, tools, history, prompt,
+                                     images)
 
 
 class AnthropicConversation:
     def __init__(self, provider, api_key: str, system: Sequence[str], tools: Sequence[ToolSpec],
-                 history: Sequence[Tuple[str, str]], prompt: str):
+                 history: Sequence[Tuple[str, str]], prompt: str, images: Sequence[Image] = ()):
         self._provider = provider
         self._api_key = api_key
         # Each system block is a cache breakpoint: the reference first (never changes),
@@ -65,16 +69,26 @@ class AnthropicConversation:
         self._tools = [{"name": t.name, "description": t.description, "input_schema": t.parameters}
                        for t in tools]
         self.messages: List[Dict[str, Any]] = []
+        if images:
+            content: List[Dict[str, Any]] = []
+            for image in images:
+                content.append({"type": "text", "text": image.label})
+                content.append({"type": "image", "source": {
+                    "type": "base64", "media_type": image.media_type, "data": image.base64()}})
+            self.messages.append({"role": "user", "content": content})
         for role, text in history:
             self._push(role, text)
         self._push("user", prompt)
 
     def _push(self, role: str, text: str) -> None:
         # The API wants turns to alternate; two of the same role in a row (a turn that
-        # failed before answering) are merged rather than sent as a 400.
-        if self.messages and self.messages[-1]["role"] == role and isinstance(
-                self.messages[-1]["content"], str):
-            self.messages[-1]["content"] += "\n\n" + text
+        # failed before answering, or the images ahead of the first message) are merged
+        # rather than sent as a 400.
+        last = self.messages[-1] if self.messages else None
+        if last and last["role"] == role and isinstance(last["content"], str):
+            last["content"] += "\n\n" + text
+        elif last and last["role"] == role and isinstance(last["content"], list):
+            last["content"].append({"type": "text", "text": text})
         else:
             self.messages.append({"role": role, "content": text})
 

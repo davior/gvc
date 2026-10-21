@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { FileText, Globe, Loader2, Paperclip, StickyNote, X } from 'lucide-react'
+import {
+  FileText,
+  Globe,
+  ImageIcon,
+  Loader2,
+  Paperclip,
+  StickyNote,
+  X,
+} from 'lucide-react'
 import { apiErrorMessage } from '@/api/client'
 import {
   assistantApi,
@@ -10,29 +18,36 @@ import {
 import { useAssistantStore } from '@/stores/assistant'
 
 /**
- * What the assistant has been given to work from: files, notes from Gecko Notes and web
- * pages. Each is read as text once, when attached, and every request in the
+ * What the assistant has been given to work from: files, pictures, notes from Gecko
+ * Notes and web pages. Each is read once, when attached, and every request in the
  * conversation reads it from then on; removing one takes it out of the next request.
  *
- * Text only. What the server can read is a text, Markdown, subtitle, CSV, PDF, Word or
- * HTML file; `ACCEPT` mirrors it so the file dialog offers those first.
+ * What the server can read is a text, Markdown, subtitle, CSV, PDF, Word or HTML file,
+ * or a JPEG, PNG, WebP or GIF picture; `ACCEPT` mirrors it so the file dialog offers
+ * those first. Pictures are refused, with a reason, when the AI model in Settings isn't
+ * marked as one that can look at images.
  */
 
 const ACCEPT =
-  '.txt,.md,.markdown,.csv,.tsv,.json,.srt,.vtt,.log,.yaml,.yml,.xml,.rst,.org,.pdf,.docx,.html,.htm,text/*,application/pdf'
+  '.txt,.md,.markdown,.csv,.tsv,.json,.srt,.vtt,.log,.yaml,.yml,.xml,.rst,.org,.pdf,.docx,.html,.htm,text/*,application/pdf,.jpg,.jpeg,.png,.webp,.gif,image/jpeg,image/png,image/webp,image/gif'
 
 const KIND_ICON: Record<AttachmentKind, ReactNode> = {
   file: <FileText className="h-3 w-3 shrink-0" />,
   note: <StickyNote className="h-3 w-3 shrink-0" />,
   url: <Globe className="h-3 w-3 shrink-0" />,
+  image: <ImageIcon className="h-3 w-3 shrink-0" />,
 }
 
 // One empty list, not a new one per read: a selector returning a fresh array makes
 // the store look changed on every render, and React loops.
 const NONE: Attachment[] = []
 
-function size(chars: number): string {
-  return chars >= 1000 ? `${Math.round(chars / 1000)}k characters` : `${chars} characters`
+function size(a: Attachment): string {
+  if (a.kind === 'image')
+    return a.width && a.height ? `${a.width}×${a.height}` : 'picture'
+  return a.chars >= 1000
+    ? `${Math.round(a.chars / 1000)}k characters`
+    : `${a.chars} characters`
 }
 
 /** The conversation's attachments, each removable. */
@@ -46,9 +61,13 @@ export function AttachmentList() {
         <li
           key={a.id}
           className="flex max-w-full items-center gap-1 rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-[11px] text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
-          title={`${a.source}\n${size(a.chars)}${a.truncated ? ', only the beginning was kept' : ''}\n\n${a.preview}`}
+          title={`${a.source}\n${size(a)}${a.truncated ? ', only the beginning was kept' : ''}\n\n${a.preview}`}
         >
-          {KIND_ICON[a.kind]}
+          {a.thumb ? (
+            <img src={a.thumb} alt="" className="h-5 w-5 shrink-0 rounded object-cover" />
+          ) : (
+            KIND_ICON[a.kind]
+          )}
           <span className="min-w-0 truncate">{a.title}</span>
           {a.truncated && <span className="shrink-0 text-amber-600">(cut short)</span>}
           <button
@@ -235,7 +254,8 @@ export function AttachControls() {
                 className={item}
                 onClick={() => fileInput.current?.click()}
               >
-                <FileText className="h-3.5 w-3.5" /> A file (text, PDF, Word…)
+                <FileText className="h-3.5 w-3.5" /> A file or picture (text, PDF, Word,
+                images…)
               </button>
               <button
                 type="button"

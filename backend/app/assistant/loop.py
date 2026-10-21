@@ -12,7 +12,7 @@ from typing import Callable, List, Optional, Sequence, Tuple
 
 from app.assistant import tools as T
 from app.assistant.tools import Working, _issues_text
-from app.providers.base import ChatProvider, Reply
+from app.providers.base import ChatProvider, Image, Reply
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +42,9 @@ def _first_line(text: str) -> str:
 def run(provider: ChatProvider, working: Working, *, system: Sequence[str],
         history: Sequence[Tuple[str, str]], prompt: str, on_step: Step,
         on_reply: Callable[[Reply], None], cancelled: Callable[[], bool],
-        max_rounds: int) -> Outcome:
+        max_rounds: int, images: Sequence[Image] = ()) -> Outcome:
     conversation = provider.conversation(system=system, tools=T.SPECS, history=history,
-                                         prompt=prompt)
+                                         prompt=prompt, images=images)
     outcome = Outcome(reply="")
     nudges = 0
     for _ in range(max_rounds):

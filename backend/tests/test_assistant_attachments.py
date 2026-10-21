@@ -321,3 +321,139 @@ def test_every_turn_of_the_conversation_reads_what_is_attached(auth_client, prov
     res = auth_client.post("/api/assistant/turns", json={"prompt": "And now?", "session_id": chat_id})
     worker._run(res.json()["data"]["id"])
     assert provider.started["system"][1] == ""
+
+
+# ─── pictures ────────────────────────────────────────────────────────────────
+
+def _picture(size=(3000, 2000), mode="RGB", fmt="JPEG"):
+    from PIL import Image as Pil
+
+    out = io.BytesIO()
+    Pil.new(mode, size, (200, 80, 20, 128)[:len(mode)] if mode != "L" else 128).save(out, fmt)
+    return out.getvalue()
+
+
+def test_a_picture_is_scaled_down_and_kept_as_jpeg_or_png():
+    big = attach.prepare_image(_picture())
+    assert (big["width"], big["height"]) == (1568, 1045) and big["media_type"] == "image/jpeg"
+    assert big["thumb"].startswith("data:image/jpeg;base64,")
+    clear = attach.prepare_image(_picture((400, 300), "RGBA", "PNG"))
+    assert clear["media_type"] == "image/png" and clear["width"] == 400
+    assert attach.prepare_image(_picture((64, 64), "RGB", "WEBP"))["media_type"] == "image/jpeg"
+
+
+def test_a_broken_or_enormous_picture_is_refused(monkeypatch):
+    from PIL import Image as Pil
+
+    with pytest.raises(attach.Unreadable, match="couldn't be read"):
+        attach.prepare_image(b"\xff\xd8\xff not really a jpeg")
+    monkeypatch.setattr(Pil, "MAX_IMAGE_PIXELS", 1000)
+    with pytest.raises(attach.Unreadable, match="too many pixels"):
+        attach.prepare_image(_picture((100, 100)))
+    with pytest.raises(attach.Unreadable, match="JPEG, PNG"):
+        attach.prepare_image(_picture((10, 10), "RGB", "BMP"))
+
+
+def _seeing(session, sees=True):
+    from app.auth import UserCtx
+    from app.models.provider import AIProvider
+    from app.services.users import ensure_user
+
+    ensure_user(session, UserCtx(id=TEST_USER_ID, username=TEST_USER_ID))
+    row = AIProvider(user_id=TEST_USER_ID, name="Claude", provider_type="anthropic",
+                     model="claude-opus-5-5", api_key="sk", is_active=True,
+                     supports_images=sees)
+    session.add(row)
+    session.commit()
+    return row
+
+
+def test_a_picture_is_attached_to_disk_and_cleaned_up(auth_client, session):
+    _seeing(session)
+    chat_id = new_chat(auth_client)
+    res = auth_client.post(f"/api/assistant/sessions/{chat_id}/attachments/file",
+                           files={"file": ("board.jpg", _picture(), "image/jpeg")})
+    assert res.status_code == 201, res.text
+    item = res.json()["data"]
+    assert item["kind"] == "image" and item["chars"] == 0
+    assert item["thumb"].startswith("data:image/") and item["width"] == 1568
+    folder = attach.image_dir(chat_id)
+    assert len(list(folder.iterdir())) == 1
+
+    auth_client.delete(f"/api/assistant/sessions/{chat_id}/attachments/{item['id']}")
+    assert not folder.exists()
+
+    auth_client.post(f"/api/assistant/sessions/{chat_id}/attachments/file",
+                     files={"file": ("board.jpg", _picture(), "image/jpeg")})
+    assert auth_client.delete(f"/api/assistant/sessions/{chat_id}").status_code == 204
+    assert not folder.exists()
+
+
+def test_a_picture_for_a_model_that_cant_see_is_refused(auth_client, session):
+    _seeing(session, sees=False)
+    chat_id = new_chat(auth_client)
+    res = auth_client.post(f"/api/assistant/sessions/{chat_id}/attachments/file",
+                           files={"file": ("board.png", _picture((10, 10), "RGB", "PNG"),
+                                           "image/png")})
+    assert res.status_code == 409 and res.json()["detail"]["code"] == "images_unsupported"
+    assert "look at images" in res.json()["detail"]["message"]
+    assert not attach.image_dir(chat_id).exists()
+
+
+def test_pictures_have_their_own_limit_and_a_refused_one_leaves_no_file(
+        auth_client, session, monkeypatch):
+    _seeing(session)
+    monkeypatch.setattr(settings, "assistant_max_images", 1)
+    chat_id = new_chat(auth_client)
+
+    def add():
+        return auth_client.post(f"/api/assistant/sessions/{chat_id}/attachments/file",
+                                files={"file": ("a.png", _picture((10, 10), "RGB", "PNG"),
+                                                "image/png")})
+
+    assert add().status_code == 201
+    res = add()
+    assert res.status_code == 409 and res.json()["detail"]["code"] == "too_many_images"
+    assert len(list(attach.image_dir(chat_id).iterdir())) == 1
+
+
+def test_an_image_url_is_attached_as_a_picture(auth_client, session, siblings, public_dns):
+    _seeing(session)
+    siblings.pages["https://cdn.example/maps/basin.png?w=2"] = (
+        200, {"content-type": "image/png"}, _picture((50, 40), "RGB", "PNG"))
+    chat_id = new_chat(auth_client)
+    res = auth_client.post(f"/api/assistant/sessions/{chat_id}/attachments/url",
+                           json={"url": "https://cdn.example/maps/basin.png?w=2"})
+    assert res.status_code == 201, res.text
+    item = res.json()["data"]
+    assert item["kind"] == "image" and item["title"] == "basin.png"
+    assert item["source"] == "https://cdn.example/maps/basin.png?w=2"
+
+
+def test_a_turn_shows_the_model_the_pictures_and_lists_them(auth_client, session, engine,
+                                                            monkeypatch):
+    provider_row = _seeing(session)
+    monkeypatch.setattr(worker.queue, "engine", engine)
+    scripted = ScriptedProvider(script=[says("A storyboard in three panels.")])
+    monkeypatch.setattr(worker, "build_provider", lambda session, user_id: scripted)
+    chat_id = new_chat(auth_client)
+    auth_client.post(f"/api/assistant/sessions/{chat_id}/attachments/file",
+                     files={"file": ("board.jpg", _picture(), "image/jpeg")})
+
+    res = auth_client.post("/api/assistant/turns",
+                           json={"prompt": "What's in my storyboard?", "session_id": chat_id})
+    worker._run(res.json()["data"]["id"])
+    [picture] = scripted.started["images"]
+    assert picture.media_type == "image/jpeg" and picture.data[:2] == b"\xff\xd8"
+    assert picture.label == "Image 1, attached by the user: board.jpg"
+    assert "Shown to you as image 1" in scripted.started["system"][1]
+
+    # Switched to a model that can't see: the picture stays listed, and isn't sent.
+    provider_row.supports_images = False
+    session.add(provider_row)
+    session.commit()
+    scripted.script.append(says("I can't see it."))
+    res = auth_client.post("/api/assistant/turns", json={"prompt": "And now?", "session_id": chat_id})
+    worker._run(res.json()["data"]["id"])
+    assert scripted.started["images"] == []
+    assert "Not shown: the current AI model" in scripted.started["system"][1]

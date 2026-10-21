@@ -72,6 +72,10 @@ class AttachmentRead(BaseModel):
     truncated: bool = False
     # The start of the text, so a person can see what was read.
     preview: str = ""
+    # Images only: a small data URL to show, and the size the model is sent.
+    thumb: Optional[str] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
     added_at: Optional[str] = None
 
 

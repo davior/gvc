@@ -51,9 +51,9 @@ export interface ChatSummary {
   updated_at: string
 }
 
-export type AttachmentKind = 'file' | 'note' | 'url'
+export type AttachmentKind = 'file' | 'note' | 'url' | 'image'
 
-/** Material the conversation works from, read as text when it was attached. */
+/** Material the conversation works from: text read when it was attached, or a picture. */
 export interface Attachment {
   id: string
   kind: AttachmentKind
@@ -64,6 +64,10 @@ export interface Attachment {
   /** Longer than one attachment may be, so only its beginning was kept. */
   truncated: boolean
   preview: string
+  /** Pictures only: a small data URL to show, and the size the model is sent. */
+  thumb?: string | null
+  width?: number | null
+  height?: number | null
   added_at: string | null
 }
 

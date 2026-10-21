@@ -60,7 +60,8 @@ def _attachment_read(item: dict) -> AttachmentRead:
                           source=item["source"], chars=item.get("chars", 0),
                           truncated=bool(item.get("truncated")),
                           preview=(item.get("text") or "")[:280],
-                          added_at=item.get("added_at"))
+                          thumb=item.get("thumb"), width=item.get("width"),
+                          height=item.get("height"), added_at=item.get("added_at"))
 
 
 def _not_found(what: str) -> HTTPException:
@@ -147,6 +148,7 @@ def delete_chat(session_id: str, user: CurrentUser,
     session.flush()
     session.delete(row)
     session.commit()
+    attach.remove_files(row.id, json.loads(row.attachments or "[]"))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -160,11 +162,23 @@ def _refused(code: str, message: str, status_code: int) -> HTTPException:
     return HTTPException(status_code=status_code, detail={"code": code, "message": message})
 
 
+def _require_eyes(session: Session, user) -> None:
+    """Refuse a picture the model would never see, rather than let it sit there
+    silently ignored. With no provider yet there is nothing to judge, so it's taken."""
+    provider = active_provider(session, user.id)
+    if provider is not None and not provider.supports_images:
+        raise _refused("images_unsupported",
+                       f"{provider.name} is set up as a model that can't look at images. Turn "
+                       "on \"This model can look at images\" for it in Settings, or switch to "
+                       "one that can.", status.HTTP_409_CONFLICT)
+
+
 def _attach(session: Session, row: AssistantSession, item: dict) -> AttachmentRead:
     existing = json.loads(row.attachments or "[]")
     try:
         attach.admit(existing, item)
     except attach.Unreadable as exc:
+        attach.remove_files(row.id, [item])
         raise _refused(exc.code, exc.message, exc.status_code) from exc
     existing.append(item)
     row.attachments = json.dumps(existing, ensure_ascii=False)
@@ -187,7 +201,12 @@ def attach_file(session_id: str, user: CurrentUser, file: UploadFile = File(...)
                        status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
     name = (file.filename or "file").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     try:
-        item = attach.make("file", name, name, attach.file_text(name, data, file.content_type or ""))
+        if attach.is_image(name, file.content_type or ""):
+            _require_eyes(session, user)
+            item = attach.make_image(row.id, name, name, data)
+        else:
+            item = attach.make("file", name, name,
+                               attach.file_text(name, data, file.content_type or ""))
     except attach.Unreadable as exc:
         raise _refused(exc.code, exc.message, exc.status_code) from exc
     return DataResponse(data=_attach(session, row, item))
@@ -221,8 +240,13 @@ def attach_url(session_id: str, body: UrlAttach, user: CurrentUser,
     try:
         page = web_fetch.fetch(url, max_bytes=settings.assistant_attachment_max_mb * 1024 * 1024,
                                accept=attach.URL_TYPES)
-        title, text = attach.url_text(page.content_type, page.charset, page.body)
-        item = attach.make("url", title or page.url, page.url, text)
+        if page.content_type in attach.IMAGE_TYPES:
+            _require_eyes(session, user)
+            name = page.url.split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1] or page.url
+            item = attach.make_image(row.id, name, page.url, page.body)
+        else:
+            title, text = attach.url_text(page.content_type, page.charset, page.body)
+            item = attach.make("url", title or page.url, page.url, text)
     except web_fetch.FetchError as exc:
         raise _refused(exc.code, exc.message, exc.status_code) from exc
     except attach.Unreadable as exc:
@@ -244,6 +268,7 @@ def detach(session_id: str, attachment_id: str, user: CurrentUser,
     row.updated_at = utcnow()
     session.add(row)
     session.commit()
+    attach.remove_files(row.id, [a for a in existing if a.get("id") == attachment_id])
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

@@ -216,20 +216,51 @@ describe('AssistantPanel', () => {
     )
   })
 
+  it('attaches a picture and shows its thumbnail', async () => {
+    const open = chat(turn({ outcome: 'applied', proposed_spec: null }))
+    const picture: Attachment = {
+      id: 'a3',
+      kind: 'image',
+      title: 'board.jpg',
+      source: 'board.jpg',
+      chars: 0,
+      truncated: false,
+      preview: '',
+      thumb: 'data:image/jpeg;base64,AAAA',
+      width: 1568,
+      height: 1045,
+      added_at: null,
+    }
+    vi.spyOn(assistantApi, 'sessions').mockResolvedValue([open])
+    vi.spyOn(assistantApi, 'session')
+      .mockResolvedValueOnce(open)
+      .mockResolvedValue({ ...open, attachments: [picture] })
+    const attached = vi.spyOn(assistantApi, 'attachFile').mockResolvedValue(picture)
+    const { container } = at('/p/p1')
+    await screen.findByText('Dissolve into the valley now.')
+
+    const file = new File(['x'], 'board.jpg', { type: 'image/jpeg' })
+    await userEvent.upload(screen.getByLabelText('Attach files'), file)
+    expect(attached).toHaveBeenCalledWith('c1', file)
+    expect(await screen.findByText('board.jpg')).toBeInTheDocument()
+    expect(
+      container.querySelector('img[src="data:image/jpeg;base64,AAAA"]')
+    ).not.toBeNull()
+    expect(screen.getByText('board.jpg').closest('li')?.title).toContain('1568×1045')
+  })
+
   it('finds a note in Gecko Notes and attaches it', async () => {
     const open = chat(turn({ outcome: 'applied', proposed_spec: null }))
     vi.spyOn(assistantApi, 'sessions').mockResolvedValue([open])
     vi.spyOn(assistantApi, 'session').mockResolvedValue(open)
-    const find = vi
-      .spyOn(assistantApi, 'findNotes')
-      .mockResolvedValue([
-        {
-          id: 'n1',
-          title: 'Colorado research',
-          preview: 'The compact of 1922',
-          modified_at: null,
-        },
-      ])
+    const find = vi.spyOn(assistantApi, 'findNotes').mockResolvedValue([
+      {
+        id: 'n1',
+        title: 'Colorado research',
+        preview: 'The compact of 1922',
+        modified_at: null,
+      },
+    ])
     const attached = vi.spyOn(assistantApi, 'attachNote').mockResolvedValue({
       id: 'a2',
       kind: 'note',

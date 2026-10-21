@@ -12,7 +12,9 @@ import logging
 from typing import Any, Dict, List, Sequence, Tuple
 
 from app.providers import PROVIDER_OLLAMA, _upstream
-from app.providers.base import ProviderError, Reply, ToolCall, ToolResult, ToolSpec, Usage
+from app.providers.base import (
+    Image, ProviderError, Reply, ToolCall, ToolResult, ToolSpec, Usage,
+)
 from app.providers.endpoints import OLLAMA_BASE, openai_compat_base
 from app.providers.params import parse_extra_params
 
@@ -40,13 +42,15 @@ class OpenAIProvider:
         return self._provider.provider_type
 
     def conversation(self, *, system: Sequence[str], tools: Sequence[ToolSpec],
-                     history: Sequence[Tuple[str, str]], prompt: str) -> "OpenAIConversation":
-        return OpenAIConversation(self._provider, self._api_key, system, tools, history, prompt)
+                     history: Sequence[Tuple[str, str]], prompt: str,
+                     images: Sequence[Image] = ()) -> "OpenAIConversation":
+        return OpenAIConversation(self._provider, self._api_key, system, tools, history, prompt,
+                                  images)
 
 
 class OpenAIConversation:
     def __init__(self, provider, api_key: str, system: Sequence[str], tools: Sequence[ToolSpec],
-                 history: Sequence[Tuple[str, str]], prompt: str):
+                 history: Sequence[Tuple[str, str]], prompt: str, images: Sequence[Image] = ()):
         self._provider = provider
         self._api_key = api_key
         self._tools = [{"type": "function", "function": {
@@ -58,6 +62,14 @@ class OpenAIConversation:
         joined = "\n\n".join(text for text in system if text)
         if joined:
             self.messages.append({"role": "system", "content": joined})
+        if images:
+            # Content parts with data URLs: what OpenAI, and Ollama's /v1, both read.
+            parts: List[Dict[str, Any]] = []
+            for image in images:
+                parts.append({"type": "text", "text": image.label})
+                parts.append({"type": "image_url", "image_url": {
+                    "url": f"data:{image.media_type};base64,{image.base64()}"}})
+            self.messages.append({"role": "user", "content": parts})
         for role, text in history:
             self.messages.append({"role": role, "content": text})
         self.messages.append({"role": "user", "content": prompt})

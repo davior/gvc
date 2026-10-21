@@ -104,6 +104,9 @@ class Settings(BaseSettings):
     assistant_attachment_max_chars: int = 60_000
     assistant_attachments_max_chars: int = 150_000
     assistant_max_attachments: int = 12
+    # Of those, pictures. Each is sent to the model on every round of every turn, at
+    # roughly 1,500 tokens apiece at full size.
+    assistant_max_images: int = 6
     # The largest file, or web page, read for an attachment.
     assistant_attachment_max_mb: int = 20
     job_heartbeat_seconds: int = 30

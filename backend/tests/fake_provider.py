@@ -53,9 +53,10 @@ class ScriptedProvider:
     provider_type: str = "anthropic"
 
     def conversation(self, *, system: Sequence[str], tools: Sequence[ToolSpec],
-                     history: Sequence[Tuple[str, str]], prompt: str) -> ScriptedConversation:
+                     history: Sequence[Tuple[str, str]], prompt: str,
+                     images: Sequence[Any] = ()) -> ScriptedConversation:
         self.started = {"system": list(system), "tools": [t.name for t in tools],
-                        "history": list(history), "prompt": prompt}
+                        "history": list(history), "prompt": prompt, "images": list(images)}
         return ScriptedConversation(self.script, self.log)
 
     def results(self) -> List[ToolResult]:
