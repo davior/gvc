@@ -492,7 +492,7 @@ def build_shot_command(
     - `in_transition` / `out_transition`: the join at each end, which in GVC differ
       per scene (a scene's `transition_in` is its incoming join and the previous
       scene's outgoing one). Unset, both are `options.transition`.
-    - `loop` False on a muted video holds its last frame instead of repeating it.
+    - `loop` False on a video holds its last frame instead of repeating it.
     - `path`: a Ken Burns move between two frames of the picture (S1), in place of
       the preset drift.
     """
@@ -565,8 +565,10 @@ def build_shot_command(
         chains = [fit_chain(video_in, "fit", width, height, options.fit)]
         stage = "fit"
 
-    if kind == "video_muted" and not loop:
-        # Shorter than its scene and not to be repeated: hold the last frame.
+    if kind in ("video_muted", "video_sound") and not loop:
+        # Shorter than its scene and not to be repeated: hold the last frame. A clip
+        # with its sound reaches here when a blend out of it asks for more than the
+        # file has left after its out point (`compile.layout`'s tail).
         chains.append(f"[{stage}]tpad=stop_mode=clone:stop_duration={duration:.3f}[hold]")
         stage = "hold"
 

@@ -80,6 +80,9 @@ class Unit:
     chapter: Optional[str] = None
     # The end credits: a card drawn from these lines rather than from `card`.
     credits: Optional[List[str]] = None
+    # Seconds a clip with its sound runs past its out point, under a blend out of it
+    # (`layout`). Footage after the out point where the file has it, else a held frame.
+    tail: float = 0.0
 
 
 def _transition_in(spec: VideoSpec, segment: Segment) -> Transition:
@@ -281,7 +284,13 @@ def layout(units: Sequence[Unit], durations: Sequence[float], warnings: List[str
     project's transition, as every quote has in Notes. A blend overlaps its two units
     by its duration, held to half the shorter one so neither is ever entirely under a
     blend; too short to see, and it becomes a cut.
+
+    A clip playing its own sound is lengthened by the blend out of it rather than
+    overlapped: the stitch ends the outgoing shot's audio where the blend starts, so
+    otherwise the last words before its out point would be cut. Its `tail` says by how
+    much, for the renderer to extract that much more.
     """
+    durations = list(durations)
     joins: List[Optional[Join]] = [None]
     for index in range(1, len(units)):
         unit = units[index]
@@ -303,6 +312,13 @@ def layout(units: Sequence[Unit], durations: Sequence[float], warnings: List[str
         for join in joins:
             if join and join.is_blend:
                 join.style, join.overlap = "fade", 0.0
+
+    for index, join in enumerate(joins):
+        before = units[index - 1] if index else None
+        if join is not None and join.is_blend and before is not None \
+                and before.kind == "video_sound":
+            before.tail = join.overlap
+            durations[index - 1] += join.overlap
 
     starts: List[float] = []
     cursor = 0.0

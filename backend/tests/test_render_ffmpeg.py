@@ -119,6 +119,15 @@ def test_sounded_clip_uses_its_own_audio():
     assert "[0:a]" in _graph(argv)
 
 
+def test_a_sounded_clip_holds_its_last_frame_rather_than_running_short():
+    """A blend's tail can ask for more than the file has after the out point."""
+    argv = F.build_shot_command(kind="video_sound", background="c.mp4", audio=None, duration=2,
+                                output="s.mp4", options=RenderOptions(), preview=False,
+                                background_has_audio=True, loop=False)
+    assert "tpad=stop_mode=clone" in _graph(argv)
+    assert "-stream_loop" not in argv
+
+
 def test_sounded_clip_without_an_audio_track_gets_silence():
     """The concat demuxer needs every part to carry an audio stream."""
     argv = F.build_shot_command(kind="video_sound", background="c.mp4", audio=None, duration=2,

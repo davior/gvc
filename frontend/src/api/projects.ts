@@ -154,6 +154,8 @@ export interface Segment {
   narration?: { beats: Beat[]; [key: string]: unknown }
   transition_in?: { style?: string; duration?: number }
   overlays?: Overlay[]
+  /** Seconds: `fixed` sets the scene's length, `min` floors one that follows narration. */
+  duration?: { min?: number; fixed?: number }
   [key: string]: unknown
 }
 

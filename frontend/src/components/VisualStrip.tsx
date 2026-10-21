@@ -1,4 +1,4 @@
-import { Film, ImageOff, Search, Sparkles, Square, X } from 'lucide-react'
+import { Film, ImageOff, Play, Search, Sparkles, Square, X } from 'lucide-react'
 import type { GamAsset } from '@/api/gam'
 import { RUNNING, type Generation } from '@/api/generations'
 import type { Segment, VideoSpec } from '@/api/projects'
@@ -12,6 +12,8 @@ interface Props {
   gamAssets: Record<string, GamAsset | null>
   onFind: () => void
   onRemove: () => void
+  /** Open the scene's footage in the player; absent, the thumbnail is just a picture. */
+  onOpen?: () => void
   /** Open the Generate dialog for a placeholder; absent, nothing offers to. */
   onGenerate?: (key: string) => void
 }
@@ -76,6 +78,7 @@ export default function VisualStrip({
   gamAssets,
   onFind,
   onRemove,
+  onOpen,
   onGenerate,
 }: Props) {
   const rows = useGenerationStore((s) => s.rows)
@@ -108,7 +111,19 @@ export default function VisualStrip({
       className="flex items-center gap-3 rounded bg-gray-50 p-2 dark:bg-gray-800"
       aria-label="Picture"
     >
-      {shown.thumb ? (
+      {shown.thumb && onOpen ? (
+        <button
+          type="button"
+          aria-label="Play footage"
+          className="group relative h-12 w-20 shrink-0 overflow-hidden rounded"
+          onClick={onOpen}
+        >
+          <img src={shown.thumb} alt="" className="h-full w-full object-cover" />
+          <span className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-70 group-hover:opacity-100">
+            <Play className="h-4 w-4 text-white" />
+          </span>
+        </button>
+      ) : shown.thumb ? (
         <img src={shown.thumb} alt="" className="h-12 w-20 rounded object-cover" />
       ) : (
         <span className="flex h-12 w-20 items-center justify-center rounded bg-gray-200 dark:bg-gray-700">

@@ -311,6 +311,8 @@ def render(
                 start, length = unit.trim
                 if length is None:
                     length = max(0.1, (unit.media.duration or 0.0) - start)
+                # Past the file's end `-t` yields less, and the shot holds its last frame.
+                length += unit.tail
                 clip = f"clip_{index:04d}.mp4"
                 F.run(F.build_extract_command(background, clip, start=start, length=length,
                                               with_audio=unit.kind == "video_sound"),
@@ -405,7 +407,8 @@ def render(
                   cwd=work_dir, timeout=F.shot_timeout(sum(timeline.durations)))
         except F.FFmpegError as exc:
             # The blends cost a re-encode; if that fails, the shots still join by cuts,
-            # and the timeline is re-laid without their overlaps to match.
+            # and the timeline is re-laid without their overlaps to match. A clip's
+            # tail stays, as a moment more of it before the cut.
             logger.warning("Blended stitch failed (%s); joining with cuts", exc)
             warnings.append("Blends were joined as cuts: blending the shots together failed.")
             for join in timeline.joins:

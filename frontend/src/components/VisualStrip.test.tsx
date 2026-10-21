@@ -47,6 +47,22 @@ function strip(segment: Segment) {
 }
 
 describe('VisualStrip', () => {
+  it('opens the footage in the player from its thumbnail', async () => {
+    const onOpen = vi.fn()
+    render(
+      <VisualStrip
+        spec={spec}
+        segment={{ id: 's', kind: 'scene', visual: { asset: 'a_reel' } }}
+        gamAssets={{ g1: reel }}
+        onFind={vi.fn()}
+        onRemove={vi.fn()}
+        onOpen={onOpen}
+      />
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Play footage' }))
+    expect(onOpen).toHaveBeenCalled()
+  })
+
   it('shows the footage with its thumbnail and trim', () => {
     strip({
       id: 's',
