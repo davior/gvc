@@ -11,4 +11,7 @@ COPY app/ ./app/
 COPY alembic/ ./alembic/
 COPY alembic.ini entrypoint.sh ./
 RUN mkdir -p /app/data/db
+# config.py derives a default data directory from its own path, which in this layout
+# is /data, not /app/data. Set here so the image is right even run without compose.
+ENV DATA_DIR=/app/data
 ENTRYPOINT ["./entrypoint.sh"]

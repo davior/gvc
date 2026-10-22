@@ -5,11 +5,15 @@ services:
     build: ./backend
     restart: unless-stopped
     volumes:
-      # All of data/: the database, finished renders, and the cache of GAM files a
-      # render fetched, so a rebuild keeps all three.
+      # All of data/: the database, finished renders, the cache of GAM files a render
+      # fetched, and pictures attached to the assistant, so a rebuild keeps them all.
       - ./data:/app/data
     environment:
       - DATABASE_URL=sqlite:////app/data/db/gvc.db
+      # Load-bearing. Left to default, the data directory is worked out from where
+      # config.py sits, which in the image is /app/app/, so it lands on /data, outside
+      # the volume above, and everything but the database is lost on every rebuild.
+      - DATA_DIR=/app/data
       # Must match gecko-notes'. GVC verifies the sessions Notes issues; a different
       # secret means every token is rejected. No default — the app refuses to start.
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
