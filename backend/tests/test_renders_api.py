@@ -131,6 +131,22 @@ def test_a_render_queued_before_a_restart_is_ended_not_rerun(auth_client, engine
     assert "restart" in ended["error"]
 
 
+def test_a_failed_render_says_which_step_it_was_on(auth_client, engine_for_worker, monkeypatch):
+    """A render runs ffmpeg a dozen ways, and "killed by signal 9" alone doesn't say
+    whether a shot, the stitch or the overlays ran out of memory."""
+    def _render(*, progress, **_kwargs):
+        progress("Stitching", 80, "joining 40 shots")
+        raise F.FFmpegError("ffmpeg failed (killed by signal 9 (most likely out of memory))")
+
+    monkeypatch.setattr(worker, "render", _render)
+    project = _project(auth_client)
+    job = _start(auth_client, project["id"]).json()["data"]
+    worker._run(job["id"])
+    failed = auth_client.get(f"/api/renders/{job['id']}").json()["data"]
+    assert failed["error"] == ("Stitching, joining 40 shots: "
+                               "ffmpeg failed (killed by signal 9 (most likely out of memory))")
+
+
 def test_a_queued_render_can_be_cancelled(auth_client, engine_for_worker):
     project = _project(auth_client)
     job = _start(auth_client, project["id"]).json()["data"]

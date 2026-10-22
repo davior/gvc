@@ -18,7 +18,8 @@ from app.render.narration import (
     shift_cues, split_for_subtitles, strip_emoji, write_srt,
 )
 from app.render.options import (
-    KENBURNS_MIN_LEG_SECONDS, MusicSpec, RenderOptions, encoder_tier, frame_size,
+    KENBURNS_MIN_LEG_SECONDS, KENBURNS_PREVIEW_READ_PIXELS, MusicSpec, RenderOptions,
+    encoder_tier, frame_size,
     kenburns_geometry,
 )
 
@@ -1275,3 +1276,84 @@ def test_a_window_out_of_range_is_clamped_to_the_video():
         spec=_music(fade_out=0.0), duck=False, start=12.0, end=50.0))
     # Nothing left to score: a sliver, never a negative trim.
     assert "atrim=end=0.100" in graph
+
+
+# ── memory: the stitch, the overlays and a preview's drift ──────────────────
+
+def test_a_preview_drift_reads_a_smaller_picture_than_a_full_render():
+    """A preview read stills at the same 24 megapixels as 4K, which made a
+    drifting preview shot cost four times a still one and was enough, with
+    everything else on the box, to get ffmpeg killed for memory."""
+    full_w, full_h, _w, _h = kenburns_geometry(854, 480)
+    read_w, read_h, write_w, write_h = kenburns_geometry(854, 480, preview=True)
+    assert read_w * read_h <= KENBURNS_PREVIEW_READ_PIXELS < full_w * full_h
+    assert read_w >= 854 * 4 and read_w >= write_w
+
+    options = _kb()
+    argv = F.build_shot_command(kind="still", background="bg.png", audio="n.wav", duration=6.0,
+                                output="s.mp4", options=options, preview=True)
+    assert f"scale={read_w}:{read_h}" in _graph(argv)
+
+
+def _blend(n, overlap=0.5):
+    return [None] + [("fade", overlap)] * (n - 1)
+
+
+def test_a_short_stitch_is_one_pass():
+    assert F.plan_stitch_chunks([4.0] * 5, _blend(5), 30) == [F.StitchChunk(0, 4)]
+
+
+def test_a_long_blended_stitch_splits_inside_a_shot_just_before_it_blends_out():
+    chunks = F.plan_stitch_chunks([4.0] * 20, _blend(20, 0.6), 30, size=8)
+    assert [(c.first, c.last) for c in chunks] == [(0, 7), (7, 14), (14, 19)]
+    # Shot 7 blends out at 3.4 s, frame 102: the run stops a frame before it and the
+    # next one starts on exactly that frame, so the two together are the whole shot.
+    assert chunks[0].end_frame == 101 and chunks[1].start_frame == 101
+    assert chunks[-1].end_frame is None
+
+
+def test_a_stitch_splits_at_a_cut_when_one_comes_first():
+    joins = _blend(20)
+    joins[9] = None
+    chunks = F.plan_stitch_chunks([4.0] * 20, joins, 30, size=8)
+    assert chunks[0] == F.StitchChunk(0, 7, 0, 104)
+    joins[8] = None
+    chunks = F.plan_stitch_chunks([4.0] * 20, joins, 30, size=8)
+    assert chunks[0] == F.StitchChunk(0, 7) and chunks[1].first == 8
+
+
+def test_a_shot_too_short_to_split_moves_the_split_on():
+    durations = [4.0] * 20
+    durations[7] = 1.0   # blended in and out for 0.5 s each: nothing clear to cut on
+    chunks = F.plan_stitch_chunks(durations, _blend(20), 30, size=8)
+    assert chunks[0].last == 8 and chunks[1].first == 8
+
+
+def test_the_runs_cover_every_shot_exactly_once():
+    chunks = F.plan_stitch_chunks([3.0] * 61, _blend(61), 30)
+    assert chunks[0].first == 0 and chunks[-1].last == 60
+    for before, after in zip(chunks, chunks[1:]):
+        assert after.first == before.last and after.start_frame == before.end_frame
+
+
+def test_a_stitch_run_trims_its_ends_by_frame_and_sample_and_decodes_single_threaded():
+    argv = F.build_stitch_command(
+        ["a.mp4", "b.mp4", "c.mp4"], [4.0, 4.0, 4.0], "out.mp4", joins=_blend(3),
+        options=RenderOptions(), preview=True, start_frame=30, end_frame=60)
+    graph = _graph(argv)
+    assert argv.count("-threads") == 3
+    assert "[0:v]trim=start_frame=30,setpts=PTS-STARTPTS,settb=AVTB[s0]" in graph
+    assert "[0:a]atrim=start_sample=48000,asetpts=PTS-STARTPTS[st0]" in graph
+    assert "[2:v]trim=end_frame=60," in graph and "atrim=end_sample=96000" in graph
+    # The first shot is 3 s long once trimmed, so the first blend starts at 2.5 s.
+    assert "offset=2.500" in graph
+    assert "[at2][st2]concat" in graph
+
+
+def test_each_overlay_layer_exists_only_for_its_window():
+    argv = F.build_overlay_pass(
+        "stitched.mp4", [F.TimedLayer("a.png", 1.0, 4.5, 0.3)], "out.mp4",
+        options=RenderOptions(), preview=True, duration=10.0)
+    layer = argv[argv.index("a.png") - 12:argv.index("a.png")]
+    assert layer[layer.index("-itsoffset") + 1] == "1.000"
+    assert layer[layer.index("-t") + 1] == "3.500"

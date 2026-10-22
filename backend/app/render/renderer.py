@@ -204,6 +204,27 @@ def _background(unit: Unit, spec: VideoSpec, options: RenderOptions, work_dir: s
     return name
 
 
+def _stitch_blended(
+    shot_files: List[str], durations: List[float], joins: list, output: str,
+    *, options: RenderOptions, preview: bool, work_dir: str,
+) -> None:
+    """Blend the shots together a few at a time, then remux the runs into `output`."""
+    chunks = F.plan_stitch_chunks(durations, joins, options.fps)
+    names: List[str] = []
+    for number, chunk in enumerate(chunks):
+        name = output if len(chunks) == 1 else f"stitch_{number:03d}.mp4"
+        span = slice(chunk.first, chunk.last + 1)
+        F.run(F.build_stitch_command(shot_files[span], durations[span], name,
+                                     joins=[None] + list(joins[chunk.first + 1:chunk.last + 1]),
+                                     options=options, preview=preview,
+                                     start_frame=chunk.start_frame, end_frame=chunk.end_frame),
+              cwd=work_dir, timeout=F.shot_timeout(sum(durations[span])))
+        names.append(name)
+    if len(names) > 1:
+        F.write_concat_list(os.path.join(work_dir, "stitch.txt"), names)
+        F.run(F.build_concat_command("stitch.txt", output), cwd=work_dir, timeout=1800)
+
+
 def render(
     *, spec: VideoSpec, preview: bool, work_dir: str, out_dir: str, data_dir: str, user_id: str,
     gam: GamClient, speech: NotesSpeech, progress: Progress,
@@ -288,7 +309,7 @@ def render(
                         picture=(media_item.width, media_item.height),
                         ease=unit.motion.ease or "in_out",
                     )
-                    if F.path_crop_rects(path, *kenburns_geometry(width, height)[:2],
+                    if F.path_crop_rects(path, *kenburns_geometry(width, height, preview)[:2],
                                          width / height)[2]:
                         warnings.append(f"Shot {index + 1}: a Ken Burns frame ran off the "
                                         "picture and was moved back inside it")
@@ -299,7 +320,8 @@ def render(
         has_audio = False
         if unit.kind in ("card",) or (unit.kind == "still" and unit.media is None):
             drift = F.kenburns_effect_for(unit.kind, index, unit_options)
-            draw_w, draw_h = (kenburns_geometry(width, height)[:2] if drift else (width, height))
+            draw_w, draw_h = (kenburns_geometry(width, height, preview)[:2] if drift
+                              else (width, height))
             background = _background(unit, spec, unit_options, work_dir, index, draw_w, draw_h,
                                      background_image)
         elif unit.kind == "still":
@@ -402,9 +424,8 @@ def render(
     stitched = "stitched.mp4"
     if any(blends):
         try:
-            F.run(F.build_stitch_command(shot_files, timeline.durations, stitched, joins=blends,
-                                         options=options, preview=preview),
-                  cwd=work_dir, timeout=F.shot_timeout(sum(timeline.durations)))
+            _stitch_blended(shot_files, timeline.durations, blends, stitched,
+                            options=options, preview=preview, work_dir=work_dir)
         except F.FFmpegError as exc:
             # The blends cost a re-encode; if that fails, the shots still join by cuts,
             # and the timeline is re-laid without their overlaps to match. A clip's

@@ -64,11 +64,21 @@ def _run(job_id: str) -> None:
     work_dir = data_dir / "work" / job_id
     out_dir = renders_dir() / job_id
     gam, speech = GamClient(token), NotesSpeech(token)
+    report = queue.reporter(job_id)
+    # The stage is cleared when the job finishes, and an ffmpeg failure doesn't say
+    # which of a render's dozen ffmpeg runs it was: a shot, the stitch, the overlays.
+    # Remembered here so the error can.
+    last: Dict[str, str] = {}
+
+    def progress(stage: str, percent: int, detail: str = "") -> None:
+        last.update(stage=stage, detail=detail)
+        report(stage, percent, detail)
+
     try:
         result = render(
             spec=spec, preview=preview, work_dir=str(work_dir), out_dir=str(out_dir),
             data_dir=str(data_dir), user_id=user_id, gam=gam, speech=speech,
-            progress=queue.reporter(job_id),
+            progress=progress,
             max_segments=settings.render_max_segments,
             max_narration_chars=settings.render_max_narration_chars,
         )
@@ -83,7 +93,10 @@ def _run(job_id: str) -> None:
         shutil.rmtree(out_dir, ignore_errors=True)
     except Exception as exc:  # noqa: BLE001 - a failed render is a job error, not a crash
         logger.exception("Render %s failed", job_id)
-        _finish(job_id, status="error", stage="", error_message=readable_error(exc))
+        where = ", ".join(v for v in (last.get("stage"), last.get("detail")) if v)
+        message = readable_error(exc)
+        _finish(job_id, status="error", stage="",
+                error_message=f"{where}: {message}" if where else message)
         shutil.rmtree(out_dir, ignore_errors=True)
     else:
         def rel(path: Optional[str]) -> Optional[str]:
