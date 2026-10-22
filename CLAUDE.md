@@ -114,7 +114,8 @@ docker compose ps
 curl -f http://localhost:${APP_PORT}/api/health
 ```
 
-- `data/db/` is bind-mounted, so it survives rebuilds.
+- All of `data/` is bind-mounted (the database, renders, the render cache and assistant
+  pictures), so it survives rebuilds. `DATA_DIR=/app/data` is what points the app at it.
 - `JWT_SECRET_KEY` must be set and must **match gecko-notes'**. The app refuses to
   start without it.
 - Behind the reverse proxy, set `COMPOSE_FILE=docker-compose.yml:docker-compose.prod.yml`
