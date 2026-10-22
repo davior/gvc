@@ -348,7 +348,7 @@ def kenburns_sweep(travel: int, frames: int, fps: int) -> Tuple[str, str]:
 def kenburns_chain(
     src: str, out: str, *,
     width: int, height: int, fps: int, duration: float,
-    effect: str, amount: float,
+    effect: str, amount: float, preview: bool = False,
 ) -> str:
     """A `zoompan` drift over a still, rendered above `width`x`height` and scaled back.
 
@@ -376,7 +376,7 @@ def kenburns_chain(
     frames forever, so `d` is set a couple of frames beyond the shot and the
     caller's `-t` cuts before the ramp can begin again.
     """
-    read_width, read_height, write_width, write_height = kenburns_geometry(width, height)
+    read_width, read_height, write_width, write_height = kenburns_geometry(width, height, preview)
     frames = max(1, int(math.ceil(max(0.1, duration) * max(1, fps))))
     # What is read is the only headroom the zoom has; travelling past it would
     # start magnifying pixels, which is the softness this arrangement avoids.
@@ -542,7 +542,7 @@ def build_shot_command(
     drift = (kenburns_effect_for(kind, index, options)
              if "zoompan" in filters and path is None else None)
     if path is not None and kind == "still" and "zoompan" in filters:
-        read_width, read_height, _w, _h = kenburns_geometry(width, height)
+        read_width, read_height, _w, _h = kenburns_geometry(width, height, preview)
         # A path's frames are fractions of the *picture*, so the picture is placed
         # whole on a canvas of the output's shape (never cropped, whatever `fit`
         # says) and the frames are worked out on that canvas.
@@ -550,15 +550,15 @@ def build_shot_command(
                             "pad" if options.fit == "pad" else "blur")]
         chains.append(kenburns_path_chain(
             "fit", "kb", width=width, height=height, fps=options.fps, duration=duration,
-            path=path,
+            path=path, preview=preview,
         ))
         stage = "kb"
     elif drift:
-        read_width, read_height, _w, _h = kenburns_geometry(width, height)
+        read_width, read_height, _w, _h = kenburns_geometry(width, height, preview)
         chains = [fit_chain(video_in, "fit", read_width, read_height, options.fit)]
         chains.append(kenburns_chain(
             "fit", "kb", width=width, height=height, fps=options.fps, duration=duration,
-            effect=drift, amount=options.ken_burns.amount,
+            effect=drift, amount=options.ken_burns.amount, preview=preview,
         ))
         stage = "kb"
     else:
@@ -935,7 +935,7 @@ def path_crop_rects(
 
 def kenburns_path_chain(
     src: str, out: str, *, width: int, height: int, fps: int, duration: float,
-    path: KenBurnsPath,
+    path: KenBurnsPath, preview: bool = False,
 ) -> str:
     """A `zoompan` move between two frames, over a picture fitted at the read size.
 
@@ -950,7 +950,7 @@ def kenburns_path_chain(
     oversampling keeps each step to a fraction of an output pixel, which is what
     makes that acceptable for M2.
     """
-    read_width, read_height, write_width, write_height = kenburns_geometry(width, height)
+    read_width, read_height, write_width, write_height = kenburns_geometry(width, height, preview)
     frames = max(1, int(math.ceil(max(0.1, duration) * max(1, fps))))
     (x0, y0, w0), (x1, y1, w1), _moved = path_crop_rects(
         path, read_width, read_height, width / max(1, height))
@@ -996,6 +996,7 @@ def build_extract_command(
 def build_stitch_command(
     shot_files: Sequence[str], durations: Sequence[float], output: str,
     *, joins: Sequence[Optional[Tuple[str, float]]], options: RenderOptions, preview: bool,
+    start_frame: int = 0, end_frame: Optional[int] = None,
 ) -> List[str]:
     """`build_xfade_command` with a transition of its own at every join.
 
@@ -1003,22 +1004,56 @@ def build_stitch_command(
     whole, which is a cut or a dip (a dip is drawn inside both shots); a pair is the
     xfade name and the overlap. Audio is handled exactly as there: trimmed to where
     the blend starts and the next shot appended, so words never overlap.
+
+    `start_frame` drops that many frames off the front of the first shot and
+    `end_frame` stops the last one at that frame: one run of a chunked stitch (see
+    `plan_stitch_chunks`), whose neighbours show the rest of the shot.
     """
+    fps = max(1, options.fps)
+    durations = list(durations)
+    last = len(shot_files) - 1
+    if end_frame is not None:
+        durations[last] = end_frame / fps
+    if start_frame:
+        durations[0] -= start_frame / fps
+
     argv = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
     for name in shot_files:
-        argv += ["-i", name]
+        # Every input is open, with its decoder, for the whole pass. A decoder's
+        # default is a thread per core and a frame buffer per thread, which made
+        # this pass's memory the shot count times the core count.
+        argv += ["-threads", "1", "-i", name]
 
     # Every input on one timebase first. `concat` re-times its output to
     # AV_TIME_BASE (1/1000000) while the shots carry 1/90000, and `xfade` refuses two
     # inputs that disagree — so a cut followed by a blend failed to build at all.
-    chains: List[str] = [f"[{i}:v]settb=AVTB[s{i}]" for i in range(len(shot_files))]
-    video, audio = "s0", "0:a"
+    chains: List[str] = []
+    sounds: List[str] = []
+    for i in range(len(shot_files)):
+        lo = start_frame if i == 0 else 0
+        hi = end_frame if i == last else None
+        if not lo and hi is None:
+            chains.append(f"[{i}:v]settb=AVTB[s{i}]")
+            sounds.append(f"{i}:a")
+            continue
+        # Trimmed by frame and by sample rather than by seconds, so the picture and
+        # the sound part at the same instant and the next run picks up exactly
+        # there. 48 kHz is what `encode_args` writes every shot's audio at.
+        bounds = [f"start_frame={lo}"] if lo else []
+        samples = [f"start_sample={round(lo * 48000 / fps)}"] if lo else []
+        if hi is not None:
+            bounds.append(f"end_frame={hi}")
+            samples.append(f"end_sample={round(hi * 48000 / fps)}")
+        chains.append(f"[{i}:v]trim={':'.join(bounds)},setpts=PTS-STARTPTS,settb=AVTB[s{i}]")
+        chains.append(f"[{i}:a]atrim={':'.join(samples)},asetpts=PTS-STARTPTS[st{i}]")
+        sounds.append(f"st{i}")
+    video, audio = "s0", sounds[0]
     total = durations[0]
     for index in range(1, len(shot_files)):
         join = joins[index] if index < len(joins) else None
         if join is None:
             chains.append(f"[{video}][s{index}]concat=n=2:v=1:a=0[vx{index}]")
-            chains.append(f"[{audio}][{index}:a]concat=n=2:v=0:a=1[ax{index}]")
+            chains.append(f"[{audio}][{sounds[index]}]concat=n=2:v=0:a=1[ax{index}]")
             total += durations[index]
         else:
             name, overlap = join
@@ -1028,7 +1063,7 @@ def build_stitch_command(
                 f"duration={overlap:.3f}:offset={offset:.3f}[vx{index}]"
             )
             chains.append(f"[{audio}]atrim=end={offset:.3f},asetpts=PTS-STARTPTS[at{index}]")
-            chains.append(f"[at{index}][{index}:a]concat=n=2:v=0:a=1[ax{index}]")
+            chains.append(f"[at{index}][{sounds[index]}]concat=n=2:v=0:a=1[ax{index}]")
             total += durations[index] - overlap
         video, audio = f"vx{index}", f"ax{index}"
 
@@ -1037,6 +1072,75 @@ def build_stitch_command(
     argv += encode_args(options, preview)
     argv += ["-movflags", "+faststart", output]
     return argv
+
+
+# How many shots one pass of a blended stitch decodes at once. A single pass over
+# every shot grew with the video, since each input holds a decoder and its frame
+# buffers from the first frame to the last: about 10 MB a shot at preview size even
+# single-threaded, 1.9 GB for 80 shots before that, and several times either at
+# 1080p. Stitching runs of this many and remuxing the runs keeps the peak flat.
+STITCH_CHUNK_SHOTS = 8
+
+
+@dataclass(frozen=True)
+class StitchChunk:
+    """One pass of a chunked stitch: shots `first`..`last`, inclusive.
+
+    `start_frame` is how much of `first` the previous run already showed, and
+    `end_frame` where in `last` this one stops (None: the whole shot).
+    """
+
+    first: int
+    last: int
+    start_frame: int = 0
+    end_frame: Optional[int] = None
+
+
+def _join_overlap(joins: Sequence[Optional[Tuple[str, float]]], index: int) -> float:
+    join = joins[index] if 0 <= index < len(joins) else None
+    return join[1] if join else 0.0
+
+
+def plan_stitch_chunks(
+    durations: Sequence[float], joins: Sequence[Optional[Tuple[str, float]]], fps: int,
+    size: int = STITCH_CHUNK_SHOTS,
+) -> List[StitchChunk]:
+    """Cut a blended stitch into runs whose outputs `concat -c copy` back together.
+
+    A run can end at a cut, which needs nothing, or inside a shot, which is how a
+    video blended at every join still gets split: the run stops partway through the
+    shot and the next one starts there, so the blend each side stays whole inside
+    one run. The split frame is the last one before the shot starts blending out,
+    because the sound there is the trailing hold `shot_end_pause_ms` leaves after
+    the last word: an AAC frame boundary lands in silence rather than mid-word.
+
+    Every run is encoded with `encode_args`, so the remux is the same one the plain
+    concat already relies on, and the picture is encoded once, as before.
+    """
+    count = len(durations)
+    size = max(2, size)
+    fps = max(1, fps)
+    chunks: List[StitchChunk] = []
+    first, start = 0, 0
+    while count - first > size:
+        split: Optional[Tuple[int, Optional[int]]] = None
+        for j in range(first + size - 1, count - 1):
+            if _join_overlap(joins, j + 1) <= 0:
+                split = (j, None)
+                break
+            # A frame clear of both blends, with one to spare each side.
+            lo = math.ceil(_join_overlap(joins, j) * fps) + 1
+            hi = math.floor((durations[j] - _join_overlap(joins, j + 1)) * fps) - 1
+            if lo <= hi:
+                split = (j, hi)
+                break
+        if split is None:
+            break
+        j, frame = split
+        chunks.append(StitchChunk(first, j, start, frame))
+        first, start = (j + 1, 0) if frame is None else (j, frame)
+    chunks.append(StitchChunk(first, count - 1, start, None))
+    return chunks
 
 
 @dataclass(frozen=True)
@@ -1145,10 +1249,13 @@ def build_overlay_pass(
     So this is one re-encode of the whole picture after the stitch, done only when a
     video has timed overlays at all.
 
-    Each layer is a looped still. Its fades are alpha fades at absolute times, which
-    line up with the video's because a looped image input starts at zero too, and
-    `enable` keeps it off outside its window so nothing is composited where it isn't
-    shown.
+    Each layer is a looped still that only exists for its window: `-itsoffset`
+    starts it at the layer's start and `-t` ends it there, so its fades are alpha
+    fades at absolute times on the video's own clock. Looping every layer for the
+    whole video instead decoded each one on every frame, which made this pass's
+    memory and time grow with the overlay count — thirty layers took 560 MB and
+    twenty times as long. `enable` still keeps it off outside its window, and
+    `eof_action=pass` lets the picture through once it has ended.
     """
     fps = options.fps
     total = max(0.1, duration)
@@ -1156,7 +1263,10 @@ def build_overlay_pass(
     chains: List[str] = []
     stage = "0:v"
     for position, layer in enumerate(layers, start=1):
-        argv += ["-loop", "1", "-framerate", str(fps), "-t", f"{total:.3f}", "-i", layer.path]
+        start = max(0.0, min(layer.start, total))
+        length = max(1.0 / max(1, fps), min(layer.end, total) - start)
+        argv += ["-threads", "1", "-itsoffset", f"{start:.3f}", "-loop", "1",
+                 "-framerate", str(fps), "-t", f"{length:.3f}", "-i", layer.path]
         chain = f"[{position}:v]format=rgba"
         if layer.fade > 0:
             chain += (f",fade=t=in:st={layer.start:.3f}:d={layer.fade:.3f}:alpha=1"

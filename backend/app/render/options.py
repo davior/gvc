@@ -95,6 +95,12 @@ def transition_colour(style: str) -> str:
 # and the blur both grow with it, and past here the smoothness gained is smaller
 # than the memory spent.
 KENBURNS_READ_PIXELS = 24_000_000
+# A preview is 854x480 and encoded `ultrafast` to be looked at once, but under the
+# budget above it was read at 24 megapixels like a 4K render, which made a
+# drifting shot cost four times a still one (440 MB against 105). A third of the
+# budget still reads it above four times the frame, which no preview can tell from
+# the full read, at half the memory.
+KENBURNS_PREVIEW_READ_PIXELS = 8_000_000
 KENBURNS_READ_MAX_SCALE = 8.0
 KENBURNS_WRITE_PIXELS = 3840 * 2160
 KENBURNS_WRITE_MAX_SCALE = 2.0
@@ -119,7 +125,8 @@ def _budgeted_scale(width: int, height: int, budget: int, ceiling: float) -> flo
     return max(1.0, min(ceiling, (budget / pixels) ** 0.5))
 
 
-def kenburns_geometry(width: int, height: int) -> Tuple[int, int, int, int]:
+def kenburns_geometry(width: int, height: int,
+                      preview: bool = False) -> Tuple[int, int, int, int]:
     """(read_w, read_h, write_w, write_h) for a drifting shot at this frame size.
 
     The fit stage renders at the read size, zoompan crops from it and emits the
@@ -130,7 +137,8 @@ def kenburns_geometry(width: int, height: int) -> Tuple[int, int, int, int]:
         n = max(2, int(value))
         return n - n % 2
 
-    read = _budgeted_scale(width, height, KENBURNS_READ_PIXELS, KENBURNS_READ_MAX_SCALE)
+    budget = KENBURNS_PREVIEW_READ_PIXELS if preview else KENBURNS_READ_PIXELS
+    read = _budgeted_scale(width, height, budget, KENBURNS_READ_MAX_SCALE)
     write = _budgeted_scale(width, height, KENBURNS_WRITE_PIXELS, KENBURNS_WRITE_MAX_SCALE)
     # Reading below what is written would mean zoompan upscaling to fill its own
     # output, which is the softness this whole arrangement exists to avoid.
