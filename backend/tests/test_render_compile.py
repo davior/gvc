@@ -357,3 +357,32 @@ def test_the_overlay_pass_draws_each_layer_only_in_its_window_and_copies_the_sou
     assert "[l2]" in graph and "fade" not in graph.split("[1:v]")[0]
     assert argv[argv.index("-c:a") + 1] == "copy"
     assert argv.count("-c:a") == 1 and argv[argv.index("-map") + 1] == "[v2]"
+
+
+# ── clip sound levels and the score during clips (S5) ───────────────────────
+
+def test_a_clips_own_level_and_a_tracks_choice_during_clips_reach_the_render():
+    spec = spec_of({
+        "assets": {"v": {"from": "gam", "id": "g1", "type": "video"},
+                   "m": {"from": "gam", "id": "g2", "type": "audio"}},
+        "segments": [
+            {"id": "a", "kind": "clip", "visual": {"asset": "v", "audio": "play",
+                                                    "volume_db": -4.5}},
+            {"id": "b", "kind": "clip", "visual": {"asset": "v", "audio": "play"}},
+        ],
+        "audio_tracks": [{"id": "t", "asset": "m", "start": "video_start",
+                          "end": "video_end", "during_clips": "mute"}]})
+    units = plan_units(spec, {"v": VIDEO, "m": SONG}, [])
+    assert [u.volume_db for u in units] == [-4.5, 0.0]
+    timeline = layout(units, [6.0, 6.0], [])
+    where = placement(units, timeline, [{} for _ in units])
+    [track] = place_tracks(spec, {"v": VIDEO, "m": SONG}, where, [])
+    assert track.during_clips == "mute"
+
+
+def test_a_clip_level_outside_its_range_is_refused():
+    _spec, issues = parse_spec({
+        "assets": {"v": {"from": "gam", "id": "g1", "type": "video"}},
+        "segments": [{"id": "a", "kind": "clip",
+                      "visual": {"asset": "v", "audio": "play", "volume_db": 40}}]})
+    assert _spec is None and issues

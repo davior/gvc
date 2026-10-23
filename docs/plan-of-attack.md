@@ -313,6 +313,24 @@ This plan takes **field by field**, so `{ "transition_in": { "style": "dissolve"
 keeps the project's duration, because that is what the AI and the editor will both
 expect.
 
+### S5. Clip sound levels, and the score during clips
+
+Footage arrives at any level, from a phone in a room to a broadcast master, so a clip
+playing its own sound is matched to the narration by the renderer: each clip's
+integrated loudness (EBU R128) over the part that plays, against the narration's,
+one static gain per clip (dynamics kept, a limiter only when raising), capped at
++24 dB so a near-silent clip doesn't become loud hiss. Two optional fields then move
+it from there, so specs without them are unchanged and stay `"0.2"`:
+
+```ts
+visual.volume_db?: number                     // -30..20; a clip's level from the match
+audio_tracks[].during_clips?: "mute" | "play" // absent: as under narration
+```
+
+A ducked track already dips under clips, since the narration's key carries their
+sound. `"mute"` fades the track out around each clip and back after; `"play"` keeps
+it at its level through clips, ducked under the voice alone.
+
 ## Changes needed in GAM
 
 Specified here, applied in GAM's repository, not from this one.

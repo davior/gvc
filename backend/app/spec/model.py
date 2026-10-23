@@ -397,6 +397,9 @@ class Visual(_Model):
     trim: Optional[Trim] = None               # videos only
     audio: Literal["mute", "play"] = "mute"   # "play" only on a clip
     loop: bool = True                         # shorter than its segment: loop, or hold
+    # A clip's sound is matched to the narration's loudness by the renderer; this
+    # moves it from there, in dB (S5). Ignored where the footage plays muted.
+    volume_db: Optional[float] = Field(default=None, ge=-30, le=20)
 
 
 class Beat(_Model):
@@ -519,6 +522,10 @@ class AudioTrack(_Model):
     loop: Optional[bool] = None         # default: on for music
     volume: Unit = 0.18
     duck_under_narration: Optional[bool] = None   # default: on for music
+    # While a clip plays its own sound (S5). None: as under narration (a ducked
+    # track dips, one that isn't plays on). "mute" fades it out for the clip and
+    # back in after; "play" keeps it at its level, ducked under narration only.
+    during_clips: Optional[Literal["mute", "play"]] = None
     fade_in: float = Field(default=0.0, ge=0, le=15)
     fade_out: float = Field(default=0.0, ge=0, le=15)
 

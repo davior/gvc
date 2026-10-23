@@ -164,6 +164,56 @@ def probe_has_audio(path: str) -> bool:
         return False
 
 
+# Spoken word sits about here; used as the target when a video has no narration.
+DEFAULT_LOUDNESS_LUFS = -16.0
+# A clip quieter than this is silence or room tone, and matching it to the voice
+# would only raise the noise.
+SILENT_LUFS = -60.0
+CLIP_GAIN_LIMITS_DB = (-30.0, 24.0)
+
+
+def measure_loudness(path: str, length: Optional[float] = None) -> Optional[float]:
+    """Integrated loudness (EBU R128, LUFS) of a file's sound, or of its first
+    `length` seconds; None when it has none worth measuring."""
+    argv = ["ffmpeg", "-hide_banner", "-nostats", "-i", path]
+    if length is not None:
+        argv += ["-t", f"{max(0.1, length):.3f}"]
+    argv += ["-vn", "-af", "ebur128=framelog=quiet", "-f", "null", "-"]
+    try:
+        out = subprocess.run(argv, capture_output=True, timeout=PROBE_TIMEOUT_SECONDS * 10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    # The summary comes last; its "I:" line is the integrated loudness.
+    found = None
+    for line in out.stderr.decode(errors="replace").splitlines():
+        line = line.strip()
+        if line.startswith("I:") and line.endswith("LUFS"):
+            try:
+                found = float(line[2:-4])
+            except ValueError:
+                found = None
+    if found is None or found < SILENT_LUFS:
+        return None
+    return found
+
+
+def combined_loudness(levels: Sequence[Tuple[float, float]]) -> Optional[float]:
+    """The loudness of several pieces played one after another, from each one's
+    (LUFS, seconds): their energy averaged by time, as R128 would over the whole."""
+    weighted = [(10 ** (lufs / 10), seconds) for lufs, seconds in levels if seconds > 0]
+    total = sum(seconds for _, seconds in weighted)
+    if not weighted or total <= 0:
+        return None
+    return 10 * math.log10(sum(energy * seconds for energy, seconds in weighted) / total)
+
+
+def clip_gain(clip_lufs: Optional[float], target_lufs: float, adjust_db: float = 0.0) -> float:
+    """dB to bring a clip to the narration's loudness, then move it by `adjust_db`."""
+    match = 0.0 if clip_lufs is None else target_lufs - clip_lufs
+    low, high = CLIP_GAIN_LIMITS_DB
+    return max(low, min(high, match + adjust_db))
+
+
 def encode_args(options: RenderOptions, preview: bool) -> List[str]:
     """Codec flags shared by every shot. Identical output = concat can `-c copy`."""
     preset, crf = encoder_tier(options.quality, preview)
@@ -480,6 +530,7 @@ def build_shot_command(
     out_transition: Optional[TransitionSpec] = None,
     loop: bool = True,
     path: Optional["KenBurnsPath"] = None,
+    audio_gain_db: float = 0.0,
 ) -> List[str]:
     """Full argv for rendering one shot to its own MP4.
 
@@ -495,6 +546,7 @@ def build_shot_command(
     - `loop` False on a video holds its last frame instead of repeating it.
     - `path`: a Ken Burns move between two frames of the picture (S1), in place of
       the preset drift.
+    - `audio_gain_db`: a clip's own sound brought to the narration's loudness (S5).
     """
     width, height = frame_size(options.aspect, options.resolution, preview)
     argv: List[str] = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
@@ -611,7 +663,16 @@ def build_shot_command(
 
     # Pad the audio so a shot always reaches its target length even when the
     # narration is shorter (a media block with little text under it).
-    audio_chain = f"[{audio_main}]aresample=48000,aformat=channel_layouts=stereo,apad"
+    audio_chain = f"[{audio_main}]aresample=48000,aformat=channel_layouts=stereo"
+    if abs(audio_gain_db) >= 0.05:
+        audio_chain += f",volume={audio_gain_db:.1f}dB"
+        if audio_gain_db > 0:
+            # Raising a quiet clip can push its loudest moments past full scale, so
+            # they are limited at -1 dBFS rather than clipped. `level=0` stops the
+            # limiter normalising the whole clip again, and `latency` takes back
+            # the few milliseconds its lookahead would put between sound and picture.
+            audio_chain += ",alimiter=limit=0.891:level=0:latency=1"
+    audio_chain += ",apad"
     if dip > 0:
         # Only the tail is faded, to match the picture dipping to colour there —
         # and it lands in the trailing hold `shot_end_pause_ms` leaves after the
@@ -996,7 +1057,7 @@ def build_extract_command(
 def build_stitch_command(
     shot_files: Sequence[str], durations: Sequence[float], output: str,
     *, joins: Sequence[Optional[Tuple[str, float]]], options: RenderOptions, preview: bool,
-    start_frame: int = 0, end_frame: Optional[int] = None,
+    start_frame: int = 0, end_frame: Optional[int] = None, streams: str = "both",
 ) -> List[str]:
     """`build_xfade_command` with a transition of its own at every join.
 
@@ -1008,6 +1069,10 @@ def build_stitch_command(
     `start_frame` drops that many frames off the front of the first shot and
     `end_frame` stops the last one at that frame: one run of a chunked stitch (see
     `plan_stitch_chunks`), whose neighbours show the rest of the shot.
+
+    `streams` is "video" or "audio" to build only that half: the partial stitch
+    (see `plan_partial_stitch`) encodes the picture only around each blend, and
+    the sound for the whole video in one pass of its own.
     """
     fps = max(1, options.fps)
     durations = list(durations)
@@ -1016,24 +1081,36 @@ def build_stitch_command(
         durations[last] = end_frame / fps
     if start_frame:
         durations[0] -= start_frame / fps
+    picture, sound = streams in ("both", "video"), streams in ("both", "audio")
+    # The picture alone can seek its first shot to `start_frame` rather than decode
+    # its way there, which for a blend piece is most of the shot. Half a frame early,
+    # so the frame-accurate seek keeps that frame however its time rounds. The sound
+    # can't: a seek lands on an AAC packet, not a sample.
+    seek = start_frame if streams == "video" else 0
 
     argv = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
-    for name in shot_files:
+    for index, name in enumerate(shot_files):
         # Every input is open, with its decoder, for the whole pass. A decoder's
         # default is a thread per core and a frame buffer per thread, which made
         # this pass's memory the shot count times the core count.
-        argv += ["-threads", "1", "-i", name]
+        argv += ["-threads", "1"] + ([] if sound else ["-an"]) + ([] if picture else ["-vn"])
+        if index == 0 and seek:
+            argv += ["-ss", f"{(seek - 0.5) / fps:.6f}"]
+        argv += ["-i", name]
 
     # Every input on one timebase first. `concat` re-times its output to
     # AV_TIME_BASE (1/1000000) while the shots carry 1/90000, and `xfade` refuses two
     # inputs that disagree — so a cut followed by a blend failed to build at all.
-    chains: List[str] = []
+    vchains: List[str] = []
+    achains: List[str] = []
     sounds: List[str] = []
     for i in range(len(shot_files)):
-        lo = start_frame if i == 0 else 0
+        lo = start_frame - seek if i == 0 else 0
         hi = end_frame if i == last else None
+        if hi is not None and i == 0:
+            hi -= seek
         if not lo and hi is None:
-            chains.append(f"[{i}:v]settb=AVTB[s{i}]")
+            vchains.append(f"[{i}:v]settb=AVTB[s{i}]")
             sounds.append(f"{i}:a")
             continue
         # Trimmed by frame and by sample rather than by seconds, so the picture and
@@ -1047,33 +1124,46 @@ def build_stitch_command(
         # ffmpeg 7 leaves a trimmed stream with no frame rate (1/0), and `xfade`
         # refuses one, so it is set back: the frames are already at it, so `fps`
         # neither drops nor repeats any.
-        chains.append(f"[{i}:v]trim={':'.join(bounds)},setpts=PTS-STARTPTS,"
-                      f"fps={fps},settb=AVTB[s{i}]")
-        chains.append(f"[{i}:a]atrim={':'.join(samples)},asetpts=PTS-STARTPTS[st{i}]")
+        vchains.append(f"[{i}:v]trim={':'.join(bounds)},setpts=PTS-STARTPTS,"
+                       f"fps={fps},settb=AVTB[s{i}]")
+        achains.append(f"[{i}:a]atrim={':'.join(samples)},asetpts=PTS-STARTPTS[st{i}]")
         sounds.append(f"st{i}")
     video, audio = "s0", sounds[0]
     total = durations[0]
     for index in range(1, len(shot_files)):
         join = joins[index] if index < len(joins) else None
         if join is None:
-            chains.append(f"[{video}][s{index}]concat=n=2:v=1:a=0[vx{index}]")
-            chains.append(f"[{audio}][{sounds[index]}]concat=n=2:v=0:a=1[ax{index}]")
+            vchains.append(f"[{video}][s{index}]concat=n=2:v=1:a=0[vx{index}]")
+            achains.append(f"[{audio}][{sounds[index]}]concat=n=2:v=0:a=1[ax{index}]")
             total += durations[index]
         else:
             name, overlap = join
             offset = max(0.0, total - overlap)
-            chains.append(
+            vchains.append(
                 f"[{video}][s{index}]xfade=transition={name}:"
                 f"duration={overlap:.3f}:offset={offset:.3f}[vx{index}]"
             )
-            chains.append(f"[{audio}]atrim=end={offset:.3f},asetpts=PTS-STARTPTS[at{index}]")
-            chains.append(f"[at{index}][{sounds[index]}]concat=n=2:v=0:a=1[ax{index}]")
+            achains.append(f"[{audio}]atrim=end={offset:.3f},asetpts=PTS-STARTPTS[at{index}]")
+            achains.append(f"[at{index}][{sounds[index]}]concat=n=2:v=0:a=1[ax{index}]")
             total += durations[index] - overlap
         video, audio = f"vx{index}", f"ax{index}"
+    vchains.append(f"[{video}]setsar=1,format=yuv420p[v]")
 
-    chains.append(f"[{video}]setsar=1,format=yuv420p[v]")
-    argv += ["-filter_complex", ";".join(chains), "-map", "[v]", "-map", f"[{audio}]"]
-    argv += encode_args(options, preview)
+    shared = encode_args(options, preview)
+    split = shared.index("-c:a")
+    if not sound:
+        argv += ["-filter_complex", ";".join(vchains), "-map", "[v]", *shared[:split], "-an"]
+    elif not picture:
+        # A lone input's sound needs no graph at all, and a graph with nothing in it
+        # is an error, so the one-shot case maps the track straight through.
+        if achains:
+            argv += ["-filter_complex", ";".join(achains), "-map", f"[{audio}]"]
+        else:
+            argv += ["-map", f"{audio}"]
+        argv += [*shared[split:], "-vn"]
+    else:
+        argv += ["-filter_complex", ";".join(vchains + achains),
+                 "-map", "[v]", "-map", f"[{audio}]", *shared]
     argv += ["-movflags", "+faststart", output]
     return argv
 
@@ -1148,6 +1238,144 @@ def plan_stitch_chunks(
 
 
 @dataclass(frozen=True)
+class StitchPiece:
+    """One stretch of a partial stitch's picture, in output order.
+
+    `blend` False: frames `start_frame`..`end_frame` of shot `first` (== `last`),
+    copied as they were encoded. True: shots `first`..`last` encoded together, from
+    `start_frame` of the first to `end_frame` of the last, with their blends. An
+    `end_frame` of None runs to the end of the shot.
+    """
+
+    blend: bool
+    first: int
+    last: int
+    start_frame: int = 0
+    end_frame: Optional[int] = None
+
+
+def probe_keyframes(path: str, fps: int) -> Tuple[List[int], int]:
+    """Frame numbers of a video's keyframes, and how many frames it has.
+
+    Read from the packets, not the frames, so nothing is decoded and a long shot
+    probes in a moment.
+    """
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "packet=pts_time,flags", "-of", "csv=p=0", path],
+        capture_output=True, timeout=PROBE_TIMEOUT_SECONDS,
+    )
+    if out.returncode != 0:
+        raise FFmpegError(f"ffprobe could not read the keyframes of {path}")
+    frames = set()
+    count = 0
+    for line in out.stdout.decode(errors="replace").splitlines():
+        when, _, flags = line.partition(",")
+        count += 1
+        if "K" in flags:
+            try:
+                frames.add(round(float(when) * fps))
+            except ValueError:
+                continue
+    return sorted(frames), count
+
+
+def plan_partial_stitch(
+    durations: Sequence[float], joins: Sequence[Optional[Tuple[str, float]]],
+    keyframes: Sequence[Sequence[int]], fps: int,
+) -> List[StitchPiece]:
+    """Lay a blended stitch out as copied stretches and the blends between them.
+
+    A blend needs both shots decoded and encoded again, but only where they
+    overlap. Every shot was encoded with `encode_args`, so between two of its
+    keyframes it can be copied as it is and remuxed beside freshly encoded frames.
+    Each blend is therefore re-encoded from the last keyframe of the outgoing shot
+    before the blend begins to the first keyframe of the incoming one after it
+    ends: a second or two a join rather than the whole video, which at 1080p on
+    the `medium` preset is minutes against seconds.
+
+    A shot with no keyframe clear of the blends at both ends (a short one, blended
+    in and out) has nothing to copy, so the blend before it and the one after it
+    become one encode through it.
+    """
+    count = len(durations)
+    fps = max(1, fps)
+
+    def overlap(index: int) -> float:
+        return _join_overlap(joins, index) if 0 < index < count else 0.0
+
+    pieces: List[StitchPiece] = []
+    group: Optional[Tuple[int, int]] = None   # an open blend: (first shot, start frame)
+    for i in range(count):
+        frames_in, frames_out = overlap(i), overlap(i + 1)
+        keys = keyframes[i] if i < len(keyframes) else [0]
+        if frames_in > 0:
+            after = [k for k in keys if k >= math.ceil(frames_in * fps)]
+            lo: Optional[int] = after[0] if after else None
+        else:
+            lo = 0
+        hi: Optional[int] = None
+        if frames_out > 0:
+            before = [k for k in keys if k <= math.floor((durations[i] - frames_out) * fps)]
+            hi = before[-1] if before else 0
+        body = lo is not None and (hi is None or hi > lo)
+        if group is not None:
+            if not body:
+                if frames_out <= 0:   # the blend ends inside this shot, and so does it
+                    pieces.append(StitchPiece(True, group[0], i, group[1], None))
+                    group = None
+                continue
+            pieces.append(StitchPiece(True, group[0], i, group[1], lo))
+            group = None
+        start = lo or 0
+        if hi is None:
+            pieces.append(StitchPiece(False, i, i, start, None))
+        else:
+            if hi > start:
+                pieces.append(StitchPiece(False, i, i, start, hi))
+            group = (i, hi)
+    if group is not None:
+        pieces.append(StitchPiece(True, group[0], count - 1, group[1], None))
+    return pieces
+
+
+def build_cut_command(source: str, output_pattern: str, at_frames: Sequence[int],
+                      fps: int) -> List[str]:
+    """Split a shot's picture at keyframes, copied: `output_pattern` takes a %d.
+
+    The segment muxer cuts at the first keyframe at or after each time, so each is
+    asked for half a frame early: the cut lands on that keyframe however its time
+    rounds. Audio is left out; the partial stitch encodes the sound separately.
+    """
+    times = ",".join(f"{(frame - 0.5) / max(1, fps):.6f}" for frame in at_frames)
+    return [
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", source,
+        "-map", "0:v", "-c", "copy", "-an", "-f", "segment", "-segment_format", "mp4",
+        # The timescale every encode writes (see `encode_args`). The segment muxer
+        # would otherwise pick 1/15360, and ffmpeg 6's concat, given pieces on two
+        # timebases, laid them out a minute apart.
+        "-segment_format_options", "video_track_timescale=90000",
+        "-segment_times", times, "-reset_timestamps", "1", output_pattern,
+    ]
+
+
+def build_video_copy_command(source: str, output: str) -> List[str]:
+    """A shot's picture alone, copied: every file the concat joins has the same
+    streams, and the partial stitch's pieces carry no sound."""
+    return ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", source,
+            "-map", "0:v", "-c", "copy", "-an", "-video_track_timescale", "90000", output]
+
+
+def build_join_av_command(video_list: str, audio: str, output: str) -> List[str]:
+    """Remux the partial stitch's picture pieces and its sound into one file."""
+    return [
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        "-f", "concat", "-safe", "0", "-i", video_list, "-i", audio,
+        "-map", "0:v", "-map", "1:a", "-c", "copy", "-movflags", "+faststart", output,
+    ]
+
+
+@dataclass(frozen=True)
 class MixTrack:
     """One audio track placed on the finished video's timeline."""
 
@@ -1160,11 +1388,27 @@ class MixTrack:
     fade_in: float = 0.0
     fade_out: float = 0.0
     duck: bool = True     # pushed down under the narration
+    during_clips: Optional[str] = None   # None, "mute" or "play": see AudioTrack
+
+
+# How long the score takes to leave before a clip and come back after it.
+CLIP_FADE_SECONDS = 0.6
+
+
+def _quiet_during(windows: Sequence[Tuple[float, float]], fade: float) -> str:
+    """A `volume` expression that is 1, except 0 inside each window, ramping over
+    `fade` seconds either side of it so the sound leaves and returns rather than
+    cutting. Quoted, since an expression's commas would otherwise split the graph."""
+    fade = max(0.01, fade)
+    terms = [f"(1-max(0,min(1,min((t-{start - fade:.3f})/{fade:.3f},"
+             f"({end + fade:.3f}-t)/{fade:.3f}))))" for start, end in windows]
+    return "'" + "*".join(terms) + "'"
 
 
 def build_mix_command(
     source: str, tracks: Sequence[MixTrack], output: str,
     *, duration: float, duck_available: bool = True,
+    clip_windows: Sequence[Tuple[float, float]] = (),
 ) -> List[str]:
     """Mix any number of tracks under the finished video, the picture untouched.
 
@@ -1178,10 +1422,16 @@ def build_mix_command(
     A looping track restarts from the top of its file, not from `trim_in`: that is
     what `-stream_loop` does with an input seek, and a bed short enough to loop is
     rarely trimmed as well.
+
+    `clip_windows` are where a clip plays its own sound. A track set to "mute"
+    there fades out around each one. The narration's key carries the clips too,
+    which is what dips a ducked bed under them; a ducked track set to "play" is
+    compressed against a key with the clips taken out, so only the voice moves it.
     """
     argv = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", source]
     chains: List[str] = []
     ducked: List[str] = []
+    spared: List[str] = []
     flat: List[str] = []
     for position, track in enumerate(tracks, start=1):
         if track.trim_in > 0:
@@ -1201,22 +1451,39 @@ def build_mix_command(
         delay = int(round(max(0.0, track.start) * 1000))
         if delay:
             chain += f",adelay={delay}|{delay}"
-        chain += f",apad[t{position}]"
-        chains.append(chain)
-        (ducked if track.duck and duck_available else flat).append(f"t{position}")
+        chain += ",apad"
+        if track.during_clips == "mute" and clip_windows:
+            # After the delay, so `t` is the video's own clock.
+            chain += f",volume={_quiet_during(clip_windows, CLIP_FADE_SECONDS)}:eval=frame"
+        chains.append(chain + f"[t{position}]")
+        if not (track.duck and duck_available):
+            flat.append(f"t{position}")
+        elif track.during_clips == "play" and clip_windows:
+            spared.append(f"t{position}")
+        else:
+            ducked.append(f"t{position}")
 
     mix_inputs = ["nar"]
-    if ducked:
-        if len(ducked) == 1:
-            bed = ducked[0]
-        else:
-            chains.append("".join(f"[{t}]" for t in ducked)
-                          + f"amix=inputs={len(ducked)}:normalize=0[bedmix]")
-            bed = "bedmix"
-        chains.append("[0:a]asplit=2[nar][key]")
-        chains.append(f"[{bed}][key]sidechaincompress="
-                      "threshold=0.060:ratio=8:attack=15:release=350[bed]")
-        mix_inputs.append("bed")
+    beds = [(name, group) for name, group in (("bed", ducked), ("spared", spared)) if group]
+    if beds:
+        keys = (["key"] if ducked else []) + (["keyvoice"] if spared else [])
+        chains.append(f"[0:a]asplit={1 + len(keys)}[nar]" + "".join(f"[{k}]" for k in keys))
+        if spared:
+            # The clips cut out of the key, quickly, so the bed is not ducked
+            # across them; the voice either side still is.
+            chains.append(f"[keyvoice]volume={_quiet_during(clip_windows, 0.05)}:eval=frame"
+                          "[keyspared]")
+        for name, group in beds:
+            if len(group) == 1:
+                source_label = group[0]
+            else:
+                chains.append("".join(f"[{t}]" for t in group)
+                              + f"amix=inputs={len(group)}:normalize=0[{name}mix]")
+                source_label = f"{name}mix"
+            key = "key" if name == "bed" else "keyspared"
+            chains.append(f"[{source_label}][{key}]sidechaincompress="
+                          f"threshold=0.060:ratio=8:attack=15:release=350[{name}]")
+            mix_inputs.append(name)
     else:
         chains.append("[0:a]anull[nar]")
     mix_inputs += flat

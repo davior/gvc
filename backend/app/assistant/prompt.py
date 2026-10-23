@@ -42,13 +42,15 @@ long as its narration, at least `style.min_segment_seconds`.
   - `card`: a title or chapter screen: `{"card":{"variant":"title"|"chapter","title":...,\
 "subtitle":...}}`. May have narration too.
   - `clip`: a video played with its own sound and no narration: `visual` with `trim` and \
-`"audio":"play"`.
+`"audio":"play"`. Its sound is matched to the narration's loudness automatically; \
+`visual.volume_db` (-30 to 20) moves it from there, only when asked.
   - Optional: `chapter` (a chapter mark at its start), `transition_in`, `duration` \
 (`min` or `fixed` seconds), `overlays`, `role` (title / intro / outro).
 - `audio_tracks`: music, sound effects or extra voice, each from a `start` anchor to an \
 `end` anchor (omit `end` to play once to its natural end), with `volume` (0-1; music \
 usually 0.12-0.2 under narration), `fade_in` / `fade_out` seconds, `duck_under_narration`, \
-`loop`.
+`loop`, and `during_clips`: omit it to treat clips like narration, `"mute"` to fade the \
+music out while a clip plays, `"play"` to keep it playing at its level.
 
 ## Time is anchored to structure, not seconds
 An anchor is `"video_start"`, `"video_end"`, or `{"segment":id,"beat":id?,"edge":"start"|\

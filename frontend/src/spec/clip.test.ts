@@ -8,6 +8,7 @@ import {
   setLength,
   setLoop,
   setTrim,
+  setVolume,
   timingNote,
   trimAt,
 } from '@/spec/clip'
@@ -92,6 +93,12 @@ describe('scene length and looping', () => {
 
   it('sets whether short footage loops', () => {
     expect(setLoop(spec({}), 0, false).segments[0].visual?.loop).toBe(false)
+  })
+
+  it('sets a clip level, and drops it at the matched level', () => {
+    const louder = setVolume(spec({ audio: 'play' }), 0, 4)
+    expect(louder.segments[0].visual?.volume_db).toBe(4)
+    expect('volume_db' in (setVolume(louder, 0, 0).segments[0].visual ?? {})).toBe(false)
   })
 })
 

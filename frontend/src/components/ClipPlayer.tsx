@@ -10,6 +10,7 @@ import {
   setLength,
   setLoop,
   setTrim,
+  setVolume,
   timingNote,
   trimAt,
 } from '@/spec/clip'
@@ -183,6 +184,27 @@ export default function ClipPlayer({
           </div>
           {edge('in')}
           {edge('out')}
+          {visual.audio === 'play' && (
+            <label className="flex flex-wrap items-center gap-2">
+              Clip level
+              <input
+                type="range"
+                min="-20"
+                max="12"
+                step="1"
+                aria-label="Clip level in dB"
+                value={visual.volume_db ?? 0}
+                onChange={(e) => onChange(setVolume(spec, index, Number(e.target.value)))}
+              />
+              <span className="w-12 font-mono">
+                {(visual.volume_db ?? 0) > 0 ? '+' : ''}
+                {visual.volume_db ?? 0} dB
+              </span>
+              <span className="text-slate-500">
+                matched to the narration first, then moved by this
+              </span>
+            </label>
+          )}
         </>
       )}
       {segment.kind === 'scene' && (
