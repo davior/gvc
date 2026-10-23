@@ -1253,25 +1253,35 @@ def build_overlay_pass(
     So this is one re-encode of the whole picture after the stitch, done only when a
     video has timed overlays at all.
 
-    Each layer is a looped still that only exists for its window: `-itsoffset`
-    starts it at the layer's start and `-t` ends it there, so its fades are alpha
-    fades at absolute times on the video's own clock. Looping every layer for the
-    whole video instead decoded each one on every frame, which made this pass's
-    memory and time grow with the overlay count — thirty layers took 560 MB and
-    twenty times as long. `enable` still keeps it off outside its window, and
-    `eof_action=pass` lets the picture through once it has ended.
+    Each layer is its PNG read once, as a single frame, and repeated inside the
+    graph for its window only: `loop` repeats it, `trim` stops it after the
+    window's frames and `setpts` places them from the layer's start. Its fades are
+    then alpha fades at absolute times on the video's own clock, `enable` keeps it
+    off outside its window, and `eof_action=pass` lets the picture through after.
+
+    Two ways of doing this have failed. Looping each PNG as an input for the whole
+    video decoded it on every frame, which made this pass's memory and time grow
+    with the overlay count: thirty layers took 560 MB and twenty times as long. An
+    input per layer that starts late (`-itsoffset`) deadlocked Debian's ffmpeg
+    7.1.5 at the first layer's start: idle, never finishing, until the timeout. A
+    one-frame input is finished before the picture starts, and from then on the
+    overlay only pulls the layer's frames through the graph as it needs them, so
+    nothing is left waiting on ffmpeg's scheduling of inputs.
     """
-    fps = options.fps
+    fps = max(1, options.fps)
     total = max(0.1, duration)
     argv = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", source]
     chains: List[str] = []
     stage = "0:v"
     for position, layer in enumerate(layers, start=1):
         start = max(0.0, min(layer.start, total))
-        length = max(1.0 / max(1, fps), min(layer.end, total) - start)
-        argv += ["-threads", "1", "-itsoffset", f"{start:.3f}", "-loop", "1",
-                 "-framerate", str(fps), "-t", f"{length:.3f}", "-i", layer.path]
-        chain = f"[{position}:v]format=rgba"
+        # Every frame that starts inside the window, the last one included.
+        frames = max(1, math.ceil((min(layer.end, total) - start) * fps - 1e-6))
+        argv += ["-i", layer.path]
+        # `settb` first: a lone PNG comes in on the image demuxer's 1/25 timebase,
+        # which would round every frame's time, and with it the fades, to 40 ms.
+        chain = (f"[{position}:v]format=rgba,loop=loop=-1:size=1,trim=end_frame={frames},settb=AVTB,"
+                 f"setpts=N/({fps}*TB)+{start:.3f}/TB")
         if layer.fade > 0:
             chain += (f",fade=t=in:st={layer.start:.3f}:d={layer.fade:.3f}:alpha=1"
                       f",fade=t=out:st={layer.end - layer.fade:.3f}:d={layer.fade:.3f}:alpha=1")

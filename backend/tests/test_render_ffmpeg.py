@@ -1350,10 +1350,13 @@ def test_a_stitch_run_trims_its_ends_by_frame_and_sample_and_decodes_single_thre
     assert "[at2][st2]concat" in graph
 
 
-def test_each_overlay_layer_exists_only_for_its_window():
+def test_each_overlay_layer_is_one_frame_repeated_for_its_window_only():
+    """A layer looped as an input for the whole video was decoded on every frame,
+    and one started late with `-itsoffset` deadlocked ffmpeg 7.1.5."""
     argv = F.build_overlay_pass(
         "stitched.mp4", [F.TimedLayer("a.png", 1.0, 4.5, 0.3)], "out.mp4",
         options=RenderOptions(), preview=True, duration=10.0)
-    layer = argv[argv.index("a.png") - 12:argv.index("a.png")]
-    assert layer[layer.index("-itsoffset") + 1] == "1.000"
-    assert layer[layer.index("-t") + 1] == "3.500"
+    assert argv[argv.index("a.png") - 1] == "-i"
+    assert "-itsoffset" not in argv and "-loop" not in argv
+    assert ("[1:v]format=rgba,loop=loop=-1:size=1,trim=end_frame=105,settb=AVTB,"
+            "setpts=N/(30*TB)+1.000/TB,") in _graph(argv)
