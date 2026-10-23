@@ -68,6 +68,7 @@ class Unit:
     # Seconds into the file and how long, for a video; None plays it whole.
     trim: Optional[Tuple[float, float]] = None
     loop: bool = True
+    volume_db: float = 0.0            # a clip's own sound, on top of matching the narration
     panel: Optional[Panel] = None
     motion: Optional[Motion] = None   # resolved, `alternate` already cycled
     fit: str = "blur"
@@ -173,7 +174,8 @@ def plan_units(spec: VideoSpec, media: Dict[str, Media], warnings: List[str]) ->
                 warnings.append(f"Clip {segment.label or segment.id} has no video to play; left out")
                 continue
             units.append(Unit(**common, first_in_segment=True, kind="video_sound", media=found,
-                              trim=trim, loop=False, chapter=segment.chapter))
+                              trim=trim, loop=False, chapter=segment.chapter,
+                              volume_db=(visual.volume_db or 0.0) if visual else 0.0))
             continue
 
         if found and found.kind == "video":
@@ -399,6 +401,7 @@ class TrackPlacement:
     loop: bool
     duck: bool
     trim_in: float
+    during_clips: Optional[str] = None
 
 
 def place_tracks(spec: VideoSpec, media: Dict[str, Media], where: Placement,
@@ -441,7 +444,7 @@ def place_tracks(spec: VideoSpec, media: Dict[str, Media], where: Placement,
             track=track, media=found, start=start, length=length, loop=loop,
             duck=(track.duck_under_narration if track.duck_under_narration is not None
                   else track.kind == "music"),
-            trim_in=trim_in,
+            trim_in=trim_in, during_clips=track.during_clips,
         ))
     return placed
 

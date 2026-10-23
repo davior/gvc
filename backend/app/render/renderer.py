@@ -360,6 +360,19 @@ def render(
                  for u, n in zip(units, narrated)]
     timeline = layout(units, durations, warnings)
 
+    # ── how loud the voice is, for clips to be matched to (S5) ─────────────────
+    # Measured, not assumed: voices and providers differ by several dB. R128 gates
+    # out the pauses, so the holds between lines don't pull it down.
+    narration_lufs = F.DEFAULT_LOUDNESS_LUFS
+    if any(u.kind == "video_sound" for u in units):
+        levels = []
+        for narration in narrated:
+            if narration.path and narration.duration > 0:
+                lufs = F.measure_loudness(os.path.join(work_dir, narration.path))
+                if lufs is not None:
+                    levels.append((lufs, narration.duration))
+        narration_lufs = F.combined_loudness(levels) or F.DEFAULT_LOUDNESS_LUFS
+
     # ── encode each unit ─────────────────────────────────────────────────────
     cache = shot_cache.ShotCache(data_dir, user_id)
     try:
@@ -421,6 +434,15 @@ def render(
                       cwd=work_dir, timeout=F.shot_timeout(length))
                 background = clip
 
+        # A clip's sound at the voice's loudness, then moved by its own setting:
+        # footage arrives anywhere from a whisper to a broadcast master. Measured
+        # over what plays, so a loud intro the trim cuts off doesn't count.
+        gain = 0.0
+        if unit.kind == "video_sound" and has_audio:
+            gain = round(F.clip_gain(F.measure_loudness(os.path.join(work_dir, background),
+                                                        duration),
+                                     narration_lufs, unit.volume_db), 1)
+
         # Watermark, overlay text and a quote or code panel, as one layer.
         if unit.chapter:
             current_chapter = unit.chapter
@@ -470,7 +492,7 @@ def render(
                 duration=duration, output=output, options=with_options, preview=preview,
                 overlay_png=overlay_png, subtitle_file=shot_srt, background_has_audio=has_audio,
                 index=index, in_transition=in_transition, out_transition=out_transition,
-                loop=unit.loop, path=with_path,
+                loop=unit.loop, path=with_path, audio_gain_db=gain,
             )
 
         if narration.path is None and unit.kind != "video_sound":
@@ -547,9 +569,14 @@ def render(
         progress("Mixing", 90, f"{len(tracks)} audio track{'s' if len(tracks) != 1 else ''}")
         mix = [F.MixTrack(path=t.media.path, start=t.start, length=t.length, trim_in=t.trim_in,
                           loop=t.loop, volume=t.track.volume, fade_in=t.track.fade_in,
-                          fade_out=t.track.fade_out, duck=t.duck) for t in tracks]
+                          fade_out=t.track.fade_out, duck=t.duck,
+                          during_clips=t.during_clips) for t in tracks]
+        # Where a clip plays its own sound, for a track that leaves for clips (S5).
+        clip_windows = [(timeline.starts[i], timeline.end(i)) for i, u in enumerate(units)
+                        if u.kind == "video_sound" and u.media and u.media.has_audio]
         F.run(F.build_mix_command(final, mix, "scored.mp4", duration=timeline.total,
-                                  duck_available="sidechaincompress" in F.available_filters()),
+                                  duck_available="sidechaincompress" in F.available_filters(),
+                                  clip_windows=clip_windows),
               cwd=work_dir, timeout=1800)
         final = "scored.mp4"
 

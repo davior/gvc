@@ -140,6 +140,24 @@ export default function SoundtrackPanel({ spec, gamAssets, onChange }: Props) {
                 Quieter under narration
               </label>
               <label className="flex items-center gap-1">
+                During clips
+                <select
+                  className="input w-auto py-0.5"
+                  aria-label="During clips"
+                  value={track.during_clips ?? ''}
+                  onChange={(e) =>
+                    set(index, {
+                      during_clips: (e.target.value ||
+                        undefined) as AudioTrack['during_clips'],
+                    })
+                  }
+                >
+                  <option value="">As under narration</option>
+                  <option value="mute">Fade out</option>
+                  <option value="play">Keep playing</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-1">
                 <input
                   type="checkbox"
                   checked={track.loop ?? music}

@@ -164,6 +164,56 @@ def probe_has_audio(path: str) -> bool:
         return False
 
 
+# Spoken word sits about here; used as the target when a video has no narration.
+DEFAULT_LOUDNESS_LUFS = -16.0
+# A clip quieter than this is silence or room tone, and matching it to the voice
+# would only raise the noise.
+SILENT_LUFS = -60.0
+CLIP_GAIN_LIMITS_DB = (-30.0, 24.0)
+
+
+def measure_loudness(path: str, length: Optional[float] = None) -> Optional[float]:
+    """Integrated loudness (EBU R128, LUFS) of a file's sound, or of its first
+    `length` seconds; None when it has none worth measuring."""
+    argv = ["ffmpeg", "-hide_banner", "-nostats", "-i", path]
+    if length is not None:
+        argv += ["-t", f"{max(0.1, length):.3f}"]
+    argv += ["-vn", "-af", "ebur128=framelog=quiet", "-f", "null", "-"]
+    try:
+        out = subprocess.run(argv, capture_output=True, timeout=PROBE_TIMEOUT_SECONDS * 10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    # The summary comes last; its "I:" line is the integrated loudness.
+    found = None
+    for line in out.stderr.decode(errors="replace").splitlines():
+        line = line.strip()
+        if line.startswith("I:") and line.endswith("LUFS"):
+            try:
+                found = float(line[2:-4])
+            except ValueError:
+                found = None
+    if found is None or found < SILENT_LUFS:
+        return None
+    return found
+
+
+def combined_loudness(levels: Sequence[Tuple[float, float]]) -> Optional[float]:
+    """The loudness of several pieces played one after another, from each one's
+    (LUFS, seconds): their energy averaged by time, as R128 would over the whole."""
+    weighted = [(10 ** (lufs / 10), seconds) for lufs, seconds in levels if seconds > 0]
+    total = sum(seconds for _, seconds in weighted)
+    if not weighted or total <= 0:
+        return None
+    return 10 * math.log10(sum(energy * seconds for energy, seconds in weighted) / total)
+
+
+def clip_gain(clip_lufs: Optional[float], target_lufs: float, adjust_db: float = 0.0) -> float:
+    """dB to bring a clip to the narration's loudness, then move it by `adjust_db`."""
+    match = 0.0 if clip_lufs is None else target_lufs - clip_lufs
+    low, high = CLIP_GAIN_LIMITS_DB
+    return max(low, min(high, match + adjust_db))
+
+
 def encode_args(options: RenderOptions, preview: bool) -> List[str]:
     """Codec flags shared by every shot. Identical output = concat can `-c copy`."""
     preset, crf = encoder_tier(options.quality, preview)
@@ -480,6 +530,7 @@ def build_shot_command(
     out_transition: Optional[TransitionSpec] = None,
     loop: bool = True,
     path: Optional["KenBurnsPath"] = None,
+    audio_gain_db: float = 0.0,
 ) -> List[str]:
     """Full argv for rendering one shot to its own MP4.
 
@@ -495,6 +546,7 @@ def build_shot_command(
     - `loop` False on a video holds its last frame instead of repeating it.
     - `path`: a Ken Burns move between two frames of the picture (S1), in place of
       the preset drift.
+    - `audio_gain_db`: a clip's own sound brought to the narration's loudness (S5).
     """
     width, height = frame_size(options.aspect, options.resolution, preview)
     argv: List[str] = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
@@ -611,7 +663,16 @@ def build_shot_command(
 
     # Pad the audio so a shot always reaches its target length even when the
     # narration is shorter (a media block with little text under it).
-    audio_chain = f"[{audio_main}]aresample=48000,aformat=channel_layouts=stereo,apad"
+    audio_chain = f"[{audio_main}]aresample=48000,aformat=channel_layouts=stereo"
+    if abs(audio_gain_db) >= 0.05:
+        audio_chain += f",volume={audio_gain_db:.1f}dB"
+        if audio_gain_db > 0:
+            # Raising a quiet clip can push its loudest moments past full scale, so
+            # they are limited at -1 dBFS rather than clipped. `level=0` stops the
+            # limiter normalising the whole clip again, and `latency` takes back
+            # the few milliseconds its lookahead would put between sound and picture.
+            audio_chain += ",alimiter=limit=0.891:level=0:latency=1"
+    audio_chain += ",apad"
     if dip > 0:
         # Only the tail is faded, to match the picture dipping to colour there —
         # and it lands in the trailing hold `shot_end_pause_ms` leaves after the
@@ -1327,11 +1388,27 @@ class MixTrack:
     fade_in: float = 0.0
     fade_out: float = 0.0
     duck: bool = True     # pushed down under the narration
+    during_clips: Optional[str] = None   # None, "mute" or "play": see AudioTrack
+
+
+# How long the score takes to leave before a clip and come back after it.
+CLIP_FADE_SECONDS = 0.6
+
+
+def _quiet_during(windows: Sequence[Tuple[float, float]], fade: float) -> str:
+    """A `volume` expression that is 1, except 0 inside each window, ramping over
+    `fade` seconds either side of it so the sound leaves and returns rather than
+    cutting. Quoted, since an expression's commas would otherwise split the graph."""
+    fade = max(0.01, fade)
+    terms = [f"(1-max(0,min(1,min((t-{start - fade:.3f})/{fade:.3f},"
+             f"({end + fade:.3f}-t)/{fade:.3f}))))" for start, end in windows]
+    return "'" + "*".join(terms) + "'"
 
 
 def build_mix_command(
     source: str, tracks: Sequence[MixTrack], output: str,
     *, duration: float, duck_available: bool = True,
+    clip_windows: Sequence[Tuple[float, float]] = (),
 ) -> List[str]:
     """Mix any number of tracks under the finished video, the picture untouched.
 
@@ -1345,10 +1422,16 @@ def build_mix_command(
     A looping track restarts from the top of its file, not from `trim_in`: that is
     what `-stream_loop` does with an input seek, and a bed short enough to loop is
     rarely trimmed as well.
+
+    `clip_windows` are where a clip plays its own sound. A track set to "mute"
+    there fades out around each one. The narration's key carries the clips too,
+    which is what dips a ducked bed under them; a ducked track set to "play" is
+    compressed against a key with the clips taken out, so only the voice moves it.
     """
     argv = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", source]
     chains: List[str] = []
     ducked: List[str] = []
+    spared: List[str] = []
     flat: List[str] = []
     for position, track in enumerate(tracks, start=1):
         if track.trim_in > 0:
@@ -1368,22 +1451,39 @@ def build_mix_command(
         delay = int(round(max(0.0, track.start) * 1000))
         if delay:
             chain += f",adelay={delay}|{delay}"
-        chain += f",apad[t{position}]"
-        chains.append(chain)
-        (ducked if track.duck and duck_available else flat).append(f"t{position}")
+        chain += ",apad"
+        if track.during_clips == "mute" and clip_windows:
+            # After the delay, so `t` is the video's own clock.
+            chain += f",volume={_quiet_during(clip_windows, CLIP_FADE_SECONDS)}:eval=frame"
+        chains.append(chain + f"[t{position}]")
+        if not (track.duck and duck_available):
+            flat.append(f"t{position}")
+        elif track.during_clips == "play" and clip_windows:
+            spared.append(f"t{position}")
+        else:
+            ducked.append(f"t{position}")
 
     mix_inputs = ["nar"]
-    if ducked:
-        if len(ducked) == 1:
-            bed = ducked[0]
-        else:
-            chains.append("".join(f"[{t}]" for t in ducked)
-                          + f"amix=inputs={len(ducked)}:normalize=0[bedmix]")
-            bed = "bedmix"
-        chains.append("[0:a]asplit=2[nar][key]")
-        chains.append(f"[{bed}][key]sidechaincompress="
-                      "threshold=0.060:ratio=8:attack=15:release=350[bed]")
-        mix_inputs.append("bed")
+    beds = [(name, group) for name, group in (("bed", ducked), ("spared", spared)) if group]
+    if beds:
+        keys = (["key"] if ducked else []) + (["keyvoice"] if spared else [])
+        chains.append(f"[0:a]asplit={1 + len(keys)}[nar]" + "".join(f"[{k}]" for k in keys))
+        if spared:
+            # The clips cut out of the key, quickly, so the bed is not ducked
+            # across them; the voice either side still is.
+            chains.append(f"[keyvoice]volume={_quiet_during(clip_windows, 0.05)}:eval=frame"
+                          "[keyspared]")
+        for name, group in beds:
+            if len(group) == 1:
+                source_label = group[0]
+            else:
+                chains.append("".join(f"[{t}]" for t in group)
+                              + f"amix=inputs={len(group)}:normalize=0[{name}mix]")
+                source_label = f"{name}mix"
+            key = "key" if name == "bed" else "keyspared"
+            chains.append(f"[{source_label}][{key}]sidechaincompress="
+                          f"threshold=0.060:ratio=8:attack=15:release=350[{name}]")
+            mix_inputs.append(name)
     else:
         chains.append("[0:a]anull[nar]")
     mix_inputs += flat

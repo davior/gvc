@@ -1,5 +1,5 @@
 import type { GamAsset } from '@/api/gam'
-import type { Segment, Trim, VideoSpec } from '@/api/projects'
+import type { Segment, Trim, VideoSpec, Visual } from '@/api/projects'
 import { updateSegment } from '@/spec/edits'
 
 /**
@@ -148,6 +148,19 @@ export function setLoop(spec: VideoSpec, index: number, loop: boolean): VideoSpe
   return updateSegment(spec, index, (segment) =>
     segment.visual ? { ...segment, visual: { ...segment.visual, loop } } : segment
   )
+}
+
+/**
+ * A clip's own level, in dB from the narration's loudness the render matches it to.
+ * 0 is that match, so it is stored as no field at all.
+ */
+export function setVolume(spec: VideoSpec, index: number, db: number): VideoSpec {
+  return updateSegment(spec, index, (segment) => {
+    if (!segment.visual) return segment
+    const visual: Visual = { ...segment.visual, volume_db: db }
+    if (db === 0) delete visual.volume_db
+    return { ...segment, visual }
+  })
 }
 
 /** Roughly how long a scene runs: its fixed length, else its narration or the floor. */

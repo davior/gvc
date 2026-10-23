@@ -1455,3 +1455,68 @@ def test_a_blend_piece_seeks_to_its_first_frame_rather_than_decoding_up_to_it():
                                   options=RenderOptions(), preview=True,
                                   start_frame=60, end_frame=90, streams="video")
     assert "[0:v]trim=end_frame=30," in _graph(lone)
+
+
+# ── clip sound levels and the score during clips (S5) ───────────────────────
+
+def test_a_clip_is_brought_to_the_voices_loudness_then_moved_by_its_own_setting():
+    assert F.clip_gain(-30.0, -18.0) == 12.0
+    assert F.clip_gain(-10.0, -18.0) == -8.0
+    assert F.clip_gain(-30.0, -18.0, adjust_db=-6.0) == 6.0
+    # Silence (unmeasurable) is left alone, but still follows its own setting.
+    assert F.clip_gain(None, -18.0) == 0.0 and F.clip_gain(None, -18.0, 3.0) == 3.0
+    # A near-silent clip is not raised without limit: that would only raise the noise.
+    assert F.clip_gain(-70.0, -16.0) == F.CLIP_GAIN_LIMITS_DB[1]
+
+
+def test_the_voices_loudness_is_its_pieces_averaged_by_energy_and_time():
+    assert F.combined_loudness([(-18.0, 10.0), (-18.0, 30.0)]) == pytest.approx(-18.0)
+    # Twice the time at one level weighs twice as much; levels add as energy, not dB.
+    assert F.combined_loudness([(-20.0, 10.0), (-10.0, 10.0)]) == pytest.approx(-12.6, abs=0.1)
+    assert F.combined_loudness([]) is None
+
+
+def test_a_raised_clip_is_limited_and_a_lowered_one_is_not():
+    def audio(gain):
+        argv = F.build_shot_command(
+            kind="video_sound", background="clip.mp4", audio=None, duration=6.0,
+            output="s.mp4", options=RenderOptions(), preview=True,
+            background_has_audio=True, audio_gain_db=gain)
+        return [c for c in _graph(argv).split(";") if c.endswith("[a]")][0]
+    assert "volume=12.0dB,alimiter=limit=0.891:level=0:latency=1,apad" in audio(12.0)
+    assert "volume=-8.0dB,apad" in audio(-8.0) and "alimiter" not in audio(-8.0)
+    assert "volume" not in audio(0.0)
+
+
+def test_a_track_can_leave_for_clips_and_come_back_after():
+    track = F.MixTrack(path="m.mp3", start=0.0, length=30.0, during_clips="mute")
+    graph = _graph(F.build_mix_command("in.mp4", [track], "o.mp4", duration=30.0,
+                                       clip_windows=[(8.0, 15.0)]))
+    assert ("volume='(1-max(0,min(1,min((t-7.400)/0.600,(15.600-t)/0.600))))':eval=frame"
+            in graph)
+    # Still ducked under the narration as before.
+    assert "[t1][key]sidechaincompress=" in graph
+
+
+def test_a_track_can_play_on_through_clips_and_still_duck_under_the_voice():
+    plain = F.MixTrack(path="a.mp3", start=0.0, length=30.0)
+    spared = F.MixTrack(path="b.mp3", start=0.0, length=30.0, during_clips="play")
+    graph = _graph(F.build_mix_command("in.mp4", [plain, spared], "o.mp4", duration=30.0,
+                                       clip_windows=[(8.0, 15.0)]))
+    assert "[0:a]asplit=3[nar][key][keyvoice]" in graph
+    assert "[keyvoice]volume='" in graph and "[keyspared]" in graph
+    assert "[t1][key]sidechaincompress=" in graph
+    assert "[t2][keyspared]sidechaincompress=" in graph
+    assert "[nar][bed][spared]amix=inputs=3" in graph
+    # Alone, it needs no key for a bed that isn't there.
+    alone = _graph(F.build_mix_command("in.mp4", [spared], "o.mp4", duration=30.0,
+                                       clip_windows=[(8.0, 15.0)]))
+    assert "[0:a]asplit=2[nar][keyvoice]" in alone
+
+
+def test_without_clips_a_tracks_choice_during_clips_changes_nothing():
+    for mode in ("mute", "play"):
+        graph = _graph(F.build_mix_command(
+            "in.mp4", [F.MixTrack(path="m.mp3", start=0.0, length=30.0, during_clips=mode)],
+            "o.mp4", duration=30.0))
+        assert "eval=frame" not in graph and "[t1][key]sidechaincompress=" in graph

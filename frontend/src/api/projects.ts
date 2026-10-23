@@ -47,6 +47,8 @@ export interface Visual {
   trim?: Trim
   audio?: 'mute' | 'play'
   loop?: boolean
+  /** A clip's sound, in dB from the narration's loudness it is matched to. */
+  volume_db?: number
   fit?: string
   motion?: Motion
   [key: string]: unknown
@@ -68,6 +70,8 @@ export interface AudioTrack {
   loop?: boolean
   volume?: number
   duck_under_narration?: boolean
+  /** While a clip plays its own sound. Absent: as under narration. */
+  during_clips?: 'mute' | 'play'
   fade_in?: number
   fade_out?: number
   [key: string]: unknown
