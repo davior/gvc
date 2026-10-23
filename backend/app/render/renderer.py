@@ -225,6 +225,86 @@ def _stitch_blended(
         F.run(F.build_concat_command("stitch.txt", output), cwd=work_dir, timeout=1800)
 
 
+def _stitch_partial(
+    shot_files: List[str], durations: List[float], joins: list, output: str,
+    *, options: RenderOptions, preview: bool, work_dir: str,
+) -> None:
+    """Encode the picture again only around each blend, and copy the rest of it.
+
+    See `plan_partial_stitch`. The sound is built for the whole video in one pass,
+    exactly as the full stitch builds it, and muxed back in, so it is sample-exact
+    and never cut at a packet boundary.
+    """
+    fps = options.fps
+    probed = [F.probe_keyframes(os.path.join(work_dir, name), fps) for name in shot_files]
+    keyframes, counts = [k for k, _ in probed], [c for _, c in probed]
+    pieces = F.plan_partial_stitch(durations, joins, keyframes, fps)
+    # Where each shot starts on the timeline, which is where the sound puts it.
+    starts = [0.0]
+    for index in range(1, len(durations)):
+        join = joins[index] if index < len(joins) else None
+        starts.append(starts[-1] + durations[index - 1] - (join[1] if join else 0.0))
+    emitted = 0   # frames of picture laid down so far
+
+    cuts: Dict[int, List[int]] = {}
+    for piece in pieces:
+        if not piece.blend:
+            at = cuts.setdefault(piece.first, [])
+            at += [f for f in (piece.start_frame or None, piece.end_frame) if f is not None]
+    for shot, frames in cuts.items():
+        if frames:
+            cuts[shot] = sorted(set(frames))
+            F.run(F.build_cut_command(shot_files[shot], f"cut_{shot:04d}_%03d.mp4",
+                                      cuts[shot], fps), cwd=work_dir, timeout=600)
+
+    names: List[str] = []
+    for number, piece in enumerate(pieces):
+        if not piece.blend:
+            frames = cuts.get(piece.first) or []
+            if not frames:
+                name = f"cut_{piece.first:04d}_000.mp4"
+                F.run(F.build_video_copy_command(shot_files[piece.first], name),
+                      cwd=work_dir, timeout=600)
+                names.append(name)
+            else:
+                names.append(f"cut_{piece.first:04d}_"
+                             f"{sum(1 for f in frames if f <= piece.start_frame):03d}.mp4")
+            end = counts[piece.first] if piece.end_frame is None else piece.end_frame
+            emitted += end - piece.start_frame
+            continue
+        span = slice(piece.first, piece.last + 1)
+        sub_joins = [None] + list(joins[piece.first + 1:piece.last + 1])
+        # A run of short shots blended into each other is one blend piece, and as
+        # long as the video in the worst case: it is chunked like the full stitch.
+        chunks = F.plan_stitch_chunks(durations[span], sub_joins, fps)
+        for part, chunk in enumerate(chunks):
+            start = piece.start_frame if part == 0 else chunk.start_frame
+            end = piece.end_frame if part == len(chunks) - 1 else chunk.end_frame
+            first, last = piece.first + chunk.first, piece.first + chunk.last
+            # The copied stretches are whole frames, while the timeline is not: a
+            # shot planned at 13.242 s has 397 frames. Left alone, each blend would
+            # start up to a frame late and the error would add up along the video,
+            # where the full stitch measures every blend from the timeline. So the
+            # first shot's length here is what puts its blend back on the timeline.
+            lengths = list(durations[first:last + 1])
+            lengths[0] += (starts[first] + start / fps) - emitted / fps
+            name = f"blend_{number:03d}_{part:02d}.mp4"
+            F.run(F.build_stitch_command(
+                shot_files[first:last + 1], lengths, name,
+                joins=[None] + list(joins[first + 1:last + 1]), options=options,
+                preview=preview, start_frame=start, end_frame=end, streams="video"),
+                cwd=work_dir, timeout=F.shot_timeout(sum(durations[first:last + 1])))
+            names.append(name)
+            emitted += F.probe_keyframes(os.path.join(work_dir, name), fps)[1]
+
+    F.run(F.build_stitch_command(shot_files, durations, "stitch_audio.m4a", joins=joins,
+                                 options=options, preview=preview, streams="audio"),
+          cwd=work_dir, timeout=1800)
+    F.write_concat_list(os.path.join(work_dir, "stitch_video.txt"), names)
+    F.run(F.build_join_av_command("stitch_video.txt", "stitch_audio.m4a", output),
+          cwd=work_dir, timeout=1800)
+
+
 def render(
     *, spec: VideoSpec, preview: bool, work_dir: str, out_dir: str, data_dir: str, user_id: str,
     gam: GamClient, speech: NotesSpeech, progress: Progress,
@@ -424,8 +504,15 @@ def render(
     stitched = "stitched.mp4"
     if any(blends):
         try:
-            _stitch_blended(shot_files, timeline.durations, blends, stitched,
-                            options=options, preview=preview, work_dir=work_dir)
+            try:
+                _stitch_partial(shot_files, timeline.durations, blends, stitched,
+                                options=options, preview=preview, work_dir=work_dir)
+            except F.FFmpegError as exc:
+                # The same blends with every frame encoded again: several times
+                # slower at full quality, but it relies on no keyframes or remuxing.
+                logger.warning("Partial stitch failed (%s); encoding it whole", exc)
+                _stitch_blended(shot_files, timeline.durations, blends, stitched,
+                                options=options, preview=preview, work_dir=work_dir)
         except F.FFmpegError as exc:
             # The blends cost a re-encode; if that fails, the shots still join by cuts,
             # and the timeline is re-laid without their overlaps to match. A clip's

@@ -996,7 +996,7 @@ def build_extract_command(
 def build_stitch_command(
     shot_files: Sequence[str], durations: Sequence[float], output: str,
     *, joins: Sequence[Optional[Tuple[str, float]]], options: RenderOptions, preview: bool,
-    start_frame: int = 0, end_frame: Optional[int] = None,
+    start_frame: int = 0, end_frame: Optional[int] = None, streams: str = "both",
 ) -> List[str]:
     """`build_xfade_command` with a transition of its own at every join.
 
@@ -1008,6 +1008,10 @@ def build_stitch_command(
     `start_frame` drops that many frames off the front of the first shot and
     `end_frame` stops the last one at that frame: one run of a chunked stitch (see
     `plan_stitch_chunks`), whose neighbours show the rest of the shot.
+
+    `streams` is "video" or "audio" to build only that half: the partial stitch
+    (see `plan_partial_stitch`) encodes the picture only around each blend, and
+    the sound for the whole video in one pass of its own.
     """
     fps = max(1, options.fps)
     durations = list(durations)
@@ -1016,24 +1020,36 @@ def build_stitch_command(
         durations[last] = end_frame / fps
     if start_frame:
         durations[0] -= start_frame / fps
+    picture, sound = streams in ("both", "video"), streams in ("both", "audio")
+    # The picture alone can seek its first shot to `start_frame` rather than decode
+    # its way there, which for a blend piece is most of the shot. Half a frame early,
+    # so the frame-accurate seek keeps that frame however its time rounds. The sound
+    # can't: a seek lands on an AAC packet, not a sample.
+    seek = start_frame if streams == "video" else 0
 
     argv = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
-    for name in shot_files:
+    for index, name in enumerate(shot_files):
         # Every input is open, with its decoder, for the whole pass. A decoder's
         # default is a thread per core and a frame buffer per thread, which made
         # this pass's memory the shot count times the core count.
-        argv += ["-threads", "1", "-i", name]
+        argv += ["-threads", "1"] + ([] if sound else ["-an"]) + ([] if picture else ["-vn"])
+        if index == 0 and seek:
+            argv += ["-ss", f"{(seek - 0.5) / fps:.6f}"]
+        argv += ["-i", name]
 
     # Every input on one timebase first. `concat` re-times its output to
     # AV_TIME_BASE (1/1000000) while the shots carry 1/90000, and `xfade` refuses two
     # inputs that disagree — so a cut followed by a blend failed to build at all.
-    chains: List[str] = []
+    vchains: List[str] = []
+    achains: List[str] = []
     sounds: List[str] = []
     for i in range(len(shot_files)):
-        lo = start_frame if i == 0 else 0
+        lo = start_frame - seek if i == 0 else 0
         hi = end_frame if i == last else None
+        if hi is not None and i == 0:
+            hi -= seek
         if not lo and hi is None:
-            chains.append(f"[{i}:v]settb=AVTB[s{i}]")
+            vchains.append(f"[{i}:v]settb=AVTB[s{i}]")
             sounds.append(f"{i}:a")
             continue
         # Trimmed by frame and by sample rather than by seconds, so the picture and
@@ -1047,33 +1063,46 @@ def build_stitch_command(
         # ffmpeg 7 leaves a trimmed stream with no frame rate (1/0), and `xfade`
         # refuses one, so it is set back: the frames are already at it, so `fps`
         # neither drops nor repeats any.
-        chains.append(f"[{i}:v]trim={':'.join(bounds)},setpts=PTS-STARTPTS,"
-                      f"fps={fps},settb=AVTB[s{i}]")
-        chains.append(f"[{i}:a]atrim={':'.join(samples)},asetpts=PTS-STARTPTS[st{i}]")
+        vchains.append(f"[{i}:v]trim={':'.join(bounds)},setpts=PTS-STARTPTS,"
+                       f"fps={fps},settb=AVTB[s{i}]")
+        achains.append(f"[{i}:a]atrim={':'.join(samples)},asetpts=PTS-STARTPTS[st{i}]")
         sounds.append(f"st{i}")
     video, audio = "s0", sounds[0]
     total = durations[0]
     for index in range(1, len(shot_files)):
         join = joins[index] if index < len(joins) else None
         if join is None:
-            chains.append(f"[{video}][s{index}]concat=n=2:v=1:a=0[vx{index}]")
-            chains.append(f"[{audio}][{sounds[index]}]concat=n=2:v=0:a=1[ax{index}]")
+            vchains.append(f"[{video}][s{index}]concat=n=2:v=1:a=0[vx{index}]")
+            achains.append(f"[{audio}][{sounds[index]}]concat=n=2:v=0:a=1[ax{index}]")
             total += durations[index]
         else:
             name, overlap = join
             offset = max(0.0, total - overlap)
-            chains.append(
+            vchains.append(
                 f"[{video}][s{index}]xfade=transition={name}:"
                 f"duration={overlap:.3f}:offset={offset:.3f}[vx{index}]"
             )
-            chains.append(f"[{audio}]atrim=end={offset:.3f},asetpts=PTS-STARTPTS[at{index}]")
-            chains.append(f"[at{index}][{sounds[index]}]concat=n=2:v=0:a=1[ax{index}]")
+            achains.append(f"[{audio}]atrim=end={offset:.3f},asetpts=PTS-STARTPTS[at{index}]")
+            achains.append(f"[at{index}][{sounds[index]}]concat=n=2:v=0:a=1[ax{index}]")
             total += durations[index] - overlap
         video, audio = f"vx{index}", f"ax{index}"
+    vchains.append(f"[{video}]setsar=1,format=yuv420p[v]")
 
-    chains.append(f"[{video}]setsar=1,format=yuv420p[v]")
-    argv += ["-filter_complex", ";".join(chains), "-map", "[v]", "-map", f"[{audio}]"]
-    argv += encode_args(options, preview)
+    shared = encode_args(options, preview)
+    split = shared.index("-c:a")
+    if not sound:
+        argv += ["-filter_complex", ";".join(vchains), "-map", "[v]", *shared[:split], "-an"]
+    elif not picture:
+        # A lone input's sound needs no graph at all, and a graph with nothing in it
+        # is an error, so the one-shot case maps the track straight through.
+        if achains:
+            argv += ["-filter_complex", ";".join(achains), "-map", f"[{audio}]"]
+        else:
+            argv += ["-map", f"{audio}"]
+        argv += [*shared[split:], "-vn"]
+    else:
+        argv += ["-filter_complex", ";".join(vchains + achains),
+                 "-map", "[v]", "-map", f"[{audio}]", *shared]
     argv += ["-movflags", "+faststart", output]
     return argv
 
@@ -1145,6 +1174,144 @@ def plan_stitch_chunks(
         first, start = (j + 1, 0) if frame is None else (j, frame)
     chunks.append(StitchChunk(first, count - 1, start, None))
     return chunks
+
+
+@dataclass(frozen=True)
+class StitchPiece:
+    """One stretch of a partial stitch's picture, in output order.
+
+    `blend` False: frames `start_frame`..`end_frame` of shot `first` (== `last`),
+    copied as they were encoded. True: shots `first`..`last` encoded together, from
+    `start_frame` of the first to `end_frame` of the last, with their blends. An
+    `end_frame` of None runs to the end of the shot.
+    """
+
+    blend: bool
+    first: int
+    last: int
+    start_frame: int = 0
+    end_frame: Optional[int] = None
+
+
+def probe_keyframes(path: str, fps: int) -> Tuple[List[int], int]:
+    """Frame numbers of a video's keyframes, and how many frames it has.
+
+    Read from the packets, not the frames, so nothing is decoded and a long shot
+    probes in a moment.
+    """
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "packet=pts_time,flags", "-of", "csv=p=0", path],
+        capture_output=True, timeout=PROBE_TIMEOUT_SECONDS,
+    )
+    if out.returncode != 0:
+        raise FFmpegError(f"ffprobe could not read the keyframes of {path}")
+    frames = set()
+    count = 0
+    for line in out.stdout.decode(errors="replace").splitlines():
+        when, _, flags = line.partition(",")
+        count += 1
+        if "K" in flags:
+            try:
+                frames.add(round(float(when) * fps))
+            except ValueError:
+                continue
+    return sorted(frames), count
+
+
+def plan_partial_stitch(
+    durations: Sequence[float], joins: Sequence[Optional[Tuple[str, float]]],
+    keyframes: Sequence[Sequence[int]], fps: int,
+) -> List[StitchPiece]:
+    """Lay a blended stitch out as copied stretches and the blends between them.
+
+    A blend needs both shots decoded and encoded again, but only where they
+    overlap. Every shot was encoded with `encode_args`, so between two of its
+    keyframes it can be copied as it is and remuxed beside freshly encoded frames.
+    Each blend is therefore re-encoded from the last keyframe of the outgoing shot
+    before the blend begins to the first keyframe of the incoming one after it
+    ends: a second or two a join rather than the whole video, which at 1080p on
+    the `medium` preset is minutes against seconds.
+
+    A shot with no keyframe clear of the blends at both ends (a short one, blended
+    in and out) has nothing to copy, so the blend before it and the one after it
+    become one encode through it.
+    """
+    count = len(durations)
+    fps = max(1, fps)
+
+    def overlap(index: int) -> float:
+        return _join_overlap(joins, index) if 0 < index < count else 0.0
+
+    pieces: List[StitchPiece] = []
+    group: Optional[Tuple[int, int]] = None   # an open blend: (first shot, start frame)
+    for i in range(count):
+        frames_in, frames_out = overlap(i), overlap(i + 1)
+        keys = keyframes[i] if i < len(keyframes) else [0]
+        if frames_in > 0:
+            after = [k for k in keys if k >= math.ceil(frames_in * fps)]
+            lo: Optional[int] = after[0] if after else None
+        else:
+            lo = 0
+        hi: Optional[int] = None
+        if frames_out > 0:
+            before = [k for k in keys if k <= math.floor((durations[i] - frames_out) * fps)]
+            hi = before[-1] if before else 0
+        body = lo is not None and (hi is None or hi > lo)
+        if group is not None:
+            if not body:
+                if frames_out <= 0:   # the blend ends inside this shot, and so does it
+                    pieces.append(StitchPiece(True, group[0], i, group[1], None))
+                    group = None
+                continue
+            pieces.append(StitchPiece(True, group[0], i, group[1], lo))
+            group = None
+        start = lo or 0
+        if hi is None:
+            pieces.append(StitchPiece(False, i, i, start, None))
+        else:
+            if hi > start:
+                pieces.append(StitchPiece(False, i, i, start, hi))
+            group = (i, hi)
+    if group is not None:
+        pieces.append(StitchPiece(True, group[0], count - 1, group[1], None))
+    return pieces
+
+
+def build_cut_command(source: str, output_pattern: str, at_frames: Sequence[int],
+                      fps: int) -> List[str]:
+    """Split a shot's picture at keyframes, copied: `output_pattern` takes a %d.
+
+    The segment muxer cuts at the first keyframe at or after each time, so each is
+    asked for half a frame early: the cut lands on that keyframe however its time
+    rounds. Audio is left out; the partial stitch encodes the sound separately.
+    """
+    times = ",".join(f"{(frame - 0.5) / max(1, fps):.6f}" for frame in at_frames)
+    return [
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", source,
+        "-map", "0:v", "-c", "copy", "-an", "-f", "segment", "-segment_format", "mp4",
+        # The timescale every encode writes (see `encode_args`). The segment muxer
+        # would otherwise pick 1/15360, and ffmpeg 6's concat, given pieces on two
+        # timebases, laid them out a minute apart.
+        "-segment_format_options", "video_track_timescale=90000",
+        "-segment_times", times, "-reset_timestamps", "1", output_pattern,
+    ]
+
+
+def build_video_copy_command(source: str, output: str) -> List[str]:
+    """A shot's picture alone, copied: every file the concat joins has the same
+    streams, and the partial stitch's pieces carry no sound."""
+    return ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", source,
+            "-map", "0:v", "-c", "copy", "-an", "-video_track_timescale", "90000", output]
+
+
+def build_join_av_command(video_list: str, audio: str, output: str) -> List[str]:
+    """Remux the partial stitch's picture pieces and its sound into one file."""
+    return [
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        "-f", "concat", "-safe", "0", "-i", video_list, "-i", audio,
+        "-map", "0:v", "-map", "1:a", "-c", "copy", "-movflags", "+faststart", output,
+    ]
 
 
 @dataclass(frozen=True)
