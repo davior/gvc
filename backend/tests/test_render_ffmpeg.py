@@ -1342,7 +1342,7 @@ def test_a_stitch_run_trims_its_ends_by_frame_and_sample_and_decodes_single_thre
         options=RenderOptions(), preview=True, start_frame=30, end_frame=60)
     graph = _graph(argv)
     assert argv.count("-threads") == 3
-    assert "[0:v]trim=start_frame=30,setpts=PTS-STARTPTS,settb=AVTB[s0]" in graph
+    assert "[0:v]trim=start_frame=30,setpts=PTS-STARTPTS,fps=30,settb=AVTB[s0]" in graph
     assert "[0:a]atrim=start_sample=48000,asetpts=PTS-STARTPTS[st0]" in graph
     assert "[2:v]trim=end_frame=60," in graph and "atrim=end_sample=96000" in graph
     # The first shot is 3 s long once trimmed, so the first blend starts at 2.5 s.

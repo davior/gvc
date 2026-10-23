@@ -1044,7 +1044,11 @@ def build_stitch_command(
         if hi is not None:
             bounds.append(f"end_frame={hi}")
             samples.append(f"end_sample={round(hi * 48000 / fps)}")
-        chains.append(f"[{i}:v]trim={':'.join(bounds)},setpts=PTS-STARTPTS,settb=AVTB[s{i}]")
+        # ffmpeg 7 leaves a trimmed stream with no frame rate (1/0), and `xfade`
+        # refuses one, so it is set back: the frames are already at it, so `fps`
+        # neither drops nor repeats any.
+        chains.append(f"[{i}:v]trim={':'.join(bounds)},setpts=PTS-STARTPTS,"
+                      f"fps={fps},settb=AVTB[s{i}]")
         chains.append(f"[{i}:a]atrim={':'.join(samples)},asetpts=PTS-STARTPTS[st{i}]")
         sounds.append(f"st{i}")
     video, audio = "s0", sounds[0]
