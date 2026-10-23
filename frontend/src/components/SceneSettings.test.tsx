@@ -83,4 +83,35 @@ describe('SceneSettings', () => {
     fireEvent.change(screen.getByLabelText('End x'), { target: { value: '0.9' } })
     expect(latest.segments[1].visual?.motion?.to?.x).toBe(0.7)
   })
+
+  it('offers a camera move for a generated picture, naming the project default', () => {
+    const spec: VideoSpec = {
+      ...start,
+      style: { ...start.style, motion: { effect: 'alternate' } },
+      assets: {
+        a_gen: {
+          from: 'generate',
+          type: 'image',
+          prompt: 'A map',
+          result: { from: 'gam', id: 'p' },
+        },
+      },
+      segments: [
+        start.segments[0],
+        { id: 's1', kind: 'scene', visual: { asset: 'a_gen' } },
+      ],
+    }
+    render(
+      <SceneSettings
+        spec={spec}
+        index={1}
+        segment={spec.segments[1]}
+        gamAssets={{ p: map }}
+        onChange={() => {}}
+      />
+    )
+    expect(
+      screen.getByRole('option', { name: 'Project default (Alternate zooms and pans)' })
+    ).toBeInTheDocument()
+  })
 })
