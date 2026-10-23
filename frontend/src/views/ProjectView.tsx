@@ -10,6 +10,7 @@ import RenderPanel from '@/components/RenderPanel'
 import SoundtrackPanel from '@/components/SoundtrackPanel'
 import IssueList from '@/components/IssueList'
 import JsonPanel from '@/components/JsonPanel'
+import ProjectDefaults from '@/components/ProjectDefaults'
 import SceneList from '@/components/SceneList'
 import { RUNNING } from '@/api/generations'
 import { gamIdsIn, placeHit, resolveSearch, unresolvedSearches } from '@/spec/footage'
@@ -282,6 +283,7 @@ export default function ProjectView() {
           Could not show pictures from the asset library: {gamError}
         </p>
       )}
+      {tab === 'scenes' && <ProjectDefaults spec={draft} onChange={edit} />}
       {tab === 'scenes' && (
         <SceneList
           spec={draft}

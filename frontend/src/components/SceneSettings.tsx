@@ -1,11 +1,13 @@
 import type { GamAsset } from '@/api/gam'
 import type { Segment, VideoSpec } from '@/api/projects'
+import { footageOf } from '@/spec/clip'
 import FrameEditor from '@/components/FrameEditor'
 import OverlayEditor from '@/components/OverlayEditor'
 import {
   DEFAULT_PATH,
   MOTIONS,
   TRANSITIONS,
+  motionLabel,
   setMotion,
   setTransition,
 } from '@/spec/scene'
@@ -20,15 +22,6 @@ interface Props {
 
 const ASPECTS: Record<string, number> = { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1 }
 
-/** The GAM asset a scene shows, if the spec's ref resolves to one. */
-function pictureOf(spec: VideoSpec, segment: Segment, gamAssets: Props['gamAssets']) {
-  const key = segment.visual?.asset
-  const ref = key ? spec.assets?.[key] : undefined
-  const id =
-    ref?.from === 'gam' ? ref.id : ref?.from === 'search' ? ref.result?.id : undefined
-  return id ? (gamAssets[id] ?? null) : null
-}
-
 /**
  * How a scene comes in and how its picture moves. "Project default" removes the
  * scene's own setting, so changing the project's default later changes this scene too.
@@ -41,7 +34,10 @@ export default function SceneSettings({
   onChange,
 }: Props) {
   const transition = segment.transition_in
-  const picture = pictureOf(spec, segment, gamAssets)
+  // `footageOf`, not a lookup of its own: a generated picture is as much a still as
+  // one picked from the library, and a second copy of this resolution once left
+  // generated pictures without a Camera control.
+  const picture = footageOf(spec, segment, gamAssets)
   const isStill = picture?.asset_type === 'image'
   const motion = segment.visual?.motion
   const outputAspect = ASPECTS[spec.output?.aspect ?? '16:9'] ?? 16 / 9
@@ -126,7 +122,9 @@ export default function SceneSettings({
                 )
               }}
             >
-              <option value="">Project default</option>
+              <option value="">
+                Project default ({motionLabel(spec.style?.motion?.effect)})
+              </option>
               {MOTIONS.map((m) => (
                 <option key={m.value} value={m.value}>
                   {m.label}

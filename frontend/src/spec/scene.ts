@@ -32,6 +32,41 @@ export const MOTIONS = [
   { value: 'path', label: 'Move between two frames' },
 ] as const
 
+/**
+ * The moves a project can default to. No path, which is one picture's framing and the
+ * spec refuses project-wide; `alternate` instead, which only makes sense project-wide:
+ * it cycles zoom and pan scene by scene, so a run of stills doesn't all move alike.
+ */
+export const PROJECT_MOTIONS = [
+  ...MOTIONS.filter((m) => m.value !== 'path'),
+  { value: 'alternate', label: 'Alternate zooms and pans' },
+] as const
+
+/** A move in words; unset is the spec's own default, which is no move. */
+export function motionLabel(effect: string | undefined): string {
+  return (
+    PROJECT_MOTIONS.find((m) => m.value === (effect ?? 'none'))?.label ?? effect ?? ''
+  )
+}
+
+/** The spec's default `amount` for a preset move (`Motion.amount` in model.py). */
+export const DEFAULT_MOTION_AMOUNT = 0.12
+
+/**
+ * The project's default move, which every still without one of its own follows.
+ * A still default at the default amount removes `style.motion` rather than writing
+ * the spec's default back in.
+ */
+export function setProjectMotion(
+  spec: VideoSpec,
+  motion: { effect: string; amount?: number }
+): VideoSpec {
+  const style = { ...(spec.style ?? {}) }
+  if (motion.effect === 'none' && motion.amount === undefined) delete style.motion
+  else style.motion = motion
+  return { ...spec, style }
+}
+
 export function setTransition(
   spec: VideoSpec,
   index: number,
