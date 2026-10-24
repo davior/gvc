@@ -83,6 +83,20 @@ def _fetch_to(path: str, sink) -> str:
             raise CopyFailed("Could not reach Gecko Notes") from exc
 
 
+def copy_file(url: str, fallback_name: str, gam: GamClient):
+    """One Notes media file into the caller's GAM library; returns the stored asset.
+
+    Raises CopyFailed or GamError. The URL is checked here, so every caller (a pushed
+    spec, an attached note) gets the same refusal to fetch anything but Notes' media.
+    """
+    path = _safe_path(url)
+    filename = path.rsplit("/", 1)[-1] or fallback_name
+    with tempfile.TemporaryFile() as buffer:
+        content_type = _fetch_to(path, buffer) or mimetypes.guess_type(filename)[0]
+        buffer.seek(0)
+        return gam.upload(filename, buffer, content_type)
+
+
 def copy_note_media(session: Session, project: Project, gam: GamClient) -> CopyResult:
     spec = project_service.require_spec(project_service.decode(project.spec))
     result = CopyResult()
@@ -91,12 +105,7 @@ def copy_note_media(session: Session, project: Project, gam: GamClient) -> CopyR
         if not isinstance(ref, NotesAsset):
             continue
         try:
-            path = _safe_path(ref.url)
-            filename = path.rsplit("/", 1)[-1] or key
-            with tempfile.TemporaryFile() as buffer:
-                content_type = _fetch_to(path, buffer) or mimetypes.guess_type(filename)[0]
-                buffer.seek(0)
-                stored = gam.upload(filename, buffer, content_type)
+            stored = copy_file(ref.url, key, gam)
         except CopyFailed as exc:
             result.failed.append(CopyFailure(key, str(exc)))
             continue

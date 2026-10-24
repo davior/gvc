@@ -19,7 +19,7 @@ from typing import Dict, List, Optional, Tuple
 from sqlmodel import Session
 
 from app.assistant import loop
-from app.assistant.attachments import images_of, material
+from app.assistant.attachments import images_of, material, media_ids
 from app.assistant.prompt import REFERENCE, context
 from app.assistant.tools import Working
 from app.clock import utcnow
@@ -121,7 +121,8 @@ def _run(turn_id: str) -> None:
             raise ProviderError("No AI provider is set up. Add one in Settings first.")
         attached = material(attachments, sees_images=sees_images)
         images = images_of(chat_id, attachments) if sees_images else []
-        working = Working(base, gam=gam, max_generations=settings.assistant_max_generations)
+        working = Working(base, gam=gam, max_generations=settings.assistant_max_generations,
+                          note_media=media_ids(attachments))
 
         def generate(data, key, image_prompt, base_ids, outputs):
             with queue.session() as session:

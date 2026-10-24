@@ -146,7 +146,14 @@ image blocks opening the conversation, ahead of the history, so they stay in the
 cached prefix too. They go only to a provider marked "can look at images": attaching
 one for a text-only model is refused with that reason, and a conversation whose
 provider is switched to one later lists its pictures as not shown. An attached picture
-is something to look at, not a visual for the video; that has to be in GAM. Per item
+is something to look at, not a visual for the video; that has to be in GAM.
+**A note's own files are the exception.** Attaching a note also records the pictures, videos
+and sounds it holds (only files Notes serves from `/media/`, in reading order, each with
+the heading it sat under). The assistant sees them as `n1`, `n2`… and its
+`import_note_media` tool copies the ones asked for into the user's GAM library and
+registers them as assets, to be placed with `set_visual`, `add_overlay` or
+`add_audio_track` like any other. It can only name ids from attached notes, so the model
+can't make the server fetch an arbitrary URL. Per item
 and per conversation caps (`ASSISTANT_ATTACHMENT*`, `ASSISTANT_MAX_IMAGES`) refuse
 rather than silently drop. Not done: YouTube or other video URLs, whose captions are
 GAM's URL import's job.

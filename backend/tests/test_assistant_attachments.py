@@ -457,3 +457,28 @@ def test_a_turn_shows_the_model_the_pictures_and_lists_them(auth_client, session
     worker._run(res.json()["data"]["id"])
     assert scripted.started["images"] == []
     assert "Not shown: the current AI model" in scripted.started["system"][1]
+
+
+MEDIA_NOTE = json.dumps([
+    {"type": "heading", "props": {"level": 2}, "content": [{"type": "text", "text": "The valley"}],
+     "children": []},
+    {"type": "image", "props": {"url": "/media/u1/map.png", "name": "map.png", "caption": "Old map"},
+     "children": []},
+    {"type": "videoFile", "props": {"url": "https://notes.test/media/u1/pan.mp4"}, "children": []},
+    {"type": "image", "props": {"url": "https://elsewhere.test/x.png"}, "children": []},
+    {"type": "image", "props": {"url": "/media/../etc/passwd"}, "children": []},
+])
+
+
+def test_the_files_in_a_note_are_listed_for_the_assistant_in_reading_order(siblings):
+    from app.assistant import attachments as attach
+
+    item = attach.from_note("n1", "Valley", MEDIA_NOTE)
+    # Only files Notes itself serves: a remote link or a path out of /media/ is skipped.
+    assert [(m["type"], m["path"], m["after"]) for m in item["media"]] == [
+        ("image", "/media/u1/map.png", "The valley"),
+        ("video", "/media/u1/pan.mp4", "The valley"),
+    ]
+    text = attach.material([item])
+    assert 'n1: image "map.png", caption "Old map", under the heading "The valley"' in text
+    assert "n2: video" in text and "import_note_media" in text
