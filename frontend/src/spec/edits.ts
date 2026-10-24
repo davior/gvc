@@ -84,7 +84,10 @@ export function narrationText(segment: Segment): string {
 
 export function withNarrationText(segment: Segment, text: string): Segment {
   const existing = segment.narration?.beats ?? []
-  const paragraphs = text.split(/\n\s*\n/).map((p) => p.trim())
+  // Not trimmed: this runs on every keystroke and the box shows the result back, so
+  // trimming would eat the space just typed at the end of a paragraph. Only a
+  // paragraph of nothing but whitespace is normalised, to empty.
+  const paragraphs = text.split(/\n\s*\n/).map((p) => (p.trim() === '' ? '' : p))
   // An emptied box is one empty beat, not none, so the scene keeps a place to type.
   const kept = paragraphs.filter((p, i) => p !== '' || i === 0)
   const taken = new Set(existing.map((b) => b.id))

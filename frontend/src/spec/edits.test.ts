@@ -74,6 +74,11 @@ describe('narration as text', () => {
     expect(scene.narration?.beats.map((b) => b.id)).toEqual(['b1', 'b2', 'b3'])
   })
 
+  it('keeps a space typed at the end of a paragraph', () => {
+    const scene = withNarrationText(spec().segments[1], 'One two ')
+    expect(narrationText(scene)).toBe('One two ')
+  })
+
   it('keeps one empty beat when the box is cleared', () => {
     const scene = withNarrationText(spec().segments[1], '')
     expect(scene.narration?.beats).toEqual([{ id: 'b1', text: '' }])
