@@ -109,6 +109,17 @@ export type Position =
 export type WaveMode = 'line' | 'p2p' | 'cline' | 'point'
 export type WavePosition = 'top' | 'center' | 'bottom'
 
+/** One wave's look: the same fields on a scene's `waveform` overlay and on the
+ *  project-wide `chrome.waveform`, which Notes draws across a whole video. */
+export interface Waveform {
+  mode?: WaveMode
+  color?: string
+  opacity?: number
+  position?: WavePosition
+  height_pct?: number
+  scrim?: number
+}
+
 /** When an overlay shows. Absent on the overlay: its whole scene. */
 export interface Span {
   from: Anchor
@@ -175,6 +186,31 @@ export interface Segment {
   [key: string]: unknown
 }
 
+export type Aspect = '16:9' | '9:16' | '1:1'
+export type Resolution = '720p' | '1080p' | '4k'
+export type Quality = 'preview' | 'standard' | 'high'
+export type SubtitleMode = 'off' | 'sidecar' | 'soft' | 'burn'
+
+/** What the finished file is: its shape, size and extras. */
+export interface Output {
+  aspect?: Aspect
+  resolution?: Resolution
+  quality?: Quality
+  fps?: number
+  subtitles?: SubtitleMode
+  chapters?: boolean
+  thumbnail?: boolean
+  [key: string]: unknown
+}
+
+/** The narrator, for every scene that doesn't give its own. */
+export interface Voice {
+  voice?: string
+  speed?: number
+  pauses?: { paragraph_ms?: number; heading_ms?: number; segment_end_ms?: number }
+  [key: string]: unknown
+}
+
 export interface VideoSpec {
   spec_version?: string
   id?: string
@@ -184,7 +220,10 @@ export interface VideoSpec {
   segments: Segment[]
   audio_tracks?: AudioTrack[]
   credits?: Credits | null
-  output?: { aspect?: '16:9' | '9:16' | '1:1'; [key: string]: unknown }
+  output?: Output
+  voice?: Voice
+  /** Drawn over every scene that doesn't opt out. A block present means on. */
+  chrome?: { waveform?: Waveform; [key: string]: unknown }
   style?: {
     transition?: { style?: string; duration?: number }
     motion?: Motion

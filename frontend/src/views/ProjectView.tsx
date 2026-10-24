@@ -10,7 +10,10 @@ import RenderPanel from '@/components/RenderPanel'
 import SoundtrackPanel from '@/components/SoundtrackPanel'
 import IssueList from '@/components/IssueList'
 import JsonPanel from '@/components/JsonPanel'
+import OutputSettings from '@/components/OutputSettings'
 import ProjectDefaults from '@/components/ProjectDefaults'
+import VoiceSettings from '@/components/VoiceSettings'
+import WaveformSettings from '@/components/WaveformSettings'
 import SceneList from '@/components/SceneList'
 import { RUNNING } from '@/api/generations'
 import { gamIdsIn, placeHit, resolveSearch, unresolvedSearches } from '@/spec/footage'
@@ -18,7 +21,7 @@ import { canGenerate, latestByKey, unmadeGenerates } from '@/spec/generation'
 import { useGenerationStore } from '@/stores/generations'
 import { useProjectStore } from '@/stores/projects'
 
-type Tab = 'scenes' | 'soundtrack' | 'render' | 'json' | 'history'
+type Tab = 'scenes' | 'soundtrack' | 'settings' | 'render' | 'json' | 'history'
 
 /** What the footage search is open for: one scene, or a placeholder to resolve. */
 type Finding = { kind: 'scene'; index: number } | { kind: 'resolve'; key: string }
@@ -26,6 +29,7 @@ type Finding = { kind: 'scene'; index: number } | { kind: 'resolve'; key: string
 const TABS: { id: Tab; label: string }[] = [
   { id: 'scenes', label: 'Scenes' },
   { id: 'soundtrack', label: 'Soundtrack' },
+  { id: 'settings', label: 'Settings' },
   { id: 'render', label: 'Render' },
   { id: 'json', label: 'JSON' },
   { id: 'history', label: 'History' },
@@ -283,7 +287,6 @@ export default function ProjectView() {
           Could not show pictures from the asset library: {gamError}
         </p>
       )}
-      {tab === 'scenes' && <ProjectDefaults spec={draft} onChange={edit} />}
       {tab === 'scenes' && (
         <SceneList
           spec={draft}
@@ -332,6 +335,16 @@ export default function ProjectView() {
       )}
       {tab === 'soundtrack' && (
         <SoundtrackPanel spec={draft} gamAssets={gamAssets} onChange={edit} />
+      )}
+      {tab === 'settings' && (
+        // Everything that applies to the whole video rather than one scene. The home
+        // for the rest of the project-wide settings, and for templates over them.
+        <div className="space-y-4">
+          <OutputSettings spec={draft} onChange={edit} />
+          <VoiceSettings spec={draft} onChange={edit} />
+          <ProjectDefaults spec={draft} onChange={edit} />
+          <WaveformSettings spec={draft} onChange={edit} />
+        </div>
       )}
       {tab === 'render' && (
         <div className="space-y-4">
