@@ -29,12 +29,14 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from app.gam.client import GamClient, GamError
 from app.providers.base import ToolCall, ToolResult, ToolSpec
 from app.render.estimate import estimate
+from app.services import note_media as note_files
 from app.spec.validation import SpecIssue, parse_spec
 
 # A found moment is padded so a cut doesn't clip a word: the editor's `momentTrim`.
 MOMENT_PAD = 0.5
 DEFAULT_MOMENT_SECONDS = 5.0
 MAX_SEARCH_HITS = 12
+MAX_NOTE_IMPORT = 40
 
 
 class ToolFailed(Exception):
@@ -93,6 +95,10 @@ class Working:
                                 Tuple[str, Optional[float]]]] = None
     max_generations: int = 6
     generated: int = 0
+    # The files of the attached notes by the id the assistant sees (attachments.media_ids),
+    # and what each became in the library once imported, so asking twice copies once.
+    note_media: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    imported: Dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.data = copy.deepcopy(self.data)
@@ -256,6 +262,46 @@ def replace_spec(w: Working, spec: Dict[str, Any]) -> str:
         return (f"The draft is in place, with {len(issues)} issue"
                 f"{'s' if len(issues) != 1 else ''} to fix:\n" + _issues_text(issues))
     return "Done: the draft is in place and valid."
+
+
+def import_note_media(w: Working, media_ids: List[str]) -> str:
+    """Copy files out of an attached note into the user's library, and register them."""
+    if w.gam is None:
+        raise ToolFailed("The asset library isn't reachable in this turn.")
+    if not w.note_media:
+        raise ToolFailed("No note with pictures or videos is attached.")
+    if not media_ids or len(media_ids) > MAX_NOTE_IMPORT:
+        raise ToolFailed(f"Give between 1 and {MAX_NOTE_IMPORT} ids from the note's file list.")
+    unknown = [m for m in media_ids if m not in w.note_media]
+    if unknown:
+        raise ToolFailed(f"No such note file: {', '.join(unknown)}. The ids are: "
+                         f"{', '.join(w.note_media)}.")
+
+    candidate = copy.deepcopy(w.data)
+    rows: List[Dict[str, Any]] = []
+    failed: List[str] = []
+    for media_id in dict.fromkeys(media_ids):
+        media = w.note_media[media_id]
+        gam_id = w.imported.get(media_id)
+        try:
+            if gam_id is None:
+                stored = note_files.copy_file(media["path"], media_id, w.gam)
+                gam_id = w.imported[media_id] = stored.id
+                w.hits[gam_id] = Hit(gam_id, stored.name, media["type"],
+                                     stored.duration_seconds, None, None)
+        except (note_files.CopyFailed, GamError) as exc:
+            failed.append(f"{media_id} ({media['name']}): {getattr(exc, 'message', None) or exc}")
+            continue
+        key = w.register_gam(candidate, gam_id, asset_type=media["type"],
+                             label=media["caption"] or media["name"])
+        rows.append({"id": media_id, "asset": key, "gam_id": gam_id, "type": media["type"]})
+    if not rows:
+        raise ToolFailed("Nothing could be copied:\n- " + "\n- ".join(failed))
+    summary = f"Brought {len(rows)} file{'s' if len(rows) != 1 else ''} from the note into the library"
+    result = w.commit(candidate, summary)
+    return (result + " Use set_visual (asset = the key) or add_overlay to put them on scenes."
+            + _compact({"imported": rows})
+            + ("\nCould not copy:\n- " + "\n- ".join(failed) if failed else ""))
 
 
 def _insert_at(w: Working, after: Optional[str]) -> int:
@@ -630,6 +676,14 @@ TOOLS: List[Tuple[ToolSpec, Callable[..., str]]] = [
                   "audio": {"type": "string", "enum": ["mute", "play"]},
                   "loop": {"type": "boolean"}},
                "required": ["segment_id"]}), set_visual),
+    (ToolSpec("import_note_media",
+              "Copy pictures, videos or sounds out of an attached note into the user's library "
+              "(GAM) and register them in the video's assets, returning each one's asset key. "
+              "Use it when the user wants the note's own media in the video; then place each "
+              "with set_visual, add_overlay or add_audio_track, on the scene that covers the "
+              "heading it sat under. Takes ids from the note's file list (n1, n2…).",
+              {"type": "object", "properties": {"media_ids": {"type": "array", "items": _STR}},
+               "required": ["media_ids"]}), import_note_media),
     (ToolSpec("add_placeholder",
               "When the library has nothing fitting: a placeholder for footage still to find "
               "(kind search, text = what to look for) or a picture to generate (kind generate, "

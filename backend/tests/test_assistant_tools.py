@@ -213,3 +213,38 @@ def test_a_generation_that_cannot_start_leaves_the_placeholder():
     assert not result.is_error and "no fal.ai key" in result.content
     key = w.data["segments"][1]["visual"]["asset"]
     assert w.data["assets"][key]["from"] == "generate" and w.generated == 0
+
+
+def test_a_notes_files_are_copied_into_the_library_once_and_registered(siblings):
+    siblings.notes_files = {"/media/u1/map.png": b"map", "/media/u1/pan.mp4": b"pan"}
+    w = Working(spec(), gam=GamClient("user-token"), note_media={
+        "n1": {"type": "image", "path": "/media/u1/map.png", "name": "map.png",
+               "caption": "Old map", "after": "The valley"},
+        "n2": {"type": "video", "path": "/media/u1/pan.mp4", "name": "pan.mp4",
+               "caption": "", "after": ""},
+        "n3": {"type": "image", "path": "/media/u1/gone.png", "name": "gone.png",
+               "caption": "", "after": ""},
+    })
+
+    result = run(w, "import_note_media", media_ids=["n1", "n2", "n3"])
+
+    assert not result.is_error, result.content
+    assert "Could not copy" in result.content and "n3" in result.content
+    assets = {k: v for k, v in w.data["assets"].items() if k != "a_map"}
+    assert sorted(a["id"] for a in assets.values()) == ["gam-1", "gam-2"]
+    assert {a["type"] for a in assets.values()} == {"image", "video"}
+    assert "a_old_map" in assets
+
+    # The key it returned is usable at once, and asking again uploads nothing new.
+    assert not run(w, "set_visual", segment_id="s_valley", asset="a_old_map").is_error
+    run(w, "import_note_media", media_ids=["n1"])
+    assert len(siblings.uploads) == 2
+
+
+def test_only_the_ids_of_attached_notes_can_be_imported(siblings):
+    w = Working(spec(), gam=GamClient("user-token"), note_media={})
+    assert run(w, "import_note_media", media_ids=["n1"]).is_error
+    w.note_media = {"n1": {"type": "image", "path": "/media/u1/a.png", "name": "a",
+                           "caption": "", "after": ""}}
+    result = run(w, "import_note_media", media_ids=["/etc/passwd"])
+    assert result.is_error and "No such note file" in result.content
