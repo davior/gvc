@@ -1,5 +1,12 @@
 import type { VideoSpec } from '@/api/projects'
-import { DEFAULT_MOTION_AMOUNT, PROJECT_MOTIONS, setProjectMotion } from '@/spec/scene'
+import { NumberField, SelectField } from '@/components/SettingsFields'
+import {
+  DEFAULT_MOTION_AMOUNT,
+  PROJECT_MOTIONS,
+  TRANSITIONS,
+  setProjectMotion,
+} from '@/spec/scene'
+import { STYLE_DEFAULTS, patchSetting } from '@/spec/settings'
 
 interface Props {
   spec: VideoSpec
@@ -71,6 +78,43 @@ export default function ProjectDefaults({ spec, onChange }: Props) {
       <span className="text-gray-500">
         Scenes with a camera move of their own keep it.
       </span>
+      <span className="w-full" />
+      <SelectField
+        label="Transition between scenes"
+        value={spec.style?.transition?.style ?? STYLE_DEFAULTS.transition.style}
+        options={TRANSITIONS}
+        onChange={(style) =>
+          onChange(
+            patchSetting(
+              spec,
+              ['style', 'transition'],
+              { style },
+              STYLE_DEFAULTS.transition
+            )
+          )
+        }
+      />
+      {(spec.style?.transition?.style ?? 'none') !== 'none' && (
+        <NumberField
+          label="Transition length"
+          value={spec.style?.transition?.duration ?? STYLE_DEFAULTS.transition.duration}
+          min={0.1}
+          max={3}
+          step={0.1}
+          suffix="s"
+          onCommit={(duration) =>
+            onChange(
+              patchSetting(
+                spec,
+                ['style', 'transition'],
+                { duration },
+                STYLE_DEFAULTS.transition
+              )
+            )
+          }
+        />
+      )}
+      <span className="text-gray-500">A scene can set its own, from its card.</span>
     </section>
   )
 }

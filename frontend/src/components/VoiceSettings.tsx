@@ -1,4 +1,5 @@
 import type { VideoSpec } from '@/api/projects'
+import { NumberField } from '@/components/SettingsFields'
 import { VOICE_DEFAULTS, setVoice } from '@/spec/settings'
 
 interface Props {
@@ -35,45 +36,31 @@ export default function VoiceSettings({ spec, onChange }: Props) {
             onChange={(e) => onChange(setVoice(spec, { voice: e.target.value }))}
           />
         </label>
-        <label className="flex items-center gap-1">
-          Speed
-          <input
-            type="number"
-            min="0.5"
-            max="2"
-            step="0.05"
-            aria-label="Speaking speed"
-            className="input w-16 py-0.5"
-            value={voice?.speed ?? VOICE_DEFAULTS.speed}
-            onChange={(e) => {
-              const speed = Number(e.target.value)
-              if (speed >= 0.5 && speed <= 2) onChange(setVoice(spec, { speed }))
-            }}
-          />
-          ×
-        </label>
+        <NumberField
+          label="Speaking speed"
+          value={voice?.speed ?? VOICE_DEFAULTS.speed}
+          min={0.5}
+          max={2}
+          step={0.05}
+          suffix="×"
+          onCommit={(speed) => onChange(setVoice(spec, { speed }))}
+        />
       </div>
       <div className="flex flex-wrap items-center gap-3 text-xs text-gray-600 dark:text-gray-300">
         <span className="font-medium">Pause</span>
         {PAUSES.map((p) => (
-          <label key={p.key} className="flex items-center gap-1">
-            {p.label}
-            <input
-              type="number"
-              min="0"
-              max={p.max}
-              step="50"
-              aria-label={`Pause ${p.label.toLowerCase()}, milliseconds`}
-              className="input w-20 py-0.5"
-              value={pauses[p.key]}
-              onChange={(e) => {
-                const ms = Math.round(Number(e.target.value))
-                if (ms >= 0 && ms <= p.max)
-                  onChange(setVoice(spec, { pauses: { [p.key]: ms } }))
-              }}
-            />
-            ms
-          </label>
+          <NumberField
+            key={p.key}
+            label={`Pause ${p.label.toLowerCase()}, milliseconds`}
+            value={pauses[p.key]}
+            min={0}
+            max={p.max}
+            step={50}
+            suffix="ms"
+            onCommit={(ms) =>
+              onChange(setVoice(spec, { pauses: { [p.key]: Math.round(ms) } }))
+            }
+          />
         ))}
       </div>
     </section>

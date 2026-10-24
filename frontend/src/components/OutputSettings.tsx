@@ -1,4 +1,5 @@
 import type { Aspect, Quality, Resolution, SubtitleMode, VideoSpec } from '@/api/projects'
+import { NumberField } from '@/components/SettingsFields'
 import { OUTPUT_DEFAULTS, setOutput } from '@/spec/settings'
 
 interface Props {
@@ -73,23 +74,13 @@ export default function OutputSettings({ spec, onChange }: Props) {
         {select('Quality', o.quality, QUALITIES, (quality) =>
           onChange(setOutput(spec, { quality }))
         )}
-        <label className="flex items-center gap-1">
-          Frames per second
-          <input
-            type="number"
-            min="12"
-            max="60"
-            step="1"
-            aria-label="Frames per second"
-            className="input w-16 py-0.5"
-            value={o.fps}
-            onChange={(e) => {
-              // Out of range is refused by the spec on save; hold the box to it here.
-              const fps = Math.round(Number(e.target.value))
-              if (fps >= 12 && fps <= 60) onChange(setOutput(spec, { fps }))
-            }}
-          />
-        </label>
+        <NumberField
+          label="Frames per second"
+          value={o.fps}
+          min={12}
+          max={60}
+          onCommit={(fps) => onChange(setOutput(spec, { fps: Math.round(fps) }))}
+        />
         {select('Subtitles', o.subtitles, SUBTITLES, (subtitles) =>
           onChange(setOutput(spec, { subtitles }))
         )}

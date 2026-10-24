@@ -10,7 +10,12 @@ import RenderPanel from '@/components/RenderPanel'
 import SoundtrackPanel from '@/components/SoundtrackPanel'
 import IssueList from '@/components/IssueList'
 import JsonPanel from '@/components/JsonPanel'
+import CardSettings from '@/components/CardSettings'
+import LookSettings from '@/components/LookSettings'
 import OutputSettings from '@/components/OutputSettings'
+import OverlayTextSettings from '@/components/OverlayTextSettings'
+import PanelSettings from '@/components/PanelSettings'
+import WatermarkSettings from '@/components/WatermarkSettings'
 import ProjectDefaults from '@/components/ProjectDefaults'
 import VoiceSettings from '@/components/VoiceSettings'
 import WaveformSettings from '@/components/WaveformSettings'
@@ -342,7 +347,15 @@ export default function ProjectView() {
         <div className="space-y-4">
           <OutputSettings spec={draft} onChange={edit} />
           <VoiceSettings spec={draft} onChange={edit} />
+          <LookSettings spec={draft} gamAssets={gamAssets} onChange={edit} />
           <ProjectDefaults spec={draft} onChange={edit} />
+          <CardSettings spec={draft} onChange={edit} />
+          <PanelSettings spec={draft} onChange={edit} />
+          <h2 className="pt-2 text-sm font-medium text-gray-900 dark:text-gray-100">
+            Drawn over every scene
+          </h2>
+          <WatermarkSettings spec={draft} gamAssets={gamAssets} onChange={edit} />
+          <OverlayTextSettings spec={draft} onChange={edit} />
           <WaveformSettings spec={draft} onChange={edit} />
         </div>
       )}

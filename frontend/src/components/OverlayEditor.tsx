@@ -11,6 +11,7 @@ import type {
 } from '@/api/projects'
 import AnchorSelect from '@/components/AnchorSelect'
 import { sceneName, type AnchorOption } from '@/spec/anchors'
+import { POSITIONS } from '@/spec/positions'
 import { WAVE_MODES, WAVE_POSITIONS } from '@/spec/waveform'
 import FootageSearch from '@/components/FootageSearch'
 import {
@@ -29,14 +30,6 @@ interface Props {
   gamAssets: Record<string, GamAsset | null>
   onChange: (next: VideoSpec) => void
 }
-
-const POSITIONS: { value: Position; label: string }[] = [
-  { value: 'top-left', label: 'Top left' },
-  { value: 'top-right', label: 'Top right' },
-  { value: 'center', label: 'Centre' },
-  { value: 'bottom-left', label: 'Bottom left' },
-  { value: 'bottom-right', label: 'Bottom right' },
-]
 
 const KIND_LABEL: Record<string, string> = {
   waveform: 'Wave',
