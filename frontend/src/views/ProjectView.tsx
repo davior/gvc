@@ -10,7 +10,9 @@ import RenderPanel from '@/components/RenderPanel'
 import SoundtrackPanel from '@/components/SoundtrackPanel'
 import IssueList from '@/components/IssueList'
 import JsonPanel from '@/components/JsonPanel'
+import OutputSettings from '@/components/OutputSettings'
 import ProjectDefaults from '@/components/ProjectDefaults'
+import VoiceSettings from '@/components/VoiceSettings'
 import WaveformSettings from '@/components/WaveformSettings'
 import SceneList from '@/components/SceneList'
 import { RUNNING } from '@/api/generations'
@@ -338,6 +340,8 @@ export default function ProjectView() {
         // Everything that applies to the whole video rather than one scene. The home
         // for the rest of the project-wide settings, and for templates over them.
         <div className="space-y-4">
+          <OutputSettings spec={draft} onChange={edit} />
+          <VoiceSettings spec={draft} onChange={edit} />
           <ProjectDefaults spec={draft} onChange={edit} />
           <WaveformSettings spec={draft} onChange={edit} />
         </div>
