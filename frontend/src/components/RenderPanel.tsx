@@ -205,7 +205,10 @@ export default function RenderPanel({ projectId, dirty, version }: Props) {
       {renders.length > 0 && (
         <ul className="space-y-1" aria-label="Renders">
           {renders.map((render) => (
-            <li key={render.id} className="card flex items-center gap-3 p-2 text-xs">
+            <li
+              key={render.id}
+              className="card flex items-center gap-3 p-2 text-xs text-gray-700 dark:text-gray-200"
+            >
               <span className="w-24 font-medium text-gray-900 dark:text-gray-100">
                 {render.preview ? 'Preview' : 'Render'} v{render.version}
               </span>

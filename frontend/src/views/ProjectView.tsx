@@ -115,40 +115,66 @@ export default function ProjectView() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-4 p-6">
-      <div className="flex items-center gap-3">
-        <Link to="/projects" className="btn btn-ghost p-2" aria-label="All videos">
-          <ArrowLeft className="h-4 w-4" />
-        </Link>
-        <input
-          className="input flex-1 text-lg font-semibold"
-          aria-label="Video title"
-          value={draft.title}
-          onChange={(e) => edit({ ...draft, title: e.target.value })}
-        />
-        {dirty && (
-          <button type="button" className="btn btn-ghost" onClick={discard}>
-            <Undo2 className="mr-1 inline h-4 w-4" />
-            Discard
+    <div className="mx-auto max-w-4xl space-y-4 px-6 pb-6">
+      {/* Pinned so Save stays reachable however far down the scenes you are. The
+          opaque background stops the scenes showing through as they scroll under it. */}
+      <div className="sticky top-0 z-20 -mx-6 space-y-3 bg-gray-50 px-6 pb-0 pt-6 dark:bg-gray-900">
+        <div className="flex items-center gap-3">
+          <Link to="/projects" className="btn btn-ghost p-2" aria-label="All videos">
+            <ArrowLeft className="h-4 w-4" />
+          </Link>
+          <input
+            className="input flex-1 text-lg font-semibold"
+            aria-label="Video title"
+            value={draft.title}
+            onChange={(e) => edit({ ...draft, title: e.target.value })}
+          />
+          {dirty && (
+            <button type="button" className="btn btn-ghost" onClick={discard}>
+              <Undo2 className="mr-1 inline h-4 w-4" />
+              Discard
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={!dirty || saving}
+            onClick={() => void save()}
+          >
+            <Save className="mr-1 inline h-4 w-4" />
+            {saving ? 'Saving…' : dirty ? 'Save' : 'Saved'}
           </button>
-        )}
-        <button
-          type="button"
-          className="btn btn-primary"
-          disabled={!dirty || saving}
-          onClick={() => void save()}
-        >
-          <Save className="mr-1 inline h-4 w-4" />
-          {saving ? 'Saving…' : dirty ? 'Save' : 'Saved'}
-        </button>
-      </div>
+        </div>
 
-      <p className="text-xs text-gray-500">
-        Version {project.version}
-        {source?.kind === 'note' &&
-          ' · pushed from Gecko Notes; edited only here from now on'}
-        {source?.kind === 'brief' && ' · drafted from a prompt'}
-      </p>
+        <p className="text-xs text-gray-500">
+          Version {project.version}
+          {source?.kind === 'note' &&
+            ' · pushed from Gecko Notes; edited only here from now on'}
+          {source?.kind === 'brief' && ' · drafted from a prompt'}
+        </p>
+
+        <div
+          role="tablist"
+          className="flex gap-1 border-b border-gray-200 dark:border-gray-700"
+        >
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === t.id}
+              onClick={() => setTab(t.id)}
+              className={`px-3 py-2 text-sm ${
+                tab === t.id
+                  ? 'border-b-2 border-primary-600 font-medium text-gray-900 dark:text-gray-100'
+                  : 'text-gray-500'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {project.pending_note_media > 0 && (
         <div className="space-y-2 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
@@ -192,28 +218,6 @@ export default function ProjectView() {
         </p>
       )}
       <IssueList issues={issues} />
-
-      <div
-        role="tablist"
-        className="flex gap-1 border-b border-gray-200 dark:border-gray-700"
-      >
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            aria-selected={tab === t.id}
-            onClick={() => setTab(t.id)}
-            className={`px-3 py-2 text-sm ${
-              tab === t.id
-                ? 'border-b-2 border-primary-600 font-medium text-gray-900 dark:text-gray-100'
-                : 'text-gray-500'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
 
       {tab === 'scenes' && toFind.length > 0 && (
         <section aria-label="To find" className="card space-y-2 p-3">
