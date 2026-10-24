@@ -1,13 +1,21 @@
 import { useMemo, useState } from 'react'
-import { Image as ImageIcon, Trash2, Type, UserRound } from 'lucide-react'
+import { AudioWaveform, Image as ImageIcon, Trash2, Type, UserRound } from 'lucide-react'
 import type { GamAsset } from '@/api/gam'
-import type { Overlay, Position, Segment, VideoSpec } from '@/api/projects'
+import type {
+  Overlay,
+  Position,
+  Segment,
+  VideoSpec,
+  WaveMode,
+  WavePosition,
+} from '@/api/projects'
 import AnchorSelect from '@/components/AnchorSelect'
 import { sceneName, type AnchorOption } from '@/spec/anchors'
 import FootageSearch from '@/components/FootageSearch'
 import {
   addImageOverlay,
   addOverlay,
+  addWaveOverlay,
   isTimed,
   removeOverlay,
   updateOverlay,
@@ -29,7 +37,22 @@ const POSITIONS: { value: Position; label: string }[] = [
   { value: 'bottom-right', label: 'Bottom right' },
 ]
 
+// Notes' names for the wave styles, so the same wave is called the same in both.
+const WAVE_MODES: { value: WaveMode; label: string }[] = [
+  { value: 'line', label: 'Line' },
+  { value: 'cline', label: 'Centred line' },
+  { value: 'p2p', label: 'Peak to peak' },
+  { value: 'point', label: 'Points' },
+]
+
+const WAVE_POSITIONS: { value: WavePosition; label: string }[] = [
+  { value: 'top', label: 'Top' },
+  { value: 'center', label: 'Centre' },
+  { value: 'bottom', label: 'Bottom' },
+]
+
 const KIND_LABEL: Record<string, string> = {
+  waveform: 'Wave',
   text: 'Text',
   lower_third: 'Name',
   image: 'Picture',
@@ -119,6 +142,11 @@ export default function OverlayEditor({
             {overlay.type === 'image' && (
               <span className="min-w-0 flex-1 truncate">
                 {pictureName(overlay.asset)}
+              </span>
+            )}
+            {overlay.type === 'waveform' && (
+              <span className="min-w-0 flex-1 truncate text-gray-500">
+                Moves with the sound
               </span>
             )}
             <button
@@ -214,6 +242,89 @@ export default function OverlayEditor({
                 </label>
               </>
             )}
+            {overlay.type === 'waveform' && (
+              <>
+                <label className="flex items-center gap-1">
+                  Style
+                  <select
+                    className="input w-auto py-0.5"
+                    aria-label="Wave style"
+                    value={overlay.mode ?? 'line'}
+                    onChange={(e) =>
+                      set(overlay.id, { mode: e.target.value as WaveMode })
+                    }
+                  >
+                    {WAVE_MODES.map((m) => (
+                      <option key={m.value} value={m.value}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex items-center gap-1">
+                  Where
+                  <select
+                    className="input w-auto py-0.5"
+                    aria-label="Wave position"
+                    value={overlay.position ?? 'bottom'}
+                    onChange={(e) =>
+                      set(overlay.id, { position: e.target.value as WavePosition })
+                    }
+                  >
+                    {WAVE_POSITIONS.map((p) => (
+                      <option key={p.value} value={p.value}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <input
+                  type="color"
+                  aria-label="Wave colour"
+                  className="h-6 w-8 cursor-pointer rounded"
+                  value={overlay.color ?? '#00ff41'}
+                  onChange={(e) => set(overlay.id, { color: e.target.value })}
+                />
+                <label className="flex items-center gap-1">
+                  Height
+                  <input
+                    type="range"
+                    min="8"
+                    max="50"
+                    step="1"
+                    aria-label="Wave height, % of the frame"
+                    value={overlay.height_pct ?? 22}
+                    onChange={(e) =>
+                      set(overlay.id, { height_pct: Number(e.target.value) })
+                    }
+                  />
+                </label>
+                <label className="flex items-center gap-1">
+                  Opacity
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="1"
+                    step="0.05"
+                    aria-label="Wave opacity"
+                    value={overlay.opacity ?? 0.7}
+                    onChange={(e) => set(overlay.id, { opacity: Number(e.target.value) })}
+                  />
+                </label>
+                <label className="flex items-center gap-1">
+                  Backing
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    aria-label="Darkened backing behind the wave"
+                    value={overlay.scrim ?? 0.45}
+                    onChange={(e) => set(overlay.id, { scrim: Number(e.target.value) })}
+                  />
+                </label>
+              </>
+            )}
             <label className="flex items-center gap-1">
               Fade
               <input
@@ -282,6 +393,14 @@ export default function OverlayEditor({
         >
           <ImageIcon className="mr-1 inline h-3.5 w-3.5" />
           Picture
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost text-xs"
+          onClick={() => onChange(addWaveOverlay(spec, index))}
+        >
+          <AudioWaveform className="mr-1 inline h-3.5 w-3.5" />
+          Audio wave
         </button>
       </div>
       {picking && (

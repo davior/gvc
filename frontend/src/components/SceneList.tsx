@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Paperclip, Plus, Trash2 } from 'lucide-react'
 import type { GamAsset } from '@/api/gam'
 import type { Segment, VideoSpec } from '@/api/projects'
 import ClipPlayer from '@/components/ClipPlayer'
@@ -25,6 +25,22 @@ interface Props {
   /** Open the footage search for the segment at this index. */
   onFindFootage?: (index: number) => void
   onGenerate?: (key: string) => void
+}
+
+/** Where the scene's picture or footage lives in GAM, if it is in GAM yet. */
+function gamPageOf(
+  spec: VideoSpec,
+  segment: Segment,
+  gamAssets: Record<string, GamAsset | null>
+): string | null {
+  const ref = segment.visual ? spec.assets?.[segment.visual.asset] : undefined
+  const id =
+    ref?.from === 'gam'
+      ? ref.id
+      : ref?.from === 'search' || ref?.from === 'generate'
+        ? ref.result?.id
+        : undefined
+  return (id && gamAssets[id]?.page_url) || null
 }
 
 const KIND_LABEL: Record<Segment['kind'], string> = {
@@ -59,6 +75,7 @@ export default function SceneList({
     <div className="space-y-3">
       {segments.map((segment, index) => {
         const footage = footageOf(spec, segment, gamAssets)
+        const gamPage = gamPageOf(spec, segment, gamAssets)
         return (
           <section
             key={segment.id}
@@ -106,6 +123,20 @@ export default function SceneList({
               >
                 <Trash2 className="h-4 w-4" />
               </button>
+              {gamPage && (
+                // A link, not a button: it is somewhere else, and a new tab keeps the
+                // editor's unsaved changes where they are.
+                <a
+                  href={gamPage}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-ghost p-2"
+                  aria-label="Open in GAM"
+                  title="Open this scene's asset in GAM"
+                >
+                  <Paperclip className="h-4 w-4" />
+                </a>
+              )}
             </div>
 
             {segment.kind === 'card' && segment.card && (

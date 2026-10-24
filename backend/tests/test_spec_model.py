@@ -165,3 +165,20 @@ def test_structural_rules_still_hold():
 def test_a_misspelt_field_is_an_error_not_ignored():
     issues = _issues({"segments": [{"id": "s1", "kind": "scene", "transtion_in": {}}]})
     assert issues == [(["segments", 0, "transtion_in"], "Extra inputs are not permitted")]
+
+
+def test_a_waveform_overlay_takes_the_same_settings_as_the_projects_waveform():
+    spec = _valid({"segments": [{"id": "s", "kind": "scene", "overlays": [
+        {"id": "w", "type": "waveform", "mode": "cline", "position": "center",
+         "height_pct": 30, "show": {"from": "video_start", "to": "video_end"}}]}]})
+    wave = spec.segments[0].overlays[0]
+    assert (wave.color, wave.opacity, wave.scrim) == ("#00ff41", 0.7, 0.45)
+    assert dump_spec(spec)["segments"][0]["overlays"][0]["mode"] == "cline"
+
+
+def test_a_waveform_overlay_outside_the_ranges_is_refused_with_its_path():
+    issues = _issues({"segments": [{"id": "s", "kind": "scene", "overlays": [
+        {"id": "w", "type": "waveform", "mode": "squiggle", "scrim": 2}]}]})
+    paths = [path for path, _ in issues]
+    assert ["segments", 0, "overlays", 0, "mode"] in paths
+    assert ["segments", 0, "overlays", 0, "scrim"] in paths

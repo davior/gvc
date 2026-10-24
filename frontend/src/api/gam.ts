@@ -16,6 +16,8 @@ export interface GamAsset {
   file_url: string | null
   thumb_url: string | null
   credit: string
+  /** GAM's own page for the asset, to open it in the library. */
+  page_url?: string | null
   parent_asset_id: string | null
   in_point: number | null
   out_point: number | null

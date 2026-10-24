@@ -51,6 +51,7 @@ def to_asset(raw: Dict[str, Any]) -> GamAssetRead:
         file_url=_absolute(raw.get("file_url")),
         thumb_url=_absolute(raw.get("thumb_url")),
         credit=raw.get("credit") or "",
+        page_url=f"{settings.gam_base_url.rstrip('/')}/a/{raw['id']}",
         size_bytes=raw.get("size_bytes") or 0,
         parent_asset_id=raw.get("parent_asset_id"),
         in_point=raw.get("in_point"),

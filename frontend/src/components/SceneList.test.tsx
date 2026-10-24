@@ -32,6 +32,46 @@ function Harness() {
 }
 
 describe('SceneList', () => {
+  it('links a scene to its asset in GAM with a paper clip, once it has one', () => {
+    const spec: VideoSpec = {
+      title: 'T',
+      assets: { a: { from: 'gam', id: 'g1', type: 'image' } },
+      segments: [
+        { id: 's1', kind: 'scene', label: 'With', visual: { asset: 'a' } },
+        { id: 's2', kind: 'scene', label: 'Without' },
+      ],
+    }
+    const gam = {
+      g1: {
+        id: 'g1',
+        name: 'Map',
+        asset_type: 'image',
+        duration_seconds: null,
+        width: null,
+        height: null,
+        file_url: null,
+        thumb_url: null,
+        credit: '',
+        page_url: 'https://gam.example/a/g1',
+        parent_asset_id: null,
+        in_point: null,
+        out_point: null,
+        missing: false,
+      },
+    }
+    render(<SceneList spec={spec} onChange={() => {}} gamAssets={gam} />)
+    const link = within(screen.getByRole('region', { name: 'With' })).getByRole('link', {
+      name: 'Open in GAM',
+    })
+    expect(link).toHaveAttribute('href', 'https://gam.example/a/g1')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(
+      within(screen.getByRole('region', { name: 'Without' })).queryByRole('link', {
+        name: 'Open in GAM',
+      })
+    ).toBeNull()
+  })
+
   it('builds a video scene by scene', async () => {
     render(<Harness />)
 

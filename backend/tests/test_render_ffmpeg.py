@@ -1520,3 +1520,55 @@ def test_without_clips_a_tracks_choice_during_clips_changes_nothing():
             "in.mp4", [F.MixTrack(path="m.mp3", start=0.0, length=30.0, during_clips=mode)],
             "o.mp4", duration=30.0))
         assert "eval=frame" not in graph and "[t1][key]sidechaincompress=" in graph
+
+
+def test_a_wave_window_reads_a_slice_of_the_videos_own_sound_and_fades_with_its_scrim():
+    wave = F.TimedWave(RenderOptions().waveform, 2.0, 6.0, 0.5)
+    argv = F.build_overlay_pass(
+        "stitched.mp4", [], "out.mp4", options=RenderOptions(), preview=True,
+        duration=10.0, waves=[wave], width=1280, height=720)
+    graph = _graph(argv)
+    assert "[0:a]anull[wa1]" in graph
+    assert "atrim=start=2.000:end=6.000" in graph and "showwaves=s=1280x158" in graph
+    # The scrim and the wave are one stream, so the fade takes both.
+    assert "overlay=format=auto:shortest=1[wv1_b]" in graph
+    assert "fade=t=in:st=2.000:d=0.500:alpha=1" in graph
+    assert "overlay=0:562:eof_action=pass:enable='between(t,2.000,6.000)'[wv1]" in graph
+    assert argv[argv.index("-map") + 1] == "[wv1]"
+    assert argv[argv.index("-c:a") + 1] == "copy"
+
+
+def test_several_waves_split_the_sound_once():
+    waves = [F.TimedWave(RenderOptions().waveform, 0.0, 2.0), F.TimedWave(RenderOptions().waveform, 3.0, 5.0)]
+    graph = _graph(F.build_overlay_pass(
+        "s.mp4", [], "o.mp4", options=RenderOptions(), preview=True, duration=6.0,
+        waves=waves, width=1280, height=720))
+    assert "[0:a]asplit=2[wa1][wa2]" in graph
+    # The second wave is drawn over the first, not over the bare picture.
+    assert "[wv1][wv2_p]overlay=" in graph
+
+
+@pytest.mark.skipif(not os.path.exists("/usr/bin/ffmpeg") or "showwaves" not in F.available_filters(),
+                    reason="needs ffmpeg with showwaves")
+def test_the_wave_pass_really_runs_and_draws_only_in_its_window(tmp_path):
+    source = tmp_path / "in.mp4"
+    F.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+           "-f", "lavfi", "-i", "color=c=0x202020:s=320x180:r=30:d=4",
+           "-f", "lavfi", "-i", "sine=frequency=220:duration=4",
+           "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(source)],
+          timeout=60)
+    wave = F.TimedWave(RenderOptions().waveform, 1.0, 3.0, 0.2)
+    argv = F.build_overlay_pass(str(source), [], str(tmp_path / "out.mp4"),
+                                options=RenderOptions(), preview=True, duration=4.0,
+                                waves=[wave], width=320, height=180)
+    F.run(argv, timeout=120)
+
+    def green_at(t):
+        png = tmp_path / f"f{t}.png"
+        F.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-ss", str(t),
+               "-i", str(tmp_path / "out.mp4"), "-frames:v", "1", str(png)], timeout=30)
+        from PIL import Image
+        img = Image.open(png).convert("RGB")
+        return any(g > 150 and r < 100 for r, g, _ in img.getdata())
+
+    assert green_at(2.0) and not green_at(0.5) and not green_at(3.6)

@@ -27,7 +27,7 @@ from app.render.ffmpeg import KENBURNS_CYCLE, MIN_TRANSITION_SECONDS, XFADE_MAX_
 from app.render.options import XFADE_NAMES, is_crossfade
 from app.spec.model import (
     AnchorRef, AudioTrack, Beat, Card, CodeOverlay, ImageOverlay, LowerThirdOverlay, Motion,
-    QuoteOverlay, Segment, TextOverlay, Transition, VideoSpec,
+    QuoteOverlay, Segment, TextOverlay, Transition, VideoSpec, WaveformOverlay,
 )
 
 UnitKind = str  # "still" | "card" | "video_muted" | "video_sound"
@@ -477,7 +477,7 @@ def beat_pause_ms(spec: VideoSpec, beats: Sequence[Beat], position: int) -> int:
 
 # ── timed overlays ──────────────────────────────────────────────────────────
 
-TimedKind = Union[TextOverlay, LowerThirdOverlay, ImageOverlay]
+TimedKind = Union[TextOverlay, LowerThirdOverlay, ImageOverlay, WaveformOverlay]
 
 DEFAULT_OVERLAY_FADE = 0.3
 MIN_OVERLAY_SECONDS = 0.2
@@ -507,7 +507,7 @@ def place_overlays(spec: VideoSpec, media: Dict[str, Media], where: Placement,
         span = where.segments.get(segment.id)
         name = segment.label or segment.id
         for overlay in segment.overlays:
-            if not isinstance(overlay, (TextOverlay, LowerThirdOverlay, ImageOverlay)):
+            if not isinstance(overlay, (TextOverlay, LowerThirdOverlay, ImageOverlay, WaveformOverlay)):
                 continue
             if span is None:
                 # The scene itself was left out (a clip with nothing to play).

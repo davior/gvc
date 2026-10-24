@@ -20,7 +20,7 @@ PathPart = Union[str, int]
 # field — but a key like `assets.notes` could exist, so a tag is only dropped when it
 # immediately follows a union-valued field.
 _UNION_TAGS = {"notes", "gam", "generate", "search", "note", "brief",
-               "quote", "code", "text", "lower_third", "image",
+               "quote", "code", "text", "lower_third", "image", "waveform",
                "AnchorRef", "literal['video_start','video_end']"}
 _UNION_PARENTS = {"source", "overlays", "start", "end", "from", "to"}
 

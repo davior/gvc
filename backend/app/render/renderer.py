@@ -555,11 +555,17 @@ def render(
     # ── timed overlays ───────────────────────────────────────────────────────
     timed = place_overlays(spec, media, where, warnings)
     layers = _overlay_layers(timed, work_dir, width, height)
-    if layers:
-        progress("Drawing overlays", 88,
-                 f"{len(layers)} overlay{'s' if len(layers) != 1 else ''}")
+    waves = [F.TimedWave(spec=i.overlay, start=i.start, end=i.end, fade=i.fade)
+             for i in timed if i.overlay.type == "waveform"]
+    if waves and "showwaves" not in F.available_filters():
+        warnings.append("This ffmpeg can't draw audio waves; waveform overlays were left out.")
+        waves = []
+    if layers or waves:
+        count = len(layers) + len(waves)
+        progress("Drawing overlays", 88, f"{count} overlay{'s' if count != 1 else ''}")
         F.run(F.build_overlay_pass(final, layers, "overlaid.mp4", options=options,
-                                   preview=preview, duration=timeline.total),
+                                   preview=preview, duration=timeline.total,
+                                   waves=waves, width=width, height=height),
               cwd=work_dir, timeout=F.shot_timeout(timeline.total))
         final = "overlaid.mp4"
 
@@ -636,6 +642,8 @@ def _overlay_layers(timed: List[OverlayPlacement], work_dir: str, width: int,
         elif overlay.type == "lower_third":
             image = compose.lower_third_layer(width, height, title=overlay.title,
                                               subtitle=overlay.subtitle or "")
+        elif overlay.type == "waveform":
+            continue    # drawn by the overlay pass from the video's own sound
         else:
             image = compose.image_layer(width, height, picture=item.media.path,
                                         position=overlay.position, scale_pct=overlay.scale_pct,
