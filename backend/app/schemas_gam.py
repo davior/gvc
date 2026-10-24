@@ -21,6 +21,9 @@ class GamAssetRead(BaseModel):
     file_url: Optional[str] = None
     thumb_url: Optional[str] = None
     credit: str = ""
+    # GAM's own page for the asset, for a link that opens it in the library. Built from
+    # `GAM_BASE_URL`, not signed: opening it is GAM's login, not GVC's.
+    page_url: Optional[str] = None
     # The file's size, which is what tells the render cache a copy is still current.
     size_bytes: int = 0
     # A GAM clip has no file of its own: it is its parent's bytes between these points.

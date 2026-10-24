@@ -25,6 +25,8 @@ def test_a_hit_carries_the_moment_and_absolute_signed_urls(auth_client, siblings
     assert top["snippet"] == "the «salt» road"
     assert top["asset"]["file_url"] == f"{GAM}/media/g1.bin?exp=1&sig=x"
     assert top["asset"]["thumb_url"] == f"{GAM}/media/g1.jpg?exp=1&sig=x"
+    # The paper clip on a scene opens the asset's own page in GAM.
+    assert top["asset"]["page_url"] == f"{GAM}/a/g1"
 
 
 def test_a_gam_without_end_times_still_answers(auth_client, siblings):

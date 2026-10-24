@@ -86,6 +86,9 @@ segment; `to` may reach into a later segment to hold something across a transiti
 - `{"type":"lower_third","title":"Name","subtitle":"Role"}`: for whoever is speaking in a clip.
 - `{"type":"text","text":...,"position":"top-left"|...|"center","size_pct":6}`.
 - `{"type":"image","asset":key,"position":...,"scale_pct":25,"opacity":1}`.
+- `{"type":"waveform","mode":"line"|"p2p"|"cline"|"point","color":"#00ff41","opacity":0.7,\
+"position":"top"|"center"|"bottom","height_pct":22,"scrim":0.45}`: an animated audio wave \
+drawn from whatever the video is playing (narration, a clip's sound) while it shows.
 - `{"type":"quote","text":...,"attribution":...}` and `{"type":"code",...}`: full-screen \
 panels. Anchored to a beat, they cut the scene so the quote gets its own shot.
 

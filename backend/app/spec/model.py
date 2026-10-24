@@ -460,8 +460,26 @@ class ImageOverlay(_OverlayBase):
     opacity: Optional[Unit] = None
 
 
+class WaveformOverlay(_OverlayBase):
+    """An animated audio wave across the frame for as long as the overlay shows.
+
+    The same settings, with the same ranges, as the project-wide `chrome.waveform`
+    (which is what Notes draws across a whole video). It draws what the video itself is
+    playing at that moment (narration, or a clip's own sound), so it needs no asset.
+    """
+
+    type: Literal["waveform"]
+    mode: WaveMode = "line"
+    color: str = "#00ff41"
+    opacity: Unit = 0.7
+    position: VerticalPosition = "bottom"
+    height_pct: int = Field(default=22, ge=1, le=100)
+    scrim: Unit = 0.45
+
+
 Overlay = Annotated[
-    Union[QuoteOverlay, CodeOverlay, TextOverlay, LowerThirdOverlay, ImageOverlay],
+    Union[QuoteOverlay, CodeOverlay, TextOverlay, LowerThirdOverlay, ImageOverlay,
+          WaveformOverlay],
     Field(discriminator="type"),
 ]
 

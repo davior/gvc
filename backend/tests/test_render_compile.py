@@ -386,3 +386,15 @@ def test_a_clip_level_outside_its_range_is_refused():
         "segments": [{"id": "a", "kind": "clip",
                       "visual": {"asset": "v", "audio": "play", "volume_db": 40}}]})
     assert _spec is None and issues
+
+
+def test_a_waveform_overlay_is_placed_like_the_other_timed_overlays():
+    spec = spec_of({
+        "assets": {"v": {"from": "gam", "id": "g1", "type": "video"}},
+        "segments": [{"id": "a", "kind": "clip", "visual": {"asset": "v", "audio": "play"},
+                      "overlays": [{"id": "w", "type": "waveform"}]}]})
+    units = plan_units(spec, {"v": VIDEO}, [])
+    timeline = layout(units, [6.0], [])
+    where = placement(units, timeline, [{} for _ in units])
+    [wave] = place_overlays(spec, {"v": VIDEO}, where, [])
+    assert (wave.overlay.type, wave.start, wave.end) == ("waveform", 0.0, 6.0)

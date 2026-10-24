@@ -42,6 +42,33 @@ function Harness() {
 }
 
 describe('OverlayEditor', () => {
+  it('adds an audio wave with the settings Gecko Notes defaults to, and edits them', async () => {
+    render(<Harness />)
+    await userEvent.click(screen.getByRole('button', { name: /Audio wave/ }))
+    expect(latest.segments[0].overlays).toEqual([
+      {
+        id: 'o_1',
+        type: 'waveform',
+        mode: 'line',
+        color: '#00ff41',
+        opacity: 0.7,
+        position: 'bottom',
+        height_pct: 22,
+        scrim: 0.45,
+      },
+    ])
+    fireEvent.change(screen.getByLabelText('Wave style'), { target: { value: 'cline' } })
+    fireEvent.change(screen.getByLabelText('Wave position'), { target: { value: 'top' } })
+    fireEvent.change(screen.getByLabelText('Wave height, % of the frame'), {
+      target: { value: '35' },
+    })
+    expect(latest.segments[0].overlays?.[0]).toMatchObject({
+      mode: 'cline',
+      position: 'top',
+      height_pct: 35,
+    })
+  })
+
   it('adds a lower third for the whole scene, then times it to a line and a later scene', async () => {
     render(<Harness />)
     await userEvent.click(screen.getByRole('button', { name: /Name and role/ }))

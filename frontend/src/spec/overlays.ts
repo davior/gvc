@@ -10,7 +10,7 @@ import { withGamAsset } from '@/spec/footage'
  * scene editor already treats them as beats.
  */
 
-export const TIMED_TYPES = ['text', 'lower_third', 'image'] as const
+export const TIMED_TYPES = ['text', 'lower_third', 'image', 'waveform'] as const
 export type TimedType = (typeof TIMED_TYPES)[number]
 
 export function isTimed(overlay: Overlay): boolean {
@@ -64,6 +64,25 @@ export function addImageOverlay(
     scale_pct: 25,
   }
   return withSegment(withAsset, index, (s) => ({
+    ...s,
+    overlays: [...(s.overlays ?? []), overlay],
+  }))
+}
+
+/** The same defaults as the waveform in Gecko Notes' video dialog. Written out in full
+ *  so the controls show what is drawn rather than a blank that means "the default". */
+export function addWaveOverlay(spec: VideoSpec, index: number): VideoSpec {
+  const overlay: Overlay = {
+    id: newOverlayId(spec),
+    type: 'waveform',
+    mode: 'line',
+    color: '#00ff41',
+    opacity: 0.7,
+    position: 'bottom',
+    height_pct: 22,
+    scrim: 0.45,
+  }
+  return withSegment(spec, index, (s) => ({
     ...s,
     overlays: [...(s.overlays ?? []), overlay],
   }))

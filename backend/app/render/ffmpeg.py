@@ -266,6 +266,19 @@ def fit_chain(src: str, out: str, width: int, height: int, fit: str) -> str:
     )
 
 
+def wave_band(height: int, spec) -> "tuple[int, int]":
+    """The wave's band as (height, top edge) in pixels, from its percentage and position."""
+    band = max(24, int(height * max(5, min(60, spec.height_pct)) / 100))
+    band -= band % 2
+    if spec.position == "top":
+        y = 0
+    elif spec.position == "center":
+        y = (height - band) // 2
+    else:
+        y = height - band
+    return band, y
+
+
 def waveform_chain(
     audio_src: str, video_src: str, out: str,
     width: int, height: int, fps: int, spec,
@@ -276,14 +289,7 @@ def waveform_chain(
     drifts against the picture, and the alpha is set once — the reference
     formula's repeated colorchannelmixer passes collapse to a single value.
     """
-    band = max(24, int(height * max(5, min(60, spec.height_pct)) / 100))
-    band -= band % 2
-    if spec.position == "top":
-        y = 0
-    elif spec.position == "center":
-        y = (height - band) // 2
-    else:
-        y = height - band
+    band, y = wave_band(height, spec)
     alpha = max(0.05, min(1.0, spec.opacity))
     colour = _hex_to_ffmpeg(spec.color)
 
@@ -1509,9 +1515,63 @@ class TimedLayer:
     fade: float = 0.0
 
 
+@dataclass(frozen=True)
+class TimedWave:
+    """An audio wave drawn over the finished video for a window (a scene's `waveform`).
+
+    `spec` carries the same fields as the project-wide waveform (mode, colour, opacity,
+    position, height_pct, scrim), so one drawing routine serves both.
+    """
+
+    spec: object
+    start: float
+    end: float
+    fade: float = 0.0
+
+
+def wave_layer_chain(audio_src: str, stage: str, out: str, wave: TimedWave, *,
+                     width: int, height: int, fps: int, total: float) -> str:
+    """One windowed wave: the video's own audio for the window, drawn, faded, placed.
+
+    The band (scrim box and wave together) is built as its own stream and then faded as
+    one, so the scrim fades with the wave instead of popping on. Its timestamps are
+    moved to the window's start the same way a PNG layer's are (see
+    `build_overlay_pass`), so `eof_action=pass` hands the picture back afterwards.
+    """
+    spec = wave.spec
+    start = max(0.0, min(wave.start, total))
+    end = max(start, min(wave.end, total))
+    seconds = max(0.1, end - start)
+    band, y = wave_band(height, spec)
+    alpha = max(0.05, min(1.0, spec.opacity))
+    scrim = max(0.0, min(1.0, spec.scrim))
+    parts = [
+        f"[{audio_src}]atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS,"
+        f"aformat=channel_layouts=mono,"
+        f"showwaves=s={width}x{band}:mode={spec.mode}:draw=full:scale=sqrt:"
+        f"rate={fps}:colors={_hex_to_ffmpeg(spec.color)},format=rgba,"
+        f"colorchannelmixer=aa={alpha}[{out}_w]"
+    ]
+    band_stream = f"{out}_w"
+    if scrim > 0.01:
+        parts.append(f"color=c=black@{scrim}:s={width}x{band}:r={fps}:d={seconds:.3f},"
+                     f"format=rgba[{out}_box]")
+        parts.append(f"[{out}_box][{out}_w]overlay=format=auto:shortest=1[{out}_b]")
+        band_stream = f"{out}_b"
+    placed = f"[{band_stream}]setpts=PTS-STARTPTS+{start:.3f}/TB"
+    if wave.fade > 0:
+        placed += (f",fade=t=in:st={start:.3f}:d={wave.fade:.3f}:alpha=1"
+                   f",fade=t=out:st={end - wave.fade:.3f}:d={wave.fade:.3f}:alpha=1")
+    parts.append(placed + f"[{out}_p]")
+    parts.append(f"[{stage}][{out}_p]overlay=0:{y}:eof_action=pass:"
+                 f"enable='between(t,{start:.3f},{end:.3f})'[{out}]")
+    return ";".join(parts)
+
+
 def build_overlay_pass(
     source: str, layers: Sequence[TimedLayer], output: str,
     *, options: RenderOptions, preview: bool, duration: float,
+    waves: Sequence[TimedWave] = (), width: int = 0, height: int = 0,
 ) -> List[str]:
     """Draw timed layers over the stitched picture, the sound untouched.
 
@@ -1540,6 +1600,18 @@ def build_overlay_pass(
     argv = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", source]
     chains: List[str] = []
     stage = "0:v"
+    # Waves go under the text and pictures, as Notes draws its waveform under its text.
+    # Each reads the video's own sound, and a pad can be read once, hence the split.
+    if waves:
+        if len(waves) == 1:
+            chains.append("[0:a]anull[wa1]")
+        else:
+            outs = "".join(f"[wa{n}]" for n in range(1, len(waves) + 1))
+            chains.append(f"[0:a]asplit={len(waves)}{outs}")
+        for n, wave in enumerate(waves, start=1):
+            chains.append(wave_layer_chain(f"wa{n}", stage, f"wv{n}", wave, width=width,
+                                           height=height, fps=fps, total=total))
+            stage = f"wv{n}"
     for position, layer in enumerate(layers, start=1):
         start = max(0.0, min(layer.start, total))
         # Every frame that starts inside the window, the last one included.

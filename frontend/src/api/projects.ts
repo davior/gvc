@@ -106,6 +106,9 @@ export type AssetRef =
 export type Position =
   'top-left' | 'top-right' | 'center' | 'bottom-left' | 'bottom-right'
 
+export type WaveMode = 'line' | 'p2p' | 'cline' | 'point'
+export type WavePosition = 'top' | 'center' | 'bottom'
+
 /** When an overlay shows. Absent on the overlay: its whole scene. */
 export interface Span {
   from: Anchor
@@ -137,6 +140,15 @@ export type Overlay =
       position?: Position
       scale_pct?: number
       opacity?: number
+    })
+  | (OverlayBase & {
+      type: 'waveform'
+      mode?: WaveMode
+      color?: string
+      opacity?: number
+      position?: WavePosition
+      height_pct?: number
+      scrim?: number
     })
 
 /** The end credits. Lines come from each GAM asset's credit, then `extra`. */
