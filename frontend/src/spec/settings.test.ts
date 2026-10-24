@@ -35,3 +35,60 @@ describe('setVoice', () => {
     expect(back.voice).toBeUndefined()
   })
 })
+
+import {
+  patchSetting,
+  setChromeBlock,
+  setSceneChrome,
+  STYLE_DEFAULTS,
+} from '@/spec/settings'
+
+describe('patchSetting', () => {
+  it('writes only what differs, and removes every group left empty on the way up', () => {
+    const big = patchSetting(
+      blank,
+      ['style', 'cards', 'title'],
+      { title_pct: 9 },
+      STYLE_DEFAULTS.cardText
+    )
+    expect(big.style).toEqual({ cards: { title: { title_pct: 9 } } })
+    const back = patchSetting(
+      big,
+      ['style', 'cards', 'title'],
+      { title_pct: 6.8 },
+      STYLE_DEFAULTS.cardText
+    )
+    expect(back.style).toBeUndefined()
+  })
+
+  it('leaves sibling settings alone, and compares lists by value', () => {
+    const spec = {
+      ...blank,
+      style: { fit: 'crop', background: { angle: 10 } },
+    } as VideoSpec
+    const next = patchSetting(
+      spec,
+      ['style', 'background'],
+      { colors: ['#1e293b', '#0f172a'] },
+      STYLE_DEFAULTS.background
+    )
+    expect(next.style).toEqual({ fit: 'crop', background: { angle: 10 } })
+  })
+})
+
+describe('setChromeBlock', () => {
+  it('keeps a block that equals the defaults, since present means on', () => {
+    const on = setChromeBlock(blank, 'watermark', {})
+    expect(on.chrome).toEqual({ watermark: {} })
+    expect(setChromeBlock(on, 'watermark', null).chrome).toBeUndefined()
+  })
+})
+
+describe('setSceneChrome', () => {
+  it('sets a scene on or off, and back to the default by removing the field', () => {
+    const spec: VideoSpec = { title: 'T', segments: [{ id: 'a', kind: 'scene' }] }
+    const off = setSceneChrome(spec, 0, false)
+    expect(off.segments[0].chrome).toBe(false)
+    expect('chrome' in setSceneChrome(off, 0, undefined).segments[0]).toBe(false)
+  })
+})

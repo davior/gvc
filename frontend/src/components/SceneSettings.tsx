@@ -11,6 +11,7 @@ import {
   setMotion,
   setTransition,
 } from '@/spec/scene'
+import { hasProjectOverlays, setSceneChrome } from '@/spec/settings'
 
 interface Props {
   spec: VideoSpec
@@ -145,6 +146,32 @@ export default function SceneSettings({
             onChange(setMotion(spec, index, { ...motion, ...frames }))
           }
         />
+      )}
+      {hasProjectOverlays(spec) && (
+        <label className="flex items-center gap-1">
+          Project overlays
+          <select
+            className="input w-auto py-0.5"
+            aria-label="Project overlays on this scene"
+            value={segment.chrome === undefined ? '' : String(segment.chrome)}
+            onChange={(e) =>
+              onChange(
+                setSceneChrome(
+                  spec,
+                  index,
+                  e.target.value === '' ? undefined : e.target.value === 'true'
+                )
+              )
+            }
+          >
+            <option value="">
+              Default (
+              {segment.role === 'intro' || segment.role === 'outro' ? 'off' : 'on'})
+            </option>
+            <option value="true">Show watermark, text and wave</option>
+            <option value="false">Hide them on this scene</option>
+          </select>
+        </label>
       )}
       <details
         open={(segment.overlays ?? []).some(

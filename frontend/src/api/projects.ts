@@ -181,6 +181,9 @@ export interface Segment {
   narration?: { beats: Beat[]; [key: string]: unknown }
   transition_in?: { style?: string; duration?: number }
   overlays?: Overlay[]
+  /** Whether the project-wide watermark, text and wave are drawn here. Absent: on,
+   *  except for an intro or outro. */
+  chrome?: boolean
   /** Seconds: `fixed` sets the scene's length, `min` floors one that follows narration. */
   duration?: { min?: number; fixed?: number }
   [key: string]: unknown
@@ -211,6 +214,61 @@ export interface Voice {
   [key: string]: unknown
 }
 
+export type Fit = 'blur' | 'pad' | 'crop'
+export type Band = 'top' | 'center' | 'bottom'
+
+export interface Background {
+  type?: 'gradient' | 'solid' | 'image'
+  colors?: string[]
+  angle?: number
+  /** Key of a GAM picture in `assets`; read when `type` is `image`. */
+  asset?: string
+}
+
+export interface CardText {
+  title_pct?: number
+  subtitle_pct?: number
+}
+
+/** Look and defaults shared by every scene; a scene overrides only what it says. */
+export interface Style {
+  background?: Background
+  fit?: Fit
+  transition?: { style?: string; duration?: number }
+  motion?: Motion
+  min_segment_seconds?: number
+  cards?: { seconds?: number; motion?: boolean; title?: CardText; chapter?: CardText }
+  quote?: {
+    position?: Band
+    size_pct?: number
+    color?: string
+    accent?: string
+    scrim?: number
+  }
+  code?: { position?: Band; size_pct?: number; color?: string; scrim?: number }
+  [key: string]: unknown
+}
+
+export interface Watermark {
+  asset?: string
+  text?: string
+  position?: Position
+  opacity?: number
+  scale_pct?: number
+  caption_pct?: number
+  margin_pct?: number
+}
+
+export interface OverlayText {
+  mode?: 'fixed' | 'title' | 'title_chapter'
+  text?: string
+  position?: Position
+  color?: string
+  size_pct?: number
+  margin_pct?: number
+  shadow?: boolean
+}
+
 export interface VideoSpec {
   spec_version?: string
   id?: string
@@ -223,12 +281,13 @@ export interface VideoSpec {
   output?: Output
   voice?: Voice
   /** Drawn over every scene that doesn't opt out. A block present means on. */
-  chrome?: { waveform?: Waveform; [key: string]: unknown }
-  style?: {
-    transition?: { style?: string; duration?: number }
-    motion?: Motion
+  chrome?: {
+    watermark?: Watermark
+    overlay_text?: OverlayText
+    waveform?: Waveform
     [key: string]: unknown
   }
+  style?: Style
   [key: string]: unknown
 }
 
