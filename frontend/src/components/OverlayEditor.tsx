@@ -11,6 +11,7 @@ import type {
 } from '@/api/projects'
 import AnchorSelect from '@/components/AnchorSelect'
 import { sceneName, type AnchorOption } from '@/spec/anchors'
+import { WAVE_MODES, WAVE_POSITIONS } from '@/spec/waveform'
 import FootageSearch from '@/components/FootageSearch'
 import {
   addImageOverlay,
@@ -35,20 +36,6 @@ const POSITIONS: { value: Position; label: string }[] = [
   { value: 'center', label: 'Centre' },
   { value: 'bottom-left', label: 'Bottom left' },
   { value: 'bottom-right', label: 'Bottom right' },
-]
-
-// Notes' names for the wave styles, so the same wave is called the same in both.
-const WAVE_MODES: { value: WaveMode; label: string }[] = [
-  { value: 'line', label: 'Line' },
-  { value: 'cline', label: 'Centred line' },
-  { value: 'p2p', label: 'Peak to peak' },
-  { value: 'point', label: 'Points' },
-]
-
-const WAVE_POSITIONS: { value: WavePosition; label: string }[] = [
-  { value: 'top', label: 'Top' },
-  { value: 'center', label: 'Centre' },
-  { value: 'bottom', label: 'Bottom' },
 ]
 
 const KIND_LABEL: Record<string, string> = {

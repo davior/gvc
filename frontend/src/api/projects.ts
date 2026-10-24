@@ -109,6 +109,17 @@ export type Position =
 export type WaveMode = 'line' | 'p2p' | 'cline' | 'point'
 export type WavePosition = 'top' | 'center' | 'bottom'
 
+/** One wave's look: the same fields on a scene's `waveform` overlay and on the
+ *  project-wide `chrome.waveform`, which Notes draws across a whole video. */
+export interface Waveform {
+  mode?: WaveMode
+  color?: string
+  opacity?: number
+  position?: WavePosition
+  height_pct?: number
+  scrim?: number
+}
+
 /** When an overlay shows. Absent on the overlay: its whole scene. */
 export interface Span {
   from: Anchor
@@ -185,6 +196,8 @@ export interface VideoSpec {
   audio_tracks?: AudioTrack[]
   credits?: Credits | null
   output?: { aspect?: '16:9' | '9:16' | '1:1'; [key: string]: unknown }
+  /** Drawn over every scene that doesn't opt out. A block present means on. */
+  chrome?: { waveform?: Waveform; [key: string]: unknown }
   style?: {
     transition?: { style?: string; duration?: number }
     motion?: Motion
