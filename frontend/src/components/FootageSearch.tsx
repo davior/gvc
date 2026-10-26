@@ -1,7 +1,13 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
 import { Film, Image as ImageIcon, Search, X } from 'lucide-react'
 import { apiErrorMessage } from '@/api/client'
-import { gamApi, type GamHit, type GamSearch, type MediaKind } from '@/api/gam'
+import {
+  gamApi,
+  musicSummary,
+  type GamHit,
+  type GamSearch,
+  type MediaKind,
+} from '@/api/gam'
 import { clock, momentTrim, type MomentSize, type PlaceMode } from '@/spec/footage'
 
 /**
@@ -188,6 +194,11 @@ export default function FootageSearch({
                         {h.end_time !== null && `–${clock(h.end_time)}`}
                       </span>
                     )}
+                    {musicSummary(h.asset.music) && (
+                      <span className="block truncate text-xs text-gray-500">
+                        {musicSummary(h.asset.music)}
+                      </span>
+                    )}
                     {h.snippet && <Snippet text={h.snippet} />}
                   </span>
                 </button>
@@ -235,6 +246,11 @@ export default function FootageSearch({
                       ? 'Uses the whole video'
                       : 'A still picture'}
               </p>
+              {musicSummary(selected.asset.music) && (
+                <p className="text-xs text-gray-600 dark:text-gray-400">
+                  {musicSummary(selected.asset.music)}
+                </p>
+              )}
               {selected.asset.credit && (
                 <p className="text-xs text-gray-500">{selected.asset.credit}</p>
               )}

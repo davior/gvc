@@ -22,6 +22,37 @@ export interface GamAsset {
   in_point: number | null
   out_point: number | null
   missing: boolean
+  /** What a track sounds like (GAM's music profile). Null when GAM knows nothing about
+   *  it, or is older than the profile. Optional for test literals that predate it. */
+  music?: GamMusic | null
+}
+
+export interface GamMusic {
+  genres: string[]
+  moods: string[]
+  instruments: string[]
+  bpm: number | null
+  key: string | null
+  /** Null is "not known", which is not false ("instrumental"). */
+  vocals: boolean | null
+  energy: 'low' | 'medium' | 'high' | string | null
+}
+
+/**
+ * One line saying what a track sounds like: "Ambient, Tense · 92 BPM · Am · Low energy ·
+ * Instrumental". Empty when nothing is known, so the caller can leave the line out.
+ */
+export function musicSummary(music: GamMusic | null | undefined): string {
+  if (!music) return ''
+  const parts: string[] = []
+  const words = [...music.genres, ...music.moods, ...music.instruments]
+  if (words.length) parts.push(words.join(', '))
+  if (music.bpm !== null) parts.push(`${Math.round(music.bpm)} BPM`)
+  if (music.key) parts.push(music.key)
+  if (music.energy)
+    parts.push(`${music.energy[0].toUpperCase()}${music.energy.slice(1)} energy`)
+  if (music.vocals !== null) parts.push(music.vocals ? 'Vocals' : 'Instrumental')
+  return parts.join(' · ')
 }
 
 export interface GamHit {

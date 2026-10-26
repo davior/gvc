@@ -125,6 +125,31 @@ def test_a_search_hit_becomes_the_visual_with_its_moment_as_the_trim(gam, siblin
         "from": "gam", "id": "r", "type": "video", "label": "River interview"}
 
 
+def test_a_track_hit_says_what_it_sounds_like(gam, siblings):
+    siblings.hits = [
+        hit(gam_asset("m1", "Caravan theme", "audio", music_genres=["Ambient"],
+                      music_moods=["Tense"], music_instruments=[], music_bpm=91.6,
+                      music_key=None, music_vocals=False, music_energy="low")),
+        hit(gam_asset("m2", "Untagged song", "audio")),
+    ]
+    w = Working(spec(), gam=gam)
+    found = run(w, "search_assets", query="tense ambient", type="audio").content
+
+    # Only what is known: no empty instruments, no null key, and vocals as the word that
+    # matters under narration.
+    assert ('"music":{"genres":["Ambient"],"moods":["Tense"],"bpm":92,"energy":"low",'
+            '"vocals":"instrumental"}') in found
+    # A track with no profile carries no music key at all, rather than an empty one.
+    untagged = found.split('"Untagged song"')[1]
+    assert '"music"' not in untagged
+
+
+def test_get_asset_includes_the_music_profile(gam, siblings):
+    siblings.assets["m1"] = gam_asset("m1", "Caravan theme", "audio", music_vocals=True)
+    w = Working(spec(), gam=gam)
+    assert '"music":{"vocals":"yes"}' in run(w, "get_asset", gam_id="m1").content
+
+
 def test_an_empty_search_says_to_try_again_or_leave_a_placeholder(gam, siblings):
     siblings.hits = []
     w = Working(spec(), gam=gam)

@@ -1,7 +1,13 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { gamApi, type GamAsset, type GamHit, type GamSearch } from '@/api/gam'
+import {
+  gamApi,
+  musicSummary,
+  type GamAsset,
+  type GamHit,
+  type GamSearch,
+} from '@/api/gam'
 import FootageSearch from '@/components/FootageSearch'
 
 function asset(overrides: Partial<GamAsset> = {}): GamAsset {
@@ -125,6 +131,57 @@ describe('FootageSearch', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Search' }))
     expect(await screen.findByText(/Matched on words only/)).toBeInTheDocument()
     expect(screen.getByText('Nothing in the library matches.')).toBeInTheDocument()
+  })
+
+  it('says what a track sounds like, in the list and once picked', async () => {
+    const track: GamHit = {
+      asset: asset({
+        id: 'm1',
+        name: 'Caravan theme',
+        asset_type: 'audio',
+        thumb_url: null,
+        music: {
+          genres: ['Ambient'],
+          moods: ['Tense'],
+          instruments: [],
+          bpm: 92,
+          key: 'Am',
+          vocals: false,
+          energy: 'low',
+        },
+      }),
+      score: 0.03,
+      snippet: '',
+      start_time: null,
+      end_time: null,
+    }
+    vi.spyOn(gamApi, 'search').mockResolvedValue(result([track]))
+    render(
+      <FootageSearch title="Music" purpose="track" onPick={vi.fn()} onClose={vi.fn()} />
+    )
+
+    await userEvent.type(screen.getByLabelText('Search the asset library'), 'tense')
+    await userEvent.click(screen.getByRole('button', { name: 'Search' }))
+
+    const line = 'Ambient, Tense · 92 BPM · Am · Low energy · Instrumental'
+    expect(await screen.findByText(line)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /Caravan theme/ }))
+    expect(screen.getAllByText(line)).toHaveLength(2)
+  })
+
+  it('leaves the line out for a track nothing is known about', () => {
+    expect(musicSummary(null)).toBe('')
+    expect(
+      musicSummary({
+        genres: [],
+        moods: [],
+        instruments: [],
+        bpm: null,
+        key: null,
+        vocals: null,
+        energy: null,
+      })
+    ).toBe('')
   })
 
   it('shows what went wrong when the library cannot be reached', async () => {

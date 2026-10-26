@@ -198,6 +198,27 @@ def get_spec(w: Working, segment_id: Optional[str] = None) -> str:
     return _compact(w.data)
 
 
+def _music_row(music) -> Dict[str, Any]:
+    """A track's profile with the empty parts left out, so a hit costs no more tokens
+    than what is actually known about it. Vocals are spelled as the word that matters
+    when choosing music under narration, and left out entirely when not known: a missing
+    key is what tells the model it cannot assume either way."""
+    row: Dict[str, Any] = {}
+    for name in ("genres", "moods", "instruments"):
+        terms = getattr(music, name)
+        if terms:
+            row[name] = terms
+    if music.bpm is not None:
+        row["bpm"] = round(music.bpm)
+    if music.key:
+        row["key"] = music.key
+    if music.energy:
+        row["energy"] = music.energy
+    if music.vocals is not None:
+        row["vocals"] = "yes" if music.vocals else "instrumental"
+    return row
+
+
 def search_assets(w: Working, query: str, type: Optional[str] = None,
                   limit: int = 8) -> str:
     if w.gam is None:
@@ -224,6 +245,8 @@ def search_assets(w: Working, query: str, type: Optional[str] = None,
             row["credit"] = asset.credit
         if asset.width and asset.height:
             row["size"] = f"{asset.width}x{asset.height}"
+        if asset.music:
+            row["music"] = _music_row(asset.music)
         rows.append(row)
     if not rows:
         return (f"Nothing in the library matches {query!r}. Try other words, or leave a "
@@ -240,10 +263,13 @@ def get_asset(w: Working, gam_id: str) -> str:
         raise ToolFailed(f"The asset library failed: {exc.message}")
     if asset is None:
         raise ToolFailed(f"No asset {gam_id!r} in the library.")
-    return _compact({"gam_id": asset.id, "name": asset.name, "type": asset.asset_type,
-                     "duration": asset.duration_seconds, "width": asset.width,
-                     "height": asset.height, "credit": asset.credit,
-                     "clip_of": asset.parent_asset_id})
+    details = {"gam_id": asset.id, "name": asset.name, "type": asset.asset_type,
+               "duration": asset.duration_seconds, "width": asset.width,
+               "height": asset.height, "credit": asset.credit,
+               "clip_of": asset.parent_asset_id}
+    if asset.music:
+        details["music"] = _music_row(asset.music)
+    return _compact(details)
 
 
 def replace_spec(w: Working, spec: Dict[str, Any]) -> str:
@@ -636,7 +662,9 @@ TOOLS: List[Tuple[ToolSpec, Callable[..., str]]] = [
     (ToolSpec("search_assets",
               "Search the user's asset library (GAM) by name, description and what is SAID in "
               "videos. A hit on speech carries said_at [start, end] seconds: the moment to cut "
-              "to. Use type to restrict to video, image or audio.",
+              "to. Use type to restrict to video, image or audio. An audio hit may carry "
+              "music: its genres, moods, instruments, bpm, key, energy and vocals, which "
+              "are also searchable, so search music by the sound you want.",
               {"type": "object", "properties": {
                   "query": _STR, "type": {"type": "string", "enum": ["video", "image", "audio"]},
                   "limit": {"type": "integer", "minimum": 1, "maximum": MAX_SEARCH_HITS}},

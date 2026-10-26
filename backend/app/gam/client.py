@@ -18,7 +18,7 @@ import httpx
 
 from app import outbound
 from app.config import settings
-from app.schemas_gam import GamAssetRead, GamHit, GamSearch
+from app.schemas_gam import GamAssetRead, GamHit, GamMusic, GamSearch
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,35 @@ def to_asset(raw: Dict[str, Any]) -> GamAssetRead:
         in_point=raw.get("in_point"),
         out_point=raw.get("out_point"),
         missing=bool(raw.get("missing")),
+        music=_music(raw),
     )
+
+
+def _music(raw: Dict[str, Any]) -> Optional[GamMusic]:
+    """GAM's flat `music_*` fields as one object, or None when none of them says anything.
+
+    None rather than an empty profile so "GAM knows nothing about this track" and "GAM
+    is older than the profile" read the same, and nothing downstream has to tell an
+    empty object from a missing one.
+    """
+    def terms(name: str) -> List[str]:
+        value = raw.get(name)
+        return [t for t in value if isinstance(t, str)] if isinstance(value, list) else []
+
+    music = GamMusic(
+        genres=terms("music_genres"),
+        moods=terms("music_moods"),
+        instruments=terms("music_instruments"),
+        bpm=raw.get("music_bpm"),
+        key=raw.get("music_key"),
+        vocals=raw.get("music_vocals"),
+        energy=raw.get("music_energy"),
+    )
+    if not (music.genres or music.moods or music.instruments) and all(
+        value is None for value in (music.bpm, music.key, music.vocals, music.energy)
+    ):
+        return None
+    return music
 
 
 class GamClient:

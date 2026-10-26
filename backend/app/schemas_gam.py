@@ -9,6 +9,25 @@ from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
+class GamMusic(BaseModel):
+    """What a track sounds like, from GAM's music profile (gam#46).
+
+    The one thing that lets a soundtrack be chosen for a scene rather than by its title.
+    Null on the asset when GAM knows nothing about it, or is older than the profile.
+    """
+
+    genres: List[str] = Field(default_factory=list)
+    moods: List[str] = Field(default_factory=list)
+    instruments: List[str] = Field(default_factory=list)
+    bpm: Optional[float] = None
+    # As GAM stores it: "Am", "A minor" and Camelot "8A" are all left as written.
+    key: Optional[str] = None
+    # Null is "not known", which is not False ("instrumental"). Treating the two as one
+    # would put songs with words under narration.
+    vocals: Optional[bool] = None
+    energy: Optional[str] = None  # low | medium | high
+
+
 class GamAssetRead(BaseModel):
     id: str
     name: str
@@ -31,6 +50,7 @@ class GamAssetRead(BaseModel):
     in_point: Optional[float] = None
     out_point: Optional[float] = None
     missing: bool = False
+    music: Optional[GamMusic] = None
 
 
 class GamHit(BaseModel):
