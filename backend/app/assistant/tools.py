@@ -245,6 +245,8 @@ def search_assets(w: Working, query: str, type: Optional[str] = None,
             row["credit"] = asset.credit
         if asset.width and asset.height:
             row["size"] = f"{asset.width}x{asset.height}"
+        if asset.audio_kind:
+            row["kind"] = asset.audio_kind
         if asset.music:
             row["music"] = _music_row(asset.music)
         rows.append(row)
@@ -267,6 +269,8 @@ def get_asset(w: Working, gam_id: str) -> str:
                "duration": asset.duration_seconds, "width": asset.width,
                "height": asset.height, "credit": asset.credit,
                "clip_of": asset.parent_asset_id}
+    if asset.audio_kind:
+        details["kind"] = asset.audio_kind
     if asset.music:
         details["music"] = _music_row(asset.music)
     return _compact(details)
@@ -663,8 +667,9 @@ TOOLS: List[Tuple[ToolSpec, Callable[..., str]]] = [
               "Search the user's asset library (GAM) by name, description and what is SAID in "
               "videos. A hit on speech carries said_at [start, end] seconds: the moment to cut "
               "to. Use type to restrict to video, image or audio. An audio hit may carry "
-              "music: its genres, moods, instruments, bpm, key, energy and vocals, which "
-              "are also searchable, so search music by the sound you want.",
+              "kind (music, speech or sfx) and music: its genres, moods, instruments, bpm, "
+              "key, energy and vocals, which are also searchable, so search music by the "
+              "sound you want.",
               {"type": "object", "properties": {
                   "query": _STR, "type": {"type": "string", "enum": ["video", "image", "audio"]},
                   "limit": {"type": "integer", "minimum": 1, "maximum": MAX_SEARCH_HITS}},

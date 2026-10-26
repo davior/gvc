@@ -58,6 +58,17 @@ def test_a_track_gam_knows_nothing_about_has_no_profile(auth_client, siblings):
     assert [h["asset"]["music"] for h in data] == [None, None]
 
 
+def test_a_track_carries_what_kind_of_audio_it_is(auth_client, siblings):
+    siblings.hits = [
+        hit(gam_asset("m1", "Theme", "audio", audio_kind="music")),
+        hit(gam_asset("v1", "Voice memo", "audio", audio_kind="speech")),
+        hit(gam_asset("o1", "From an old GAM", "audio")),
+        hit(gam_asset("x1", "Odd value", "audio", audio_kind="podcast")),
+    ]
+    data = auth_client.get("/api/gam/search", params={"q": "x"}).json()["data"]
+    assert [h["asset"]["audio_kind"] for h in data] == ["music", "speech", None, None]
+
+
 def test_documents_are_not_offered_for_a_video(auth_client, siblings):
     siblings.hits = [hit(gam_asset("d1", "Report", "document")), hit(gam_asset("i1", "Map", "image"))]
     body = auth_client.get("/api/gam/search", params={"q": "x"}).json()

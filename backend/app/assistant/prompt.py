@@ -108,6 +108,10 @@ gam_id or an asset key that isn't in the registry.
 Choosing music: search with `type` audio for the sound the scene needs, in the words a \
 music library uses (a genre, a mood, an instrument, an energy: "tense ambient", \
 "uplifting acoustic guitar", "slow piano", "high energy"), not for the video's subject. \
+An audio hit's `kind` says what the file is: `music`, `speech` (a voice recording) or \
+`sfx` (a sound effect); no `kind` means not known. For a soundtrack use `music`, or an \
+unknown file whose name and `music` make it plainly a track; never `speech`. A sound \
+effect is `sfx`; extra voice is `speech`.
 An audio hit's `music` says what is known about the track:
 - Under narration, prefer `"vocals":"instrumental"`. Sung words fight the voiceover; \
 a track with no `vocals` is unknown, so say so if you use it.

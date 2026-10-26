@@ -25,6 +25,8 @@ export interface GamAsset {
   /** What a track sounds like (GAM's music profile). Null when GAM knows nothing about
    *  it, or is older than the profile. Optional for test literals that predate it. */
   music?: GamMusic | null
+  /** What GAM says the audio is. Null when not known, or from a GAM before gam#49. */
+  audio_kind?: 'music' | 'speech' | 'sfx' | null
 }
 
 export interface GamMusic {
@@ -98,4 +100,18 @@ export const gamApi = {
       )
       .then((r) => r.data.data.assets)
   },
+}
+
+const KIND_LABELS = { music: 'Music', speech: 'Speech', sfx: 'Sound effect' } as const
+
+/**
+ * The line under an audio hit: what kind of audio it is, then what it sounds like.
+ * "Speech" leads on purpose: a voice memo in a list of soundtracks should be the first
+ * thing a person notices about it. A music track with a profile needs no "Music" label.
+ */
+export function audioSummary(asset: Pick<GamAsset, 'audio_kind' | 'music'>): string {
+  const sound = musicSummary(asset.music)
+  const kind = asset.audio_kind ? KIND_LABELS[asset.audio_kind] : ''
+  if (asset.audio_kind === 'music' && sound) return sound
+  return [kind, sound].filter(Boolean).join(' · ')
 }

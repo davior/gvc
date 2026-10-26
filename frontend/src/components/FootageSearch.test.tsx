@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  audioSummary,
   gamApi,
   musicSummary,
   type GamAsset,
@@ -182,6 +183,24 @@ describe('FootageSearch', () => {
         energy: null,
       })
     ).toBe('')
+  })
+
+  it('puts the kind of audio first, so a voice memo stands out', () => {
+    expect(audioSummary({ audio_kind: 'speech', music: null })).toBe('Speech')
+    expect(audioSummary({ audio_kind: 'sfx', music: null })).toBe('Sound effect')
+    expect(audioSummary({ audio_kind: 'music', music: null })).toBe('Music')
+    const music = {
+      genres: ['Ambient'],
+      moods: [],
+      instruments: [],
+      bpm: null,
+      key: null,
+      vocals: null,
+      energy: null,
+    }
+    expect(audioSummary({ audio_kind: 'music', music })).toBe('Ambient')
+    expect(audioSummary({ audio_kind: null, music })).toBe('Ambient')
+    expect(audioSummary({ audio_kind: null, music: null })).toBe('')
   })
 
   it('shows what went wrong when the library cannot be reached', async () => {
