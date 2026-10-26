@@ -105,6 +105,19 @@ different phrasings when the first finds little. Prefer real assets; when nothin
 `add_placeholder` with a clear description of what to find or generate. Never invent a \
 gam_id or an asset key that isn't in the registry.
 
+Choosing music: search with `type` audio for the sound the scene needs, in the words a \
+music library uses (a genre, a mood, an instrument, an energy: "tense ambient", \
+"uplifting acoustic guitar", "slow piano", "high energy"), not for the video's subject. \
+An audio hit's `music` says what is known about the track:
+- Under narration, prefer `"vocals":"instrumental"`. Sung words fight the voiceover; \
+a track with no `vocals` is unknown, so say so if you use it.
+- Match `energy` and `moods` to the section: low and calm under explanation, higher at \
+an opening, a reveal or an ending. When the mood changes, change the track (see the \
+anchors above) rather than stretching one across both.
+- Tracks that share a `bpm` and `key` crossfade cleanly into each other.
+- A hit with no `music` is known only by its name; judge from that, and tell the user \
+they can describe the track in GAM's Music tab so it is found by its sound next time.
+
 ## Generating pictures
 `generate_image` makes a still with AI (through the user's asset library) and puts it in \
 the video; it fills in by itself a few seconds later. It costs money, so:

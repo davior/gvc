@@ -36,6 +36,28 @@ def test_a_gam_without_end_times_still_answers(auth_client, siblings):
     assert top["start_time"] == 10.0 and top["end_time"] is None
 
 
+def test_a_track_carries_its_music_profile(auth_client, siblings):
+    track = gam_asset("m1", "Caravan theme", "audio", music_genres=["Ambient"],
+                      music_moods=["Tense"], music_instruments=[], music_bpm=92.0,
+                      music_key="Am", music_vocals=False, music_energy="low")
+    siblings.hits = [hit(track)]
+
+    asset = auth_client.get("/api/gam/search", params={"q": "tense"}).json()["data"][0]["asset"]
+
+    assert asset["music"] == {"genres": ["Ambient"], "moods": ["Tense"], "instruments": [],
+                              "bpm": 92.0, "key": "Am", "vocals": False, "energy": "low"}
+
+
+def test_a_track_gam_knows_nothing_about_has_no_profile(auth_client, siblings):
+    """An empty profile and a GAM older than gam#46 read the same: null."""
+    siblings.hits = [
+        hit(gam_asset("m1", "Untagged", "audio", music_genres=[], music_vocals=None)),
+        hit(gam_asset("m2", "From an old GAM", "audio")),
+    ]
+    data = auth_client.get("/api/gam/search", params={"q": "x"}).json()["data"]
+    assert [h["asset"]["music"] for h in data] == [None, None]
+
+
 def test_documents_are_not_offered_for_a_video(auth_client, siblings):
     siblings.hits = [hit(gam_asset("d1", "Report", "document")), hit(gam_asset("i1", "Map", "image"))]
     body = auth_client.get("/api/gam/search", params={"q": "x"}).json()
