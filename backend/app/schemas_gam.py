@@ -51,6 +51,10 @@ class GamAssetRead(BaseModel):
     out_point: Optional[float] = None
     missing: bool = False
     music: Optional[GamMusic] = None
+    # What GAM says an audio file is: music | speech | sfx, null when not known (or GAM
+    # predates gam#49). Kept beside `music`, not in it: a voice memo has a kind and no
+    # profile, and the kind is what keeps it out of a soundtrack.
+    audio_kind: Optional[str] = None
 
 
 class GamHit(BaseModel):

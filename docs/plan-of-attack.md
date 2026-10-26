@@ -350,6 +350,7 @@ Specified here, applied in GAM's repository, not from this one.
 | GAM-4 | M9: documented read API, `/picker?embed=1` with `postMessage({ assetId, inPoint, outPoint })` | Picking assets and moments by hand in the editor |
 | GAM-5 | `CORS_ORIGIN` / CSP for `gvc.geckopico.com`, only where GVC's browser code calls GAM directly | Server-side calls with a Bearer token need neither |
 | GAM-6 | A music profile on audio assets (genres, moods, instruments, BPM, key, vocals, energy), read from ID3/Vorbis/MP4 tags and searchable. **[davior/gam#46](https://github.com/davior/gam/pull/46).** GVC reads it as `GamAssetRead.music`; against a GAM without it, `music` is null and tracks are chosen by name as before | The assistant choosing a soundtrack by how it sounds, and the Sound picker saying so |
+| GAM-7 | `audio_kind` (music / speech / sfx) on audio assets. **[davior/gam#49](https://github.com/davior/gam/pull/49).** GVC reads it as `GamAssetRead.audio_kind`; null against a GAM without it | Keeping voice recordings out of a soundtrack, in the assistant and the Sound picker |
 
 GAM-1 and GAM-2 come first. They're small, and M1 below depends on them.
 

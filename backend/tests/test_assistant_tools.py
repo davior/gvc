@@ -144,6 +144,20 @@ def test_a_track_hit_says_what_it_sounds_like(gam, siblings):
     assert '"music"' not in untagged
 
 
+def test_a_hit_says_whether_it_is_music_or_a_voice(gam, siblings):
+    siblings.hits = [
+        hit(gam_asset("m1", "Theme", "audio", audio_kind="music", music_genres=["Ambient"])),
+        hit(gam_asset("v1", "Voice memo", "audio", audio_kind="speech")),
+        hit(gam_asset("u1", "Unknown", "audio")),
+    ]
+    w = Working(spec(), gam=gam)
+    found = run(w, "search_assets", query="calm", type="audio").content
+
+    assert '"name":"Theme","type":"audio","kind":"music","music":{"genres":["Ambient"]}' in found
+    assert '"name":"Voice memo","type":"audio","kind":"speech"' in found
+    assert '"kind"' not in found.split('"Unknown"')[1]
+
+
 def test_get_asset_includes_the_music_profile(gam, siblings):
     siblings.assets["m1"] = gam_asset("m1", "Caravan theme", "audio", music_vocals=True)
     w = Working(spec(), gam=gam)

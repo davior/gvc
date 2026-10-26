@@ -58,6 +58,7 @@ def to_asset(raw: Dict[str, Any]) -> GamAssetRead:
         out_point=raw.get("out_point"),
         missing=bool(raw.get("missing")),
         music=_music(raw),
+        audio_kind=raw.get("audio_kind") if raw.get("audio_kind") in ("music", "speech", "sfx") else None,
     )
 
 

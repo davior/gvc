@@ -3,7 +3,7 @@ import { Film, Image as ImageIcon, Search, X } from 'lucide-react'
 import { apiErrorMessage } from '@/api/client'
 import {
   gamApi,
-  musicSummary,
+  audioSummary,
   type GamHit,
   type GamSearch,
   type MediaKind,
@@ -194,9 +194,9 @@ export default function FootageSearch({
                         {h.end_time !== null && `–${clock(h.end_time)}`}
                       </span>
                     )}
-                    {musicSummary(h.asset.music) && (
+                    {audioSummary(h.asset) && (
                       <span className="block truncate text-xs text-gray-500">
-                        {musicSummary(h.asset.music)}
+                        {audioSummary(h.asset)}
                       </span>
                     )}
                     {h.snippet && <Snippet text={h.snippet} />}
@@ -246,9 +246,9 @@ export default function FootageSearch({
                       ? 'Uses the whole video'
                       : 'A still picture'}
               </p>
-              {musicSummary(selected.asset.music) && (
+              {audioSummary(selected.asset) && (
                 <p className="text-xs text-gray-600 dark:text-gray-400">
-                  {musicSummary(selected.asset.music)}
+                  {audioSummary(selected.asset)}
                 </p>
               )}
               {selected.asset.credit && (
