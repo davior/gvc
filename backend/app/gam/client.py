@@ -18,7 +18,7 @@ import httpx
 
 from app import outbound
 from app.config import settings
-from app.schemas_gam import GamAssetRead, GamHit, GamMusic, GamSearch
+from app.schemas_gam import GamAssetRead, GamHit, GamMusic, GamSearch, GamTranscript
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +149,7 @@ class GamClient:
                     # Absent from a GAM older than its `end_time` change (gam#36); the
                     # editor then sizes the moment itself.
                     end_time=hit.get("end_time"),
+                    other_matches=hit.get("other_matches") or 0,
                 )
                 for hit in body.get("data", [])
             ],
@@ -166,6 +167,17 @@ class GamClient:
             code, message = self._detail(response)
             raise GamError(code, message)
         return to_asset(response.json()["data"])
+
+    def transcript(self, asset_id: str) -> Optional[GamTranscript]:
+        """Everything said in an asset, with word timings. None for an unknown asset; an
+        asset never transcribed comes back with no segments."""
+        response = self._request("GET", f"/api/assets/{asset_id}/transcript")
+        if response.status_code == 404:
+            return None
+        if response.status_code != 200:
+            code, message = self._detail(response)
+            raise GamError(code, message)
+        return GamTranscript.model_validate(response.json()["data"])
 
     def download(self, file_url: str, sink, *, max_bytes: int) -> int:
         """Stream one of GAM's signed media URLs into `sink`. Returns the bytes written."""
