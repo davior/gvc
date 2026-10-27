@@ -66,4 +66,35 @@ describe('SoundtrackPanel', () => {
       within(screen.getByRole('region', { name: 'Close' })).getByLabelText('Loop to fill')
     ).not.toBeChecked()
   })
+
+  it('offers a player only for a track whose file GAM can serve', () => {
+    const gam = (id: string, over: object = {}) => ({
+      id,
+      name: id,
+      asset_type: 'audio',
+      duration_seconds: 10,
+      width: null,
+      height: null,
+      file_url: `https://gam.test/media/${id}?sig=x`,
+      thumb_url: null,
+      credit: '',
+      parent_asset_id: null,
+      in_point: null,
+      out_point: null,
+      missing: false,
+      ...over,
+    })
+    render(
+      <SoundtrackPanel
+        spec={start}
+        gamAssets={{ g1: gam('g1'), g2: gam('g2', { missing: true }) }}
+        onChange={() => {}}
+      />
+    )
+    expect(screen.getByLabelText('Listen to g1')).toHaveAttribute(
+      'src',
+      'https://gam.test/media/g1?sig=x'
+    )
+    expect(screen.queryByLabelText('Listen to g2')).not.toBeInTheDocument()
+  })
 })

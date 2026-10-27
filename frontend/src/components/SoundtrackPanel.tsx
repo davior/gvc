@@ -29,6 +29,13 @@ export default function SoundtrackPanel({ spec, gamAssets, onChange }: Props) {
     const id = ref?.from === 'gam' ? ref.id : undefined
     return (id && gamAssets[id]?.name) || ref?.label || track.asset
   }
+  // The signed URL expires, so it is read from the fresh lookup each render and never
+  // stored; a missing or not-yet-looked-up asset simply has no player.
+  const audioUrl = (track: AudioTrack) => {
+    const ref = spec.assets?.[track.asset]
+    const asset = ref?.from === 'gam' ? gamAssets[ref.id] : null
+    return asset && !asset.missing ? (asset.file_url ?? undefined) : undefined
+  }
   const set = (index: number, patch: Partial<AudioTrack>) =>
     onChange(updateTrack(spec, index, patch))
 
@@ -76,6 +83,17 @@ export default function SoundtrackPanel({ spec, gamAssets, onChange }: Props) {
                 <Trash2 className="h-4 w-4" />
               </button>
             </div>
+            {audioUrl(track) && (
+              // Plays the whole file, not the stretch between the anchors: the
+              // anchors are scene edges, which only mean something on the timeline.
+              <audio
+                controls
+                preload="none"
+                className="h-8 w-full"
+                aria-label={`Listen to ${nameOf(track)}`}
+                src={audioUrl(track)}
+              />
+            )}
             <div className="flex flex-wrap items-center gap-3">
               <AnchorSelect
                 label="From"
