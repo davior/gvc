@@ -7,6 +7,7 @@ import GenerateDialog from '@/components/GenerateDialog'
 import HistoryPanel from '@/components/HistoryPanel'
 import CreditsSettings from '@/components/CreditsSettings'
 import RenderPanel from '@/components/RenderPanel'
+import ThemeSettings from '@/components/ThemeSettings'
 import SoundtrackPanel from '@/components/SoundtrackPanel'
 import IssueList from '@/components/IssueList'
 import JsonPanel from '@/components/JsonPanel'
@@ -352,6 +353,7 @@ export default function ProjectView() {
           <OutputSettings spec={draft} onChange={edit} />
           <VoiceSettings spec={draft} onChange={edit} />
           <LookSettings spec={draft} gamAssets={gamAssets} onChange={edit} />
+          <ThemeSettings spec={draft} onChange={edit} />
           <ProjectDefaults spec={draft} onChange={edit} />
           <CardSettings spec={draft} onChange={edit} />
           <PanelSettings spec={draft} onChange={edit} />

@@ -13,10 +13,14 @@ from app.clock import utcnow
 from app.gam.client import GamClient, GamError
 from app.generation.catalogue import CatalogueError, default_params, estimate, kind_for, pick_model
 from app.models.generation import Generation
+from app.services import themes
 
 logger = logging.getLogger(__name__)
 
 FINAL = ("done", "error", "cancelled")
+
+# GAM refuses a longer prompt (gam: app/generation/request.py, MAX_PROMPT_CHARS).
+GAM_MAX_PROMPT = 4000
 
 
 class GenerationRefused(Exception):
@@ -66,6 +70,18 @@ def start(session: Session, gam: GamClient, *, user_id: str, project_id: Optiona
     prompt = (prompt or ref.get("prompt") or "").strip()
     if not prompt:
         raise GenerationRefused("no_prompt", "Say what to generate first.")
+    # The project's theme is added here, on the way out, and never written into the
+    # placeholder or the row: they keep the prompt as written, so "Try again" or a
+    # reworded theme doesn't add it twice.
+    theme = themes.of_spec(session, user_id, spec)
+    sent = themes.styled(prompt, theme)
+    picture_sent = themes.styled((picture_prompt or "").strip() or prompt, theme)
+    if max(len(sent), len(picture_sent)) > GAM_MAX_PROMPT:
+        added = f" with the theme “{theme.name}” added" if theme else ""
+        raise GenerationRefused(
+            "prompt_too_long",
+            f"The prompt{added} is over the library's {GAM_MAX_PROMPT:,} characters. "
+            "Shorten it" + (" or the theme." if theme else "."))
     chained = make_picture and ref["type"] == "video"
     bases = [] if chained else list(base_gam_ids or [])
     if not bases and not chained:
@@ -89,16 +105,15 @@ def start(session: Session, gam: GamClient, *, user_id: str, project_id: Optiona
     then = None
     if picture_model is not None:
         picture_params = default_params(picture_model, aspect=aspect, outputs=1)
-        then = json.dumps({"model_id": model["id"], "model_label": label, "prompt": prompt,
+        then = json.dumps({"model_id": model["id"], "model_label": label, "prompt": sent,
                            "params": params})
         picture_cost = estimate(picture_model, picture_params)
         cost = None if cost is None or picture_cost is None else round(cost + picture_cost, 4)
         label = f"{picture_model.get('label') or picture_model['id']} → {label}"
-        job = gam.start_generation(model_id=picture_model["id"],
-                                   prompt=(picture_prompt or "").strip() or prompt,
+        job = gam.start_generation(model_id=picture_model["id"], prompt=picture_sent,
                                    base_ids=[], params=picture_params)
     else:
-        job = gam.start_generation(model_id=model["id"], prompt=prompt,
+        job = gam.start_generation(model_id=model["id"], prompt=sent,
                                    base_ids=bases[:1] if kind == "image_to_video" else bases,
                                    params=params)
     row = Generation(id=str(uuid.uuid4()), user_id=user_id, project_id=project_id,

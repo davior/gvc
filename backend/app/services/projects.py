@@ -18,6 +18,7 @@ from sqlmodel import Session, func, select
 from app.auth import UserCtx
 from app.clock import utcnow
 from app.models.project import Project, ProjectVersion
+from app.services import themes
 from app.services.users import ensure_user
 from app.spec.model import NoteSource, VideoSpec, dump_spec
 from app.spec.validation import SpecIssue, parse_spec
@@ -103,11 +104,15 @@ def _commit_spec(
 
 def create(
     session: Session, user: UserCtx, spec: VideoSpec, *, origin: str, message: str,
-    author: str = "user",
+    author: str = "user", default_theme: bool = True,
 ) -> Project:
+    """A new project. Every way in starts with the user's default theme unless the spec
+    names one of theirs; `default_theme=False` is for the assistant's drafts (see
+    `themes.settle`)."""
     # The project row has a foreign key to the shadow user, which `/api/me` normally
     # writes first. A Notes push may well be the first request this user ever makes.
     ensure_user(session, user)
+    themes.settle(session, user.id, spec, use_default=default_theme)
     now = utcnow()
     project = Project(id=str(uuid.uuid4()), user_id=user.id, origin=origin,
                       created_at=now, updated_at=now)

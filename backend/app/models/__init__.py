@@ -10,7 +10,8 @@ from app.models.generation import Generation
 from app.models.project import Project, ProjectVersion
 from app.models.provider import AIProvider
 from app.models.render import RenderJob
+from app.models.theme import Theme
 from app.models.usage import UsageEvent
 from app.models.user import User
 
-__all__ = ["AIProvider", "AssistantSession", "AssistantTurn", "Generation", "Project", "ProjectVersion", "RenderJob", "UsageEvent", "User"]
+__all__ = ["AIProvider", "AssistantSession", "AssistantTurn", "Generation", "Project", "ProjectVersion", "RenderJob", "Theme", "UsageEvent", "User"]

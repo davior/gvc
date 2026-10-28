@@ -33,6 +33,7 @@ from app.providers.base import ProviderError, ToolCall, ToolResult, ToolSpec
 from app.schemas_gam import GamTranscript
 from app.render.estimate import estimate
 from app.services import note_media as note_files
+from app.services.themes import theme_id_of
 from app.spec.validation import SpecIssue, parse_spec
 
 # A found moment is padded so a cut doesn't clip a word: the editor's `momentTrim`.
@@ -174,6 +175,9 @@ class Working:
     # Picker calls made at once: across the videos of one round, and the windows of a
     # long one. `ask` must be safe to call from several threads.
     pick_concurrency: int = 4
+    # The user's themes by id: {"name", "prompt"}. The only ids `style.theme` may be
+    # set to, since an id the user doesn't own would silently style nothing.
+    themes: Dict[str, Dict[str, str]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.data = copy.deepcopy(self.data)
@@ -262,6 +266,10 @@ class Working:
 
     def commit(self, candidate: Dict[str, Any], summary: str) -> str:
         """Take `candidate` as the new spec if the rules above allow it."""
+        theme = theme_id_of(candidate)
+        if theme != theme_id_of(self.data) and theme is not None and theme not in self.themes:
+            raise ToolFailed(f"There is no theme {theme!r}. Use set_theme with one of the "
+                             "themes listed in the context.")
         _, issues = parse_spec(candidate)
         if issues and self.valid:
             raise ToolFailed("That edit would make the video invalid, so it was not made:\n"
@@ -521,6 +529,16 @@ def replace_spec(w: Working, spec: Dict[str, Any]) -> str:
     # The project owns its id; a draft never changes it.
     if "id" in w.data:
         candidate["id"] = w.data["id"]
+    # A whole draft seldom restates the theme, and leaving it out isn't a decision to
+    # drop it: the theme stays unless the draft names another of the user's. Removing
+    # it is set_theme's job, where it is said on purpose.
+    style = candidate.setdefault("style", {})
+    if isinstance(style, dict):
+        named = style.get("theme")
+        if named is None or (named not in w.themes and named != theme_id_of(w.data)):
+            style.pop("theme", None)
+            if theme_id_of(w.data):
+                style["theme"] = theme_id_of(w.data)
     # Accepted even with issues: a whole draft is the one edit too big to throw away
     # over a typo. The issues come back to be fixed with the other tools.
     _, issues = parse_spec(candidate)
@@ -908,6 +926,27 @@ def set_project(w: Working, changes: Dict[str, Any]) -> str:
     return w.commit(candidate, f"Changed the project's {', '.join(sorted(changes))}")
 
 
+def set_theme(w: Working, theme: Optional[str] = None) -> str:
+    """Choose the video's theme from the user's list, by name or id; none removes it."""
+    if theme is not None and not isinstance(theme, str):
+        raise ToolFailed("theme is a theme's name or id, as text.")
+    candidate = copy.deepcopy(w.data)
+    style = candidate.setdefault("style", {})
+    if theme is None or not theme.strip() or theme.strip().lower() == "none":
+        style.pop("theme", None)
+        return w.commit(candidate, "Removed the theme")
+    wanted = theme.strip()
+    found = wanted if wanted in w.themes else next(
+        (tid for tid, t in w.themes.items() if t["name"].strip().lower() == wanted.lower()),
+        None)
+    if found is None:
+        names = ", ".join(repr(t["name"]) for t in w.themes.values()) or "none; the user " \
+            "hasn't made any (they are made in Settings)"
+        raise ToolFailed(f"No theme {wanted!r}. The themes are: {names}.")
+    style["theme"] = found
+    return w.commit(candidate, f"Set the theme to {w.themes[found]['name']!r}")
+
+
 def run_estimate(w: Working) -> str:
     spec, issues = parse_spec(w.data)
     if spec is None:
@@ -1040,6 +1079,11 @@ TOOLS: List[Tuple[ToolSpec, Callable[..., str]]] = [
               "motion, background, cards…), output, voice, chrome, credits.",
               {"type": "object", "properties": {"changes": _OBJ}, "required": ["changes"]}),
      set_project),
+    (ToolSpec("set_theme",
+              "Set the video's theme: one of the user's named looks (listed in the context), "
+              "by name or id, whose style is added to every picture and clip generated for "
+              "the video. Omit theme (or \"none\") to remove it.",
+              {"type": "object", "properties": {"theme": _STR}}), set_theme),
     (ToolSpec("generate_image",
               "Generate a still picture with AI and put it in the video (as a segment's "
               "picture, an image overlay, or just in the registry). It starts at once and "

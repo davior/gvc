@@ -236,6 +236,32 @@ OpenAI, DeepSeek and Ollama.
 Dev ports: **8002** (backend) and **5175** (frontend). Notes uses 8000/5173, GAM
 8001/5174, and all three run at once.
 
+### D5. Themes: a named look, added to every generation prompt
+
+A theme is a name and a prompt modifier ("stylised 3D, soft studio light, teal and
+orange"), kept in a list per user in Settings (`theme` table, `/api/themes`). A project
+names one in its spec as `style.theme` (its id), and `generation/service.py` adds the
+theme's text after every picture and clip prompt on its way to GAM, the picture of a
+"clip from a prompt" included. That one call is where the editor's Generate and the
+assistant's `generate_image` both end up, so neither has to remember to.
+- **An id in the spec, not a column on the project.** Choosing a theme is then an edit
+  like any other: in the draft until Save, in the history, undone by revert, carried by
+  the assistant's proposals, and used by a Generate pressed before saving. An id rather
+  than the text, so rewording a theme restyles every project using it from then on.
+- **Per user**, as providers are. There is no admin role to own a shared list, and
+  one person's edit must not restyle another's videos.
+- **Added on the way out, never stored.** The placeholder and the `generation` row keep
+  the prompt as written, so "Try again" and a reworded theme don't stack it twice. GAM
+  caps a prompt at 4,000 characters, so a prompt that only goes over with its theme is
+  refused with that reason rather than by GAM.
+- **A missing theme is no theme.** A deleted theme, or the id on a spec pasted from
+  someone else, styles nothing; projects aren't rewritten when a theme is deleted.
+- **Default.** At most one theme is the default, and every way into a new project
+  (blank, pasted, pushed from Notes, drafted) starts with it. The assistant sees the
+  list, starts a draft from the default, and changes it with `set_theme` to the one the
+  brief or the user asks for; a whole-draft `replace_spec` keeps the theme unless it
+  names another. A draft whose theme the assistant removed stays without one.
+
 ## Schema changes this goal needs
 
 These change the VideoSpec. They are made in GVC's copy of `spec.py` in M0,

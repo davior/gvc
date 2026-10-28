@@ -27,6 +27,7 @@ from app.routers import projects as projects_router
 from app.routers import providers as providers_router
 from app.routers import renders as renders_router
 from app.routers import spec as spec_router
+from app.routers import themes as themes_router
 from app.routers import usage as usage_router
 from app.schemas import ClientConfig, DataResponse, HealthResponse
 
@@ -157,5 +158,6 @@ app.include_router(providers_router.router, prefix="/api/providers", tags=["prov
 app.include_router(assistant_router.router, prefix="/api/assistant", tags=["assistant"])
 app.include_router(generations_router.router, prefix="/api", tags=["generations"])
 app.include_router(usage_router.router, prefix="/api/usage", tags=["usage"])
+app.include_router(themes_router.router, prefix="/api/themes", tags=["themes"])
 # Not under /api: these URLs go straight into <video src>, authorised by signature.
 app.include_router(renders_router.media_router, prefix="/media/renders", tags=["media"])

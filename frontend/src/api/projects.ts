@@ -246,6 +246,8 @@ export interface Style {
     scrim?: number
   }
   code?: { position?: Band; size_pct?: number; color?: string; scrim?: number }
+  /** The id of one of the user's themes (`api/themes.ts`), styling what is generated. */
+  theme?: string
   [key: string]: unknown
 }
 

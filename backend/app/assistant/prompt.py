@@ -150,6 +150,15 @@ words in an overlay instead.
 the user they can generate it from the scene with the Generate button.
 - Music and sound effects can't be generated; find them in the library.
 
+## Theme
+A theme is one of the user's named looks (realistic, 3D, a colour scheme...). The video's \
+theme is `style.theme`, and its text is added to the end of every picture and clip prompt \
+generated for the video, so write prompts about the subject and composition and leave the \
+look to the theme; don't restate it or contradict it. Change it only with `set_theme`. For a \
+new video, pick the listed theme that best fits the request, or the one the user names; \
+the starter already has their default, so keep that when nothing fits better. On an \
+existing video, change the theme only when asked.
+
 ## Pacing
 Narration reads at about 15 characters a second. A 3-minute video is about 2,500 characters \
 of narration over 10-20 segments. Keep beats to one or two sentences each so pictures can \
@@ -187,8 +196,23 @@ def _registry_lines(data: Dict[str, Any]) -> str:
     return "\n".join(lines) or "(empty)"
 
 
+def _theme_lines(data: Dict[str, Any], themes: Dict[str, Dict[str, str]]) -> str:
+    style = data.get("style") if isinstance(data.get("style"), dict) else {}
+    current = style.get("theme")
+    if not themes:
+        return "Themes: the user has none (they are made in Settings), so leave the theme unset."
+    lines = [f"- {t['name']} (id {tid}){' [current]' if tid == current else ''}: "
+             f"{t['prompt'] or '(adds nothing)'}" for tid, t in themes.items()]
+    if current and current not in themes:
+        lines.append("The video names a theme that no longer exists; it adds nothing.")
+    elif not current:
+        lines.append("The video has no theme now.")
+    return "Themes (style.theme; the text is what each adds to a prompt):\n" + "\n".join(lines)
+
+
 def context(data: Dict[str, Any], *, focus: Optional[str], from_scratch: bool,
-            attached: Optional[str] = None) -> str:
+            attached: Optional[str] = None,
+            themes: Optional[Dict[str, Dict[str, str]]] = None) -> str:
     """This project, for this turn."""
     parts = []
     if from_scratch:
@@ -201,6 +225,7 @@ def context(data: Dict[str, Any], *, focus: Optional[str], from_scratch: bool,
                      + (f" ({label})" if label else ""))
     if attached:
         parts.append("The user attached these library assets to start from:\n" + attached)
+    parts.append(_theme_lines(data, themes or {}))
     parts.append("Asset registry:\n" + _registry_lines(data))
     parts.append("The video now (VideoSpec JSON):\n"
                  + json.dumps(data, ensure_ascii=False, separators=(",", ":")))
