@@ -266,6 +266,9 @@ assistant's `generate_image` both end up, so neither has to remember to.
   `generate_image` starts at once, not on Apply: it is an entry in the user's list,
   not part of the video, and a spec can only name a theme that exists. Discarding the
   proposal leaves it in the list, so the assistant says in its reply that it made one.
+  It doesn't put the new theme on the video unless asked to (`use`). Asking for a
+  theme is not asking for a video: from the project list, a turn that only chose or
+  made a theme proposes nothing, so there is no Apply to turn it into a project.
 
 ## Schema changes this goal needs
 

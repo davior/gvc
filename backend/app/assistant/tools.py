@@ -953,8 +953,12 @@ def set_theme(w: Working, theme: Optional[str] = None) -> str:
     return w.commit(candidate, f"Set the theme to {w.themes[found]['name']!r}")
 
 
-def create_theme(w: Working, name: str, prompt: str, use: bool = True) -> str:
-    """A new theme in the user's list, made now, and by default the video's theme.
+def create_theme(w: Working, name: str, prompt: str, use: bool = False) -> str:
+    """A new theme in the user's list, made now; the video's theme too only with `use`.
+
+    Not used by default: "make me a noir theme" is a request about the list, and
+    quietly restyling the open video, or turning a theme request on the project list
+    into a new video, isn't what was asked.
 
     Made at once rather than on Apply, as generate_image starts at once: a theme is an
     entry in the user's list, not part of the video, so it has no place in a proposal,
@@ -1126,11 +1130,12 @@ TOOLS: List[Tuple[ToolSpec, Callable[..., str]]] = [
               "the video. Omit theme (or \"none\") to remove it.",
               {"type": "object", "properties": {"theme": _STR}}), set_theme),
     (ToolSpec("create_theme",
-              "Add a new theme to the user's list, and (unless use is false) make it this "
-              "video's theme. name: a short name. prompt: the look it adds after every "
-              "picture and clip prompt: style, medium, light, colour palette; never a "
-              "subject. It is saved at once, whatever happens to the proposal. Only when "
-              "the user asks for one, or wants a look none of their themes has.",
+              "Add a new theme to the user's list. name: a short name. prompt: the look "
+              "it adds after every picture and clip prompt: style, medium, light, colour "
+              "palette; never a subject. It is saved at once, whatever happens to the "
+              "proposal. use: true also makes it this video's theme; only when the user "
+              "wants this video in that look, or you are drafting a video in it. Only "
+              "when the user asks for a theme, or wants a look none of theirs has.",
               {"type": "object", "properties": {"name": _STR, "prompt": _STR,
                                                 "use": {"type": "boolean"}},
                "required": ["name", "prompt"]}), create_theme),
