@@ -28,6 +28,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from app.gam.client import GamClient, GamError
 from app.providers.base import ToolCall, ToolResult, ToolSpec
+from app.schemas_gam import GamTranscript
 from app.render.estimate import estimate
 from app.services import note_media as note_files
 from app.spec.validation import SpecIssue, parse_spec
@@ -36,6 +37,18 @@ from app.spec.validation import SpecIssue, parse_spec
 MOMENT_PAD = 0.5
 DEFAULT_MOMENT_SECONDS = 5.0
 MAX_SEARCH_HITS = 12
+# A transcript is read in pages of about 8k tokens. Every result stays in the turn's
+# conversation and is sent again each round, so an hour of speech in one call would cost
+# far more than reading the stretch around what was found.
+MAX_TRANSCRIPT_CHARS = 30_000
+# Where a sentence ends: closing punctuation, then any closing quotes or brackets.
+SENTENCE_END = re.compile(r"[.?!\u2026][\"'\u201d\u2019)\]]*$")
+# Unpunctuated speech would make one endless "sentence"; past this a line is closed at
+# the next word anyway, so every line stays small enough to be a cut.
+MAX_SENTENCE_SECONDS = 30.0
+# How far the automatic cut may grow to take in the whole sentence around a found moment.
+# Enough for a long sentence, not so much that a run-on line swallows the video.
+MAX_SENTENCE_STRETCH = 12.0
 MAX_NOTE_IMPORT = 40
 
 
@@ -82,6 +95,51 @@ class Hit:
 
 
 @dataclass
+class Sentence:
+    start: float
+    end: float
+    text: str
+    speaker: Optional[int] = None
+
+
+def sentences(transcript: GamTranscript) -> List[Sentence]:
+    """What was said, as sentences timed from the words.
+
+    Not the transcriber's segments: those end wherever the speaker paused, often halfway
+    through a sentence, and a cut taken from one starts or stops mid-thought. That is the
+    bad timestamp this exists to prevent.
+    """
+    out: List[Sentence] = []
+    words: List[Tuple[str, float, float]] = []
+    speaker: Optional[int] = None
+
+    def close() -> None:
+        if words:
+            out.append(Sentence(words[0][1], words[-1][2],
+                                " ".join(text for text, _, _ in words), speaker))
+            words.clear()
+
+    for segment in transcript.segments:
+        if segment.speaker != speaker:
+            close()
+            speaker = segment.speaker
+        units = [] if segment.edited else [
+            (w.text.strip(), w.start_time, w.end_time) for w in segment.words if w.text.strip()]
+        if not units and segment.text.strip():
+            # No usable word timings (an older transcript, or one corrected by hand): the
+            # segment is the smallest thing with a time on it.
+            units = [(segment.text.strip(), segment.start_time, segment.end_time)]
+        for text, start, end in units:
+            if words and start - words[0][1] > MAX_SENTENCE_SECONDS:
+                close()
+            words.append((text, start, end))
+            if SENTENCE_END.search(text):
+                close()
+    close()
+    return out
+
+
+@dataclass
 class Working:
     data: Dict[str, Any]
     gam: Optional[GamClient] = None
@@ -99,6 +157,9 @@ class Working:
     # and what each became in the library once imported, so asking twice copies once.
     note_media: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     imported: Dict[str, str] = field(default_factory=dict)
+    # Transcripts fetched this turn by gam_id, so reading one and then cutting from it
+    # asks GAM once.
+    transcripts: Dict[str, GamTranscript] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.data = copy.deepcopy(self.data)
@@ -125,6 +186,19 @@ class Working:
 
     def name_of(self, segment: Dict[str, Any]) -> str:
         return segment.get("label") or segment.get("id", "?")
+
+    def transcript(self, gam_id: str) -> GamTranscript:
+        if gam_id not in self.transcripts:
+            if self.gam is None:
+                raise ToolFailed("The asset library isn't reachable in this turn.")
+            try:
+                found = self.gam.transcript(gam_id)
+            except GamError as exc:
+                raise ToolFailed(f"The asset library failed: {exc.message}")
+            if found is None:
+                raise ToolFailed(f"No asset {gam_id!r} in the library.")
+            self.transcripts[gam_id] = found
+        return self.transcripts[gam_id]
 
     def tracks(self) -> List[Dict[str, Any]]:
         return self.data.setdefault("audio_tracks", [])
@@ -239,6 +313,9 @@ def search_assets(w: Working, query: str, type: Optional[str] = None,
             # Where in the video it was said: what `set_visual` will cut to.
             row["said_at"] = [round(hit.start_time, 1),
                               round(hit.end_time, 1) if hit.end_time is not None else None]
+        if hit.other_matches:
+            # GAM shows each asset's best moment only; this says the rest is worth reading.
+            row["more_moments"] = hit.other_matches
         if hit.snippet:
             row["snippet"] = hit.snippet.replace("«", "").replace("»", "")[:240]
         if asset.credit:
@@ -274,6 +351,34 @@ def get_asset(w: Working, gam_id: str) -> str:
     if asset.music:
         details["music"] = _music_row(asset.music)
     return _compact(details)
+
+
+def read_transcript(w: Working, gam_id: str, start: Optional[float] = None,
+                    end: Optional[float] = None) -> str:
+    lines = [s for s in sentences(w.transcript(gam_id))
+             if (start is None or s.end > start) and (end is None or s.start < end)]
+    if not lines:
+        if start is not None or end is not None:
+            return "Nothing is said in that stretch."
+        return ("This asset has no transcript: it hasn't been transcribed in the library, or "
+                "nothing is said in it.")
+    speakers = len({s.speaker for s in lines if s.speaker is not None}) > 1
+    out: List[str] = []
+    size, rest, previous = 0, None, object()
+    for s in lines:
+        who = f"S{s.speaker}: " if speakers and s.speaker != previous else ""
+        line = f"[{s.start:.1f}-{s.end:.1f}] {who}{s.text}"
+        if out and size + len(line) > MAX_TRANSCRIPT_CHARS:
+            rest = s.start
+            break
+        out.append(line)
+        size += len(line) + 1
+        previous = s.speaker
+    head = ("One sentence per line, [start-end] in seconds. A trim from one line's start to "
+            "a later line's end cuts whole sentences.")
+    tail = (f"\n... continues: read_transcript with start {rest:.1f} for the rest."
+            if rest is not None else "")
+    return head + "\n" + "\n".join(out) + tail
 
 
 def replace_spec(w: Working, spec: Dict[str, Any]) -> str:
@@ -418,12 +523,27 @@ def remove_segment(w: Working, segment_id: str) -> str:
     return result
 
 
-def _moment_trim(hit: Hit) -> Optional[Dict[str, float]]:
+def _moment_trim(hit: Hit, lines: List[Sentence] = ()) -> Optional[Dict[str, float]]:
+    """The found moment as a cut, grown to the whole sentences it falls in when the
+    transcript is to hand, and padded without reaching into the next sentence."""
     if hit.start is None:
         return None
-    end = hit.end if hit.end is not None else hit.start + DEFAULT_MOMENT_SECONDS
-    a = max(0.0, hit.start - MOMENT_PAD)
-    b = end + MOMENT_PAD
+    a = hit.start
+    b = hit.end if hit.end is not None else hit.start + DEFAULT_MOMENT_SECONDS
+    floor, ceiling = 0.0, None
+    touching = [i for i, s in enumerate(lines) if s.end > a and s.start < b]
+    if touching:
+        first, last = touching[0], touching[-1]
+        if a - lines[first].start <= MAX_SENTENCE_STRETCH:
+            a = min(a, lines[first].start)
+        if lines[last].end - b <= MAX_SENTENCE_STRETCH:
+            b = max(b, lines[last].end)
+        if first > 0:
+            floor = lines[first - 1].end
+        if last + 1 < len(lines):
+            ceiling = lines[last + 1].start
+    a = max(floor, a - MOMENT_PAD)
+    b = b + MOMENT_PAD if ceiling is None else min(b + MOMENT_PAD, max(b, ceiling))
     if hit.duration:
         b = min(b, hit.duration)
     return {"in": round(a, 1), "out": round(b, 1)} if b > a else None
@@ -451,9 +571,16 @@ def set_visual(w: Working, segment_id: str, gam_id: Optional[str] = None,
     hit = w.hits.get(gam_id) if gam_id else None
     if trim is not None:
         visual["trim"] = trim
-    elif hit and hit.asset_type == "video" and _moment_trim(hit):
-        # The moment that was said becomes the cut, as picking a hit does in the editor.
-        visual["trim"] = _moment_trim(hit)
+    elif hit and hit.asset_type == "video" and hit.start is not None:
+        # The moment that was said becomes the cut, as picking a hit does in the editor,
+        # grown to whole sentences. Without the transcript it is still the moment.
+        try:
+            lines = sentences(w.transcript(hit.gam_id))
+        except ToolFailed:
+            lines = []
+        moment = _moment_trim(hit, lines)
+        if moment:
+            visual["trim"] = moment
     if motion is not None:
         visual["motion"] = motion
     if fit is not None:
@@ -669,11 +796,19 @@ TOOLS: List[Tuple[ToolSpec, Callable[..., str]]] = [
               "to. Use type to restrict to video, image or audio. An audio hit may carry "
               "kind (music, speech or sfx) and music: its genres, moods, instruments, bpm, "
               "key, energy and vocals, which are also searchable, so search music by the "
-              "sound you want.",
+              "sound you want. more_moments: how many other moments in that asset also "
+              "matched; read_transcript shows them.",
               {"type": "object", "properties": {
                   "query": _STR, "type": {"type": "string", "enum": ["video", "image", "audio"]},
                   "limit": {"type": "integer", "minimum": 1, "maximum": MAX_SEARCH_HITS}},
                "required": ["query"]}), search_assets),
+    (ToolSpec("read_transcript",
+              "What is said in a library video or recording, one sentence per line with its "
+              "[start-end] seconds. Use it on candidate videos before choosing a clip, to find "
+              "the passage that best makes the point. start/end read just that stretch; a long "
+              "transcript comes in pages and says where to carry on.",
+              {"type": "object", "properties": {"gam_id": _STR, "start": _NUM, "end": _NUM},
+               "required": ["gam_id"]}), read_transcript),
     (ToolSpec("get_asset", "Details of one library asset by gam_id.",
               {"type": "object", "properties": {"gam_id": _STR}, "required": ["gam_id"]}),
      get_asset),
@@ -701,8 +836,8 @@ TOOLS: List[Tuple[ToolSpec, Callable[..., str]]] = [
                "required": ["segment_id"]}), remove_segment),
     (ToolSpec("set_visual",
               "Set a segment's picture or footage: gam_id (from search_assets, registered for "
-              "you) or asset (an existing registry key). A video hit's said_at becomes the trim "
-              "unless trim is given. motion and fit as in the spec.",
+              "you) or asset (an existing registry key). A video hit's said_at, grown to whole "
+              "sentences, becomes the trim unless trim is given. motion and fit as in the spec.",
               {"type": "object", "properties": {
                   "segment_id": _STR, "gam_id": _STR, "asset": _STR, "trim": _OBJ,
                   "motion": _OBJ, "fit": {"type": "string", "enum": ["blur", "pad", "crop"]},
@@ -777,7 +912,7 @@ SPECS = [spec for spec, _ in TOOLS]
 _HANDLERS = {spec.name: handler for spec, handler in TOOLS}
 
 # Read-only tools, which neither change the video nor count as an edit in the steps.
-READS = {"get_spec", "search_assets", "get_asset", "estimate"}
+READS = {"get_spec", "search_assets", "read_transcript", "get_asset", "estimate"}
 
 
 def execute(w: Working, call: ToolCall) -> ToolResult:

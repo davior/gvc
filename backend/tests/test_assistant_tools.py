@@ -6,7 +6,7 @@ from app.assistant import tools as T
 from app.assistant.tools import Working
 from app.gam.client import GamClient
 from app.providers.base import ToolCall
-from tests.fake_siblings import gam_asset, hit
+from tests.fake_siblings import gam_asset, hit, transcript
 
 
 def spec():
@@ -123,6 +123,73 @@ def test_a_search_hit_becomes_the_visual_with_its_moment_as_the_trim(gam, siblin
     assert visual == {"asset": "a_river_interview", "trim": {"in": 41.5, "out": 48.0}}
     assert w.data["assets"]["a_river_interview"] == {
         "from": "gam", "id": "r", "type": "video", "label": "River interview"}
+
+
+def river_transcript(siblings):
+    # The transcriber's segments break mid-sentence, as they do wherever someone pauses.
+    siblings.transcripts["r"] = transcript(
+        "r",
+        (30.0, 36.0, "We came here in the spring.", 0),
+        (36.5, 42.0, "Back then the river ran", 0),
+        (42.0, 47.5, "clear all year, but now the water is gone.", 0),
+        (48.0, 52.0, "Nobody planned for that.", 1),
+    )
+
+
+def test_a_transcript_reads_as_whole_sentences_with_their_times(gam, siblings):
+    river_transcript(siblings)
+    w = Working(spec(), gam=gam)
+    read = run(w, "read_transcript", gam_id="r")
+    assert not read.is_error
+    assert read.content.splitlines()[1:] == [
+        "[30.0-36.0] S0: We came here in the spring.",
+        "[36.5-47.5] Back then the river ran clear all year, but now the water is gone.",
+        "[48.0-52.0] S1: Nobody planned for that.",
+    ]
+
+
+def test_a_transcript_can_be_read_a_stretch_at_a_time(gam, siblings, monkeypatch):
+    river_transcript(siblings)
+    w = Working(spec(), gam=gam)
+    stretch = run(w, "read_transcript", gam_id="r", start=40, end=50).content
+    assert "Back then" in stretch and "Nobody" in stretch and "spring" not in stretch
+
+    monkeypatch.setattr(T, "MAX_TRANSCRIPT_CHARS", 60)
+    page = run(w, "read_transcript", gam_id="r").content
+    assert "spring" in page and "river" not in page
+    assert "read_transcript with start 36.5" in page
+    # Asked once, however often it is read.
+    assert sum(r.url.path.endswith("/transcript") for r in siblings.gam_requests()) == 1
+
+
+def test_an_untranscribed_video_says_so(gam, siblings):
+    w = Working(spec(), gam=gam)
+    assert "no transcript" in run(w, "read_transcript", gam_id="r").content
+    assert run(w, "read_transcript", gam_id="nope").is_error
+
+
+def test_a_segment_corrected_by_hand_is_read_as_its_text(gam, siblings):
+    river_transcript(siblings)
+    segment = siblings.transcripts["r"]["segments"][0]
+    segment["text"], segment["edited"] = "We came here in late spring.", True
+    w = Working(spec(), gam=gam)
+    assert "[30.0-36.0] S0: We came here in late spring." in run(w, "read_transcript", gam_id="r").content
+
+
+def test_a_found_moment_is_cut_as_the_whole_sentence_it_falls_in(gam, siblings):
+    river_transcript(siblings)
+    w = Working(spec(), gam=gam)
+    run(w, "search_assets", query="water")
+    run(w, "set_visual", segment_id="s_valley", gam_id="r")
+    # The hit is 42-47.5, the back half of a sentence that starts at 36.5. The cut takes
+    # the whole sentence, and its padding stops where the next one begins.
+    assert w.data["segments"][1]["visual"]["trim"] == {"in": 36.0, "out": 48.0}
+
+
+def test_a_hit_says_when_more_of_the_video_matched(gam, siblings):
+    siblings.hits = [hit(siblings.assets["r"], start=42.0, end=47.5, other_matches=3)]
+    w = Working(spec(), gam=gam)
+    assert '"more_moments":3' in run(w, "search_assets", query="water").content
 
 
 def test_a_track_hit_says_what_it_sounds_like(gam, siblings):

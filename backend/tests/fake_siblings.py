@@ -33,6 +33,8 @@ def gam_asset(asset_id: str, name: str, asset_type: str = "video", **extra) -> d
 class FakeSiblings:
     assets: Dict[str, dict] = field(default_factory=dict)
     hits: List[dict] = field(default_factory=list)
+    # GAM transcripts by asset id: {"asset_id", "segments": [...]}, as /transcript gives.
+    transcripts: Dict[str, dict] = field(default_factory=dict)
     notes_files: Dict[str, bytes] = field(default_factory=dict)
     requests: List[httpx.Request] = field(default_factory=list)
     # Set to make GAM answer every request with this status.
@@ -113,6 +115,12 @@ class FakeSiblings:
                 "data": self.hits, "total": len(self.hits),
                 "query": request.url.params.get("q"), "semantic": False, "semantic_error": None,
             })
+        if path.endswith("/transcript") and request.method == "GET":
+            asset_id = path.split("/")[3]
+            if asset_id not in self.assets:
+                return httpx.Response(404, json={"detail": {"code": "not_found", "message": "gone"}})
+            return httpx.Response(200, json={"data": self.transcripts.get(
+                asset_id, {"asset_id": asset_id, "segments": []})})
         if path.startswith("/api/assets/") and request.method == "GET":
             asset = self.assets.get(path.rsplit("/", 1)[-1])
             if asset is None:
@@ -202,13 +210,30 @@ GEN_MODELS = [
 ]
 
 
-def hit(asset: dict, *, start=None, end=None, snippet="") -> dict:
+def hit(asset: dict, *, start=None, end=None, snippet="", other_matches=0) -> dict:
     data = {"asset": asset, "score": 0.03, "snippet": snippet, "start_time": start,
             "segment_id": "seg" if start is not None else None, "sources": ["keyword"],
-            "other_matches": 0}
+            "other_matches": other_matches}
     if end is not None:
         data["end_time"] = end
     return data
+
+
+def transcript(asset_id: str, *segments: tuple) -> dict:
+    """A GAM transcript from (start, end, "words of it", speaker) segments, each word
+    given an even share of its segment's time, as the transcriber's would be."""
+    out = []
+    for i, (start, end, text, *who) in enumerate(segments):
+        words = text.split()
+        step = (end - start) / len(words)
+        out.append({
+            "id": f"seg{i}", "idx": i, "text": text, "start_time": start, "end_time": end,
+            "speaker": who[0] if who else None, "edited": False,
+            "words": [{"text": word, "start_time": round(start + n * step, 3),
+                       "end_time": round(start + (n + 1) * step - 0.05, 3)}
+                      for n, word in enumerate(words)],
+        })
+    return {"asset_id": asset_id, "status": "done", "language": "en", "segments": out}
 
 
 def dumps(value) -> str:

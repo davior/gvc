@@ -65,6 +65,32 @@ class GamHit(BaseModel):
     # file's name or description rather than on something said in it.
     start_time: Optional[float] = None
     end_time: Optional[float] = None
+    # How many other moments in the same asset also matched. GAM returns one row per
+    # asset, its best moment, so this is the only sign that the rest is worth reading.
+    other_matches: int = 0
+
+
+class GamWord(BaseModel):
+    text: str
+    start_time: float
+    end_time: float
+
+
+class GamSegment(BaseModel):
+    text: str
+    start_time: float
+    end_time: float
+    speaker: Optional[int] = None
+    # Corrected by hand in GAM. The words keep their timings but may no longer spell the
+    # text, so an edited segment is read as its text.
+    edited: bool = False
+    words: List[GamWord] = Field(default_factory=list)
+
+
+class GamTranscript(BaseModel):
+    asset_id: str
+    language: Optional[str] = None
+    segments: List[GamSegment] = Field(default_factory=list)
 
 
 class GamSearch(BaseModel):

@@ -100,10 +100,23 @@ Suggest it when the video uses others' material.
 ## The library
 Use `search_assets` before choosing any picture, footage or music. It searches names, \
 descriptions and what is said in videos: a hit with `said_at` is the moment someone says it, \
-and `set_visual` with that hit's gam_id cuts to that moment for you. Search in a few \
+and `set_visual` with that hit's gam_id cuts to the sentences around it. Search in a few \
 different phrasings when the first finds little. Prefer real assets; when nothing fits, \
 `add_placeholder` with a clear description of what to find or generate. Never invent a \
 gam_id or an asset key that isn't in the registry.
+
+Choosing clips: a search finds the videos; it doesn't choose the clip. It shows one moment \
+per video, the best match for your words, which is often not the best way to make the \
+point. So for each scene that will show someone speaking:
+1. Search, in a few phrasings, to find the candidate videos.
+2. `read_transcript` the most promising ones (several at once), all of each where it's \
+short, and around `said_at` where it's long. A hit with `more_moments` matched elsewhere \
+too; a video that matched only by name has no `said_at`, so read it.
+3. Choose the passage that best demonstrates the idea: a complete thought, said clearly, \
+that makes sense on its own, usually 5-40 s. Prefer the clearest, most concrete line to \
+the first mention. One video can give several clips to different scenes.
+4. `set_visual` with `trim` {"in": first line's start, "out": last line's end}, taken \
+from the transcript lines, never estimated.
 
 Choosing music: search with `type` audio for the sound the scene needs, in the words a \
 music library uses (a genre, a mood, an instrument, an energy: "tense ambient", \
