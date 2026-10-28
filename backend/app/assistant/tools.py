@@ -23,6 +23,7 @@ from __future__ import annotations
 import copy
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -170,6 +171,9 @@ class Working:
     max_picks: int = 16
     picks: int = 0
     picked: Dict[Tuple[str, str, int], str] = field(default_factory=dict)
+    # Picker calls made at once: across the videos of one round, and the windows of a
+    # long one. `ask` must be safe to call from several threads.
+    pick_concurrency: int = 4
 
     def __post_init__(self) -> None:
         self.data = copy.deepcopy(self.data)
@@ -391,7 +395,28 @@ def read_transcript(w: Working, gam_id: str, start: Optional[float] = None,
     return head + "\n" + "\n".join(out) + tail
 
 
-def find_clips(w: Working, gam_id: str, idea: str, count: int = 3) -> str:
+@dataclass
+class ClipJob:
+    """A find_clips call checked and budgeted, its picker calls still to make.
+
+    Split from the calls themselves so a round that asks for clips from several videos
+    can make every picker call at once (`finish_clip_jobs`): each is a slow model call,
+    and one after another they were most of the wait.
+    """
+
+    key: Tuple[str, str, int]
+    gam_id: str
+    idea: str
+    count: int
+    lines: List[Sentence]
+    spans: List[Tuple[int, int]]
+    prompts: List[str]
+    duration: Optional[float]
+
+
+def plan_clips(w: Working, gam_id: str, idea: str, count: int = 3) -> "str | ClipJob":
+    """The job for a find_clips call, or its whole answer when no picker call is needed
+    (already asked this turn, or nothing is said in the video)."""
     if w.ask is None:
         raise ToolFailed("Clip picking isn't available in this turn; use read_transcript.")
     if not (idea or "").strip():
@@ -413,37 +438,80 @@ def find_clips(w: Working, gam_id: str, idea: str, count: int = 3) -> str:
         raise ToolFailed(f"Clip picking has {left} of its {w.max_picks} calls left this turn "
                          f"and this video needs {len(spans)}. Use read_transcript around a "
                          "search hit's said_at instead.")
+    # Taken now, not as the calls finish: the calls of one round run together, and each
+    # job has to see what the ones planned before it will spend.
+    w.picks += len(spans)
     seen = w.hits.get(gam_id)
+    name = seen.name if seen else None
+    return ClipJob(key=key, gam_id=gam_id, idea=idea.strip(), count=count, lines=lines,
+                   spans=spans,
+                   prompts=[clips.prompt_for(idea, count, lines, span, name) for span in spans],
+                   duration=seen.duration if seen else None)
+
+
+def finish_clip_jobs(w: Working, jobs: List[ClipJob]) -> List[Tuple[str, bool]]:
+    """Make every picker call of these jobs, up to `pick_concurrency` at once, and give
+    each job's answer as (content, is_error), in the order the jobs came."""
+    texts: List[List[str]] = [[""] * len(job.prompts) for job in jobs]
+    failed: List[Optional[str]] = [None] * len(jobs)
+    calls = [(j, i) for j, job in enumerate(jobs) for i in range(len(job.prompts))]
+    if calls:
+        workers = max(1, min(w.pick_concurrency, len(calls)))
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="clip-pick") as pool:
+            futures = {pool.submit(w.ask, clips.SYSTEM, jobs[j].prompts[i]): (j, i)
+                       for j, i in calls}
+            for future in as_completed(futures):
+                j, i = futures[future]
+                try:
+                    texts[j][i] = future.result()
+                except ProviderError as exc:
+                    # One video's failure is that video's answer; the others still stand.
+                    failed[j] = failed[j] or str(exc)
+    out: List[Tuple[str, bool]] = []
+    for job, answers, error in zip(jobs, texts, failed):
+        if error:
+            out.append((f"The clip-picking pass failed ({error}). Use read_transcript and "
+                        "choose the passage yourself.", True))
+        else:
+            out.append((_clips_result(w, job, answers), False))
+    return out
+
+
+def _clips_result(w: Working, job: ClipJob, answers: List[str]) -> str:
     found: List[clips.Clip] = []
-    for span in spans:
-        w.picks += 1
-        try:
-            text = w.ask(clips.SYSTEM, clips.prompt_for(idea, count, lines, span,
-                                                        seen.name if seen else None))
-        except ProviderError as exc:
-            raise ToolFailed(f"The clip-picking pass failed ({exc}). Use read_transcript "
-                             "and choose the passage yourself.")
-        found += clips.parse(text, lines, span)
-    chosen = clips.best(found, count)
+    for span, text in zip(job.spans, answers):
+        found += clips.parse(text, job.lines, span)
+    chosen = clips.best(found, job.count)
+    lines = job.lines
     if not chosen:
         result = ("Nothing in this video makes that point well. Try another video, or "
                   "describe the idea differently.")
     else:
-        duration = seen.duration if seen else None
         rows = []
         for clip in chosen:
             first, last = lines[clip.first], lines[clip.last]
             said = " ".join(lines[i].text for i in range(clip.first, clip.last + 1))
             rows.append({
-                "trim": _padded(first.start, last.end, lines, clip.first, clip.last, duration),
+                "trim": _padded(first.start, last.end, lines, clip.first, clip.last,
+                                job.duration),
                 "seconds": round(last.end - first.start, 1),
                 "score": clip.score,
                 "why": clip.why,
                 "says": said if len(said) <= 400 else said[:400] + "…",
             })
-        result = _compact({"gam_id": gam_id, "idea": idea.strip(), "clips": rows})
-    w.picked[key] = result
+        result = _compact({"gam_id": job.gam_id, "idea": job.idea, "clips": rows})
+    w.picked[job.key] = result
     return result
+
+
+def find_clips(w: Working, gam_id: str, idea: str, count: int = 3) -> str:
+    planned = plan_clips(w, gam_id, idea, count)
+    if isinstance(planned, str):
+        return planned
+    [(content, is_error)] = finish_clip_jobs(w, [planned])
+    if is_error:
+        raise ToolFailed(content)
+    return content
 
 
 def replace_spec(w: Working, spec: Dict[str, Any]) -> str:
@@ -1012,3 +1080,17 @@ def execute(w: Working, call: ToolCall) -> ToolResult:
     except TypeError as exc:
         # Arguments the handler doesn't take: said in the schema's terms.
         return ToolResult(call.id, f"Wrong arguments for {call.name}: {exc}", is_error=True)
+
+
+def plan(w: Working, call: ToolCall) -> "ToolResult | ClipJob":
+    """`execute`, except that a find_clips call needing the picker comes back as its job,
+    for the loop to run with the round's others. Never raises, as `execute` doesn't."""
+    if call.name != "find_clips" or call.parse_error:
+        return execute(w, call)
+    try:
+        planned = plan_clips(w, **call.arguments)
+    except ToolFailed as exc:
+        return ToolResult(call.id, str(exc), is_error=True)
+    except TypeError as exc:
+        return ToolResult(call.id, f"Wrong arguments for {call.name}: {exc}", is_error=True)
+    return ToolResult(call.id, planned) if isinstance(planned, str) else planned

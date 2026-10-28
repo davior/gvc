@@ -103,6 +103,9 @@ class Settings(BaseSettings):
     # how many candidate videos a request can weigh before it falls back to reading
     # transcripts itself.
     assistant_max_clip_picks: int = 16
+    # Of those, how many run at once. Each is a request to the user's own provider, so
+    # this is also how hard one request leans on their rate limit.
+    assistant_clip_pick_concurrency: int = 4
     # Material attached to a conversation (files, notes, web pages), as text. Each turn
     # reads all of it on every round, so the limits are about cost as much as context
     # length: 150k characters is roughly 40k tokens, cached after the first round.

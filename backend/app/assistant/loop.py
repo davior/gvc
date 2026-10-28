@@ -12,7 +12,7 @@ from typing import Callable, List, Optional, Sequence, Tuple
 
 from app.assistant import tools as T
 from app.assistant.tools import Working, _issues_text
-from app.providers.base import ChatProvider, Image, Reply
+from app.providers.base import ChatProvider, Image, Reply, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,9 @@ def run(provider: ChatProvider, working: Working, *, system: Sequence[str],
             return outcome
         if reply.text:
             on_step("think", reply.text)
-        results = []
+        results: List[Optional[ToolResult]] = []
+        # find_clips calls wait here as jobs, so all the round's picker calls run at once.
+        waiting: List[Tuple[int, str, T.ClipJob]] = []
         for call in reply.tool_calls:
             if cancelled():
                 raise Stopped()
@@ -82,11 +84,21 @@ def run(provider: ChatProvider, working: Working, *, system: Sequence[str],
                 doing = "Reading the transcript of" if call.name == "read_transcript" \
                     else "Picking clips from"
                 on_step("search", f"{doing} {seen.name if seen else gam_id}")
-            result = T.execute(working, call)
-            results.append(result)
+            planned = T.plan(working, call)
+            if isinstance(planned, T.ClipJob):
+                waiting.append((len(results), call.id, planned))
+                results.append(None)
+                continue
+            results.append(planned)
             if call.name in T.READS:
                 continue
-            on_step("issue" if result.is_error else "edit", _first_line(result.content))
+            on_step("issue" if planned.is_error else "edit", _first_line(planned.content))
+        if waiting:
+            if cancelled():
+                raise Stopped()
+            answers = T.finish_clip_jobs(working, [job for _, _, job in waiting])
+            for (index, call_id, _), (content, is_error) in zip(waiting, answers):
+                results[index] = ToolResult(call_id, content, is_error=is_error)
         conversation.answer(results)
     outcome.cut_short = (f"Stopped after {max_rounds} rounds without finishing. What it had "
                          "done so far is below; ask again to carry on.")
