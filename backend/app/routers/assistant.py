@@ -29,6 +29,7 @@ from app.schemas_assistant import (
     SessionRead, SessionSummary, Step, TurnCreate, TurnRead, UrlAttach,
 )
 from app.services import projects as project_service
+from app.services import themes
 from app.services.users import ensure_user
 from app.spec.model import BriefSource, dump_spec
 from app.spec.starter import starter_spec
@@ -324,7 +325,11 @@ def start_turn(body: TurnCreate, user: CurrentUser, token: CallerToken,
     elif project is not None:
         base = project_service.decode(project.spec)
     else:
-        base = dump_spec(starter_spec("Untitled video"))
+        # The starter carries the default theme, so the assistant sees it and can keep
+        # it or choose a better fit for the brief.
+        starter = starter_spec("Untitled video")
+        themes.settle(session, user.id, starter, use_default=True)
+        base = dump_spec(starter)
     turn = worker.submit(session, chat, user_id=user.id, token=token, prompt=body.prompt.strip(),
                          base_spec=base,
                          base_version=body.base_version if body.base_version is not None
@@ -423,7 +428,8 @@ def apply_as_new_project(turn_id: str, user: CurrentUser,
                                   provider=provider.provider_type if provider else None,
                                   model=provider.model if provider else None)
     project = project_service.create(session, user, spec, origin="brief",
-                                     message="Drafted by the assistant", author="ai")
+                                     message="Drafted by the assistant", author="ai",
+                                     default_theme=False)
     turn.outcome, turn.project_id, turn.updated_at = "applied", project.id, utcnow()
     # Pictures the draft started generating belong to the new project now, so opening it
     # finds them and fills them in.

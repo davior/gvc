@@ -10,6 +10,7 @@ import {
 } from '@/spec/generation'
 import { useGenerationStore } from '@/stores/generations'
 import { useProjectStore } from '@/stores/projects'
+import { useThemes } from '@/utils/useThemes'
 
 interface Props {
   assetKey: string
@@ -60,6 +61,8 @@ export default function GenerateDialog({ assetKey, onClose }: Props) {
   const error = useGenerationStore((s) => s.error)
 
   const ref = draft?.assets?.[assetKey] as GenerateRef | undefined
+  // Shown so the prompt can be written for the subject alone; the server adds it.
+  const theme = useThemes(draft?.style?.theme)?.find((t) => t.id === draft?.style?.theme)
   const isVideo = ref?.type === 'video'
   const pictures = useMemo(() => {
     const inVideo = draft ? picturesIn(draft) : []
@@ -189,6 +192,11 @@ export default function GenerateDialog({ assetKey, onClose }: Props) {
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
               />
+              {theme?.prompt && (
+                <span className="block text-xs text-gray-500 dark:text-gray-400">
+                  The theme “{theme.name}” is added after it: {theme.prompt}
+                </span>
+              )}
             </label>
 
             {models === null ? (

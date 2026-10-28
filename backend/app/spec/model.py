@@ -306,6 +306,11 @@ class Style(_Model):
     cards: Cards = Field(default_factory=Cards)
     quote: QuoteStyle = Field(default_factory=QuoteStyle)
     code: CodeStyle = Field(default_factory=CodeStyle)
+    # The id of one of the owner's themes (app/models/theme.py), whose prompt modifier
+    # is added to every picture and clip generated for the video. An id rather than the
+    # text, so rewording a theme restyles every project that uses it. Optional, so
+    # specs without it are unchanged and stay "0.2".
+    theme: Optional[str] = None
 
 
 class Watermark(_Model):

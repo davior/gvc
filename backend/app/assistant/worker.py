@@ -29,8 +29,10 @@ from app.gam.client import GamClient
 from app.generation import service as generation_service
 from app.jobs.runner import JobQueue, readable_error, set_fields
 from app.models.assistant import AssistantSession, AssistantTurn
+from app.models.theme import Theme
 from app.providers import active_provider, build_provider
 from app.providers.base import ProviderError, Reply
+from app.services import themes as theme_service
 from app.spec.model import dump_spec
 from app.spec.validation import parse_spec
 from app.usage import events as usage_events
@@ -118,6 +120,8 @@ def _run(turn_id: str) -> None:
             provider = build_provider(session, user_id)
             row = active_provider(session, user_id)
             sees_images = bool(row and row.supports_images)
+            themes = {t.id: {"name": t.name, "prompt": t.prompt}
+                      for t in theme_service.listed(session, user_id)}
         if provider is None:
             raise ProviderError("No AI provider is set up. Add one in Settings first.")
         attached = material(attachments, sees_images=sees_images)
@@ -125,7 +129,7 @@ def _run(turn_id: str) -> None:
         working = Working(base, gam=gam, max_generations=settings.assistant_max_generations,
                           max_picks=settings.assistant_max_clip_picks,
                           pick_concurrency=settings.assistant_clip_pick_concurrency,
-                          note_media=media_ids(attachments))
+                          note_media=media_ids(attachments), themes=themes)
 
         def generate(data, key, image_prompt, base_ids, outputs):
             with queue.session() as session:
@@ -153,8 +157,17 @@ def _run(turn_id: str) -> None:
             return reply.text
 
         working.ask = ask
+
+        def add_theme(name: str, prompt: str) -> str:
+            with queue.session() as session:
+                row = Theme(id=str(uuid.uuid4()), user_id=user_id, name=name, prompt=prompt)
+                session.add(row)
+                session.commit()
+                return row.id
+
+        working.add_theme = add_theme
         system = [REFERENCE, attached,
-                  context(base, focus=focus, from_scratch=project_id is None)]
+                  context(base, focus=focus, from_scratch=project_id is None, themes=themes)]
         outcome = loop.run(provider, working, system=system, history=history, prompt=prompt,
                            images=images,
                            on_step=on_step, on_reply=on_reply,

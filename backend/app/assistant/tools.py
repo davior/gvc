@@ -33,6 +33,8 @@ from app.providers.base import ProviderError, ToolCall, ToolResult, ToolSpec
 from app.schemas_gam import GamTranscript
 from app.render.estimate import estimate
 from app.services import note_media as note_files
+from app.schemas_themes import MAX_THEME_NAME, MAX_THEME_PROMPT
+from app.services.themes import theme_id_of
 from app.spec.validation import SpecIssue, parse_spec
 
 # A found moment is padded so a cut doesn't clip a word: the editor's `momentTrim`.
@@ -174,6 +176,14 @@ class Working:
     # Picker calls made at once: across the videos of one round, and the windows of a
     # long one. `ask` must be safe to call from several threads.
     pick_concurrency: int = 4
+    # The user's themes by id: {"name", "prompt"}. The only ids `style.theme` may be
+    # set to, since an id the user doesn't own would silently style nothing.
+    themes: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    # Adds a theme to the user's list: (name, prompt) -> its id. Set by the worker; None
+    # where there is no database to write to, and then create_theme says so.
+    add_theme: Optional[Callable[[str, str], str]] = None
+    max_new_themes: int = 2
+    new_themes: int = 0
 
     def __post_init__(self) -> None:
         self.data = copy.deepcopy(self.data)
@@ -262,6 +272,10 @@ class Working:
 
     def commit(self, candidate: Dict[str, Any], summary: str) -> str:
         """Take `candidate` as the new spec if the rules above allow it."""
+        theme = theme_id_of(candidate)
+        if theme != theme_id_of(self.data) and theme is not None and theme not in self.themes:
+            raise ToolFailed(f"There is no theme {theme!r}. Use set_theme with one of the "
+                             "themes listed in the context.")
         _, issues = parse_spec(candidate)
         if issues and self.valid:
             raise ToolFailed("That edit would make the video invalid, so it was not made:\n"
@@ -521,6 +535,16 @@ def replace_spec(w: Working, spec: Dict[str, Any]) -> str:
     # The project owns its id; a draft never changes it.
     if "id" in w.data:
         candidate["id"] = w.data["id"]
+    # A whole draft seldom restates the theme, and leaving it out isn't a decision to
+    # drop it: the theme stays unless the draft names another of the user's. Removing
+    # it is set_theme's job, where it is said on purpose.
+    style = candidate.setdefault("style", {})
+    if isinstance(style, dict):
+        named = style.get("theme")
+        if named is None or (named not in w.themes and named != theme_id_of(w.data)):
+            style.pop("theme", None)
+            if theme_id_of(w.data):
+                style["theme"] = theme_id_of(w.data)
     # Accepted even with issues: a whole draft is the one edit too big to throw away
     # over a typo. The issues come back to be fixed with the other tools.
     _, issues = parse_spec(candidate)
@@ -908,6 +932,62 @@ def set_project(w: Working, changes: Dict[str, Any]) -> str:
     return w.commit(candidate, f"Changed the project's {', '.join(sorted(changes))}")
 
 
+def set_theme(w: Working, theme: Optional[str] = None) -> str:
+    """Choose the video's theme from the user's list, by name or id; none removes it."""
+    if theme is not None and not isinstance(theme, str):
+        raise ToolFailed("theme is a theme's name or id, as text.")
+    candidate = copy.deepcopy(w.data)
+    style = candidate.setdefault("style", {})
+    if theme is None or not theme.strip() or theme.strip().lower() == "none":
+        style.pop("theme", None)
+        return w.commit(candidate, "Removed the theme")
+    wanted = theme.strip()
+    found = wanted if wanted in w.themes else next(
+        (tid for tid, t in w.themes.items() if t["name"].strip().lower() == wanted.lower()),
+        None)
+    if found is None:
+        names = ", ".join(repr(t["name"]) for t in w.themes.values()) or "none; the user " \
+            "hasn't made any (they are made in Settings)"
+        raise ToolFailed(f"No theme {wanted!r}. The themes are: {names}.")
+    style["theme"] = found
+    return w.commit(candidate, f"Set the theme to {w.themes[found]['name']!r}")
+
+
+def create_theme(w: Working, name: str, prompt: str, use: bool = True) -> str:
+    """A new theme in the user's list, made now, and by default the video's theme.
+
+    Made at once rather than on Apply, as generate_image starts at once: a theme is an
+    entry in the user's list, not part of the video, so it has no place in a proposal,
+    and the spec can only name a theme that exists. Discarding the proposal leaves the
+    theme in the list, where the user can delete it; the reply has to say it was made.
+    """
+    if w.add_theme is None:
+        raise ToolFailed("Making themes isn't available in this turn.")
+    if not isinstance(name, str) or not name.strip():
+        raise ToolFailed("Give the theme a short name.")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ToolFailed("Write the theme's text: the look it adds to every prompt.")
+    name, prompt = name.strip(), prompt.strip()
+    if len(name) > MAX_THEME_NAME or len(prompt) > MAX_THEME_PROMPT:
+        raise ToolFailed(f"A theme's name is at most {MAX_THEME_NAME} characters and its "
+                         f"text at most {MAX_THEME_PROMPT}.")
+    taken = next((tid for tid, t in w.themes.items()
+                  if t["name"].strip().lower() == name.lower()), None)
+    if taken is not None:
+        raise ToolFailed(f"There is already a theme called {w.themes[taken]['name']!r}; "
+                         "use set_theme for it, or choose another name.")
+    if w.new_themes >= w.max_new_themes:
+        raise ToolFailed(f"That's the {w.max_new_themes} themes one request may make. Use "
+                         "one of the themes listed with set_theme.")
+    theme_id = w.add_theme(name, prompt)
+    w.new_themes += 1
+    w.themes[theme_id] = {"name": name, "prompt": prompt}
+    made = f"Made the theme {name!r} in the user's list (id {theme_id})."
+    if not use:
+        return made
+    return f"{made} {set_theme(w, theme_id)}"
+
+
 def run_estimate(w: Working) -> str:
     spec, issues = parse_spec(w.data)
     if spec is None:
@@ -1040,6 +1120,20 @@ TOOLS: List[Tuple[ToolSpec, Callable[..., str]]] = [
               "motion, background, cards…), output, voice, chrome, credits.",
               {"type": "object", "properties": {"changes": _OBJ}, "required": ["changes"]}),
      set_project),
+    (ToolSpec("set_theme",
+              "Set the video's theme: one of the user's named looks (listed in the context), "
+              "by name or id, whose style is added to every picture and clip generated for "
+              "the video. Omit theme (or \"none\") to remove it.",
+              {"type": "object", "properties": {"theme": _STR}}), set_theme),
+    (ToolSpec("create_theme",
+              "Add a new theme to the user's list, and (unless use is false) make it this "
+              "video's theme. name: a short name. prompt: the look it adds after every "
+              "picture and clip prompt: style, medium, light, colour palette; never a "
+              "subject. It is saved at once, whatever happens to the proposal. Only when "
+              "the user asks for one, or wants a look none of their themes has.",
+              {"type": "object", "properties": {"name": _STR, "prompt": _STR,
+                                                "use": {"type": "boolean"}},
+               "required": ["name", "prompt"]}), create_theme),
     (ToolSpec("generate_image",
               "Generate a still picture with AI and put it in the video (as a segment's "
               "picture, an image overlay, or just in the registry). It starts at once and "
