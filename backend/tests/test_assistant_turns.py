@@ -14,7 +14,7 @@ from app.models.provider import AIProvider
 from app.models.usage import UsageEvent
 from tests.conftest import TEST_USER_ID
 from tests.fake_provider import ScriptedProvider, call, says
-from tests.fake_siblings import gam_asset, hit
+from tests.fake_siblings import gam_asset, hit, transcript
 
 
 @pytest.fixture
@@ -334,3 +334,38 @@ def test_a_draft_generates_its_pictures_but_never_its_video(
     made = auth_client.post(f"/api/assistant/turns/{turn['id']}/new-project").json()["data"]
     listed = auth_client.get(f"/api/projects/{made['project_id']}/generations").json()["data"]
     assert [g["asset_key"] for g in listed] == ["a_dam"]
+
+
+def test_clips_are_picked_in_a_pass_of_their_own_paid_for_on_the_turn(
+        auth_client, session, provider, library, engine_for_worker):
+    project = project_with(auth_client, VALID)
+    library.transcripts["r"] = transcript(
+        "r", (30.0, 36.0, "We came here in the spring."),
+        (36.5, 47.5, "Back then the river ran clear all year, but now the water is gone."))
+    provider.script += [
+        says("", call("search_assets", query="water", type="video")),
+        says("", call("find_clips", gam_id="r", idea="The river is gone")),
+        # The picking pass: its own conversation, answered from the same script.
+        says('[{"first": 1, "last": 1, "score": 9, "why": "Says it plainly."}]'),
+        says("", call("set_visual", segment_id="s_valley", gam_id="r",
+                      trim={"in": 36.0, "out": 48.0})),
+        says("The valley now cuts to the river interview saying the water is gone."),
+    ]
+    turn = start(auth_client, prompt="Find a better clip for the valley",
+                 project_id=project["id"])
+    worker._run(turn["id"])
+    done = auth_client.get(f"/api/assistant/turns/{turn['id']}").json()["data"]
+    assert done["status"] == "done", done
+
+    picked = provider.results()[1]
+    assert '"trim":{"in":36.0,"out":48.0}' in picked.content and "Says it plainly" in picked.content
+    # The pass was a conversation of its own, the last one started: no tools, no history,
+    # the picker's instructions and the numbered transcript.
+    assert provider.started["tools"] == [] and provider.started["history"] == []
+    assert "You pick clips" in provider.started["system"][0]
+    assert "1 [36.5-47.5] Back then" in provider.started["prompt"]
+    assert any(s["text"] == "Picking clips from River interview" for s in done["steps"])
+    assert done["proposed_spec"]["segments"][1]["visual"]["trim"] == {"in": 36.0, "out": 48.0}
+    # Five model calls, the pass among them, all on the turn's bill.
+    rows = session.query(UsageEvent).all()
+    assert len(rows) == 5 and all(r.turn_id == turn["id"] for r in rows)
