@@ -15,8 +15,8 @@ interface Props {
  * before saving already uses it.
  */
 export default function ThemeSettings({ spec, onChange }: Props) {
-  const themes = useThemes()
   const current = spec.style?.theme ?? ''
+  const themes = useThemes(current)
   const theme = themes?.find((t) => t.id === current)
   // An id with no theme behind it: deleted since, or pasted in from someone else.
   // The server ignores it, and so does this, but it says so rather than showing "None".

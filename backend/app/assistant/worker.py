@@ -29,6 +29,7 @@ from app.gam.client import GamClient
 from app.generation import service as generation_service
 from app.jobs.runner import JobQueue, readable_error, set_fields
 from app.models.assistant import AssistantSession, AssistantTurn
+from app.models.theme import Theme
 from app.providers import active_provider, build_provider
 from app.providers.base import ProviderError, Reply
 from app.services import themes as theme_service
@@ -156,6 +157,15 @@ def _run(turn_id: str) -> None:
             return reply.text
 
         working.ask = ask
+
+        def add_theme(name: str, prompt: str) -> str:
+            with queue.session() as session:
+                row = Theme(id=str(uuid.uuid4()), user_id=user_id, name=name, prompt=prompt)
+                session.add(row)
+                session.commit()
+                return row.id
+
+        working.add_theme = add_theme
         system = [REFERENCE, attached,
                   context(base, focus=focus, from_scratch=project_id is None, themes=themes)]
         outcome = loop.run(provider, working, system=system, history=history, prompt=prompt,

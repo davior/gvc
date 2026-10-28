@@ -71,6 +71,17 @@ describe('ThemeSettings', () => {
     expect(screen.getByText(/Generating ignores it/)).toBeInTheDocument()
   })
 
+  it('reads the list again for a theme it has not seen, such as one the assistant made', async () => {
+    const list = vi
+      .spyOn(themesApi, 'list')
+      .mockResolvedValueOnce([CLAY])
+      .mockResolvedValueOnce([CLAY, theme({ id: 't-new', name: 'Ink wash' })])
+    render(<Harness start={{ title: 'T', style: { theme: 't-new' }, segments: [] }} />)
+    expect(await screen.findByRole('option', { name: 'Ink wash' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Theme for this video')).toHaveValue('t-new')
+    expect(list).toHaveBeenCalledTimes(2)
+  })
+
   it('points to Settings when there are none', async () => {
     vi.spyOn(themesApi, 'list').mockResolvedValue([])
     render(<Harness start={{ title: 'T', segments: [] }} />)

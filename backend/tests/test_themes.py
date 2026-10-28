@@ -192,8 +192,8 @@ def test_a_prompt_too_long_with_its_theme_is_refused_before_gam(auth_client, sib
 THEMES = {"t-noir": NOIR, "t-clay": CLAY}
 
 
-def tool(w, name, **arguments):
-    return T.execute(w, ToolCall(id="x", name=name, arguments=arguments))
+def tool(w, tool_name, **arguments):
+    return T.execute(w, ToolCall(id="x", name=tool_name, arguments=arguments))
 
 
 def test_set_theme_takes_a_name_or_id_and_refuses_one_that_isnt_listed():
@@ -226,6 +226,46 @@ def test_a_whole_draft_keeps_the_theme_unless_it_names_another():
     assert w.data["style"]["theme"] == "t-noir"
     tool(w, "replace_spec", spec={"title": "Clay", "style": {"theme": "t-clay"}})
     assert w.data["style"]["theme"] == "t-clay"
+
+
+def made_themes(w):
+    made = []
+
+    def add(name, prompt):
+        made.append((name, prompt))
+        return f"t-new{len(made)}"
+
+    w.add_theme = add
+    return made
+
+
+def test_create_theme_makes_one_and_uses_it_unless_told_not_to():
+    w = Working({"title": "T", "style": {"theme": "t-noir"}}, themes=dict(THEMES))
+    made = made_themes(w)
+    result = tool(w, "create_theme", name=" Ink wash ", prompt=" Sumi-e ink, rice paper ")
+    assert not result.is_error and "Made the theme" in result.content
+    assert made == [("Ink wash", "Sumi-e ink, rice paper")]
+    assert w.data["style"]["theme"] == "t-new1"
+    assert w.changes == ["Set the theme to 'Ink wash'"]
+    # Known from then on, by name too.
+    assert not tool(w, "set_theme", theme="noir").is_error
+    assert not tool(w, "set_theme", theme="ink wash").is_error
+
+    tool(w, "create_theme", name="Pastel", prompt="Soft pastels", use=False)
+    assert w.data["style"]["theme"] == "t-new1" and len(made) == 2
+
+
+def test_create_theme_refuses_a_taken_name_an_empty_look_and_too_many():
+    w = Working({"title": "T"}, themes=dict(THEMES), max_new_themes=1)
+    made = made_themes(w)
+    taken = tool(w, "create_theme", name="noir", prompt="Something else")
+    assert taken.is_error and "set_theme" in taken.content
+    assert tool(w, "create_theme", name="Bare", prompt="  ").is_error
+    assert tool(w, "create_theme", name="Long", prompt="x" * 1501).is_error
+    assert not tool(w, "create_theme", name="One", prompt="Look one").is_error
+    assert tool(w, "create_theme", name="Two", prompt="Look two").is_error
+    assert len(made) == 1
+    assert tool(Working({"title": "T"}), "create_theme", name="X", prompt="Y").is_error
 
 
 def test_the_context_lists_the_themes_and_says_which_is_current():
@@ -270,6 +310,27 @@ def test_a_drafted_video_starts_from_the_default_and_keeps_the_assistants_choice
     made = auth_client.post(f"/api/assistant/turns/{turn['id']}/new-project").json()["data"]
     project = auth_client.get(f"/api/projects/{made['project_id']}").json()["data"]
     assert project["spec"]["style"]["theme"] == clay["id"]
+
+
+def test_a_theme_the_assistant_makes_is_in_the_list_even_if_the_draft_is_discarded(
+        auth_client, provider):
+    provider.script += [
+        # Built by hand: `call` takes the tool's name as `name`, as this tool's argument is.
+        says("", ToolCall(id="c-theme", name="create_theme",
+                          arguments={"name": "Ink wash", "prompt": "Sumi-e ink on rice paper"})),
+        says("I made an Ink wash theme and used it."),
+    ]
+    turn = auth_client.post("/api/assistant/turns", json={"prompt": "Ink-wash style, please"}
+                            ).json()["data"]
+    worker._run(turn["id"])
+    [made] = auth_client.get("/api/themes").json()["data"]
+    assert (made["name"], made["prompt"], made["is_default"]) == (
+        "Ink wash", "Sumi-e ink on rice paper", False)
+    done = auth_client.get(f"/api/assistant/turns/{turn['id']}").json()["data"]
+    assert done["proposed_spec"]["style"]["theme"] == made["id"]
+
+    auth_client.post(f"/api/assistant/turns/{turn['id']}/discarded")
+    assert len(auth_client.get("/api/themes").json()["data"]) == 1
 
 
 def test_a_theme_the_assistant_removed_is_not_put_back_by_the_default(auth_client, provider):

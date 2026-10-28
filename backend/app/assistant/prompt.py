@@ -158,6 +158,11 @@ look to the theme; don't restate it or contradict it. Change it only with `set_t
 new video, pick the listed theme that best fits the request, or the one the user names; \
 the starter already has their default, so keep that when nothing fits better. On an \
 existing video, change the theme only when asked.
+`create_theme` adds a theme to the user's list and uses it. Make one only when the user \
+asks for a new theme, or wants a look none of theirs has; otherwise use theirs. Its text \
+is a look that would suit any video (style, medium, light, palette), never this video's \
+subject, and it is saved at once even if the proposal is discarded, so say in your reply \
+that you made it.
 
 ## Pacing
 Narration reads at about 15 characters a second. A 3-minute video is about 2,500 characters \

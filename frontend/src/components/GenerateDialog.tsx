@@ -62,7 +62,7 @@ export default function GenerateDialog({ assetKey, onClose }: Props) {
 
   const ref = draft?.assets?.[assetKey] as GenerateRef | undefined
   // Shown so the prompt can be written for the subject alone; the server adds it.
-  const theme = useThemes()?.find((t) => t.id === draft?.style?.theme)
+  const theme = useThemes(draft?.style?.theme)?.find((t) => t.id === draft?.style?.theme)
   const isVideo = ref?.type === 'video'
   const pictures = useMemo(() => {
     const inVideo = draft ? picturesIn(draft) : []

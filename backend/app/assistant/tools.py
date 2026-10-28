@@ -33,6 +33,7 @@ from app.providers.base import ProviderError, ToolCall, ToolResult, ToolSpec
 from app.schemas_gam import GamTranscript
 from app.render.estimate import estimate
 from app.services import note_media as note_files
+from app.schemas_themes import MAX_THEME_NAME, MAX_THEME_PROMPT
 from app.services.themes import theme_id_of
 from app.spec.validation import SpecIssue, parse_spec
 
@@ -178,6 +179,11 @@ class Working:
     # The user's themes by id: {"name", "prompt"}. The only ids `style.theme` may be
     # set to, since an id the user doesn't own would silently style nothing.
     themes: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    # Adds a theme to the user's list: (name, prompt) -> its id. Set by the worker; None
+    # where there is no database to write to, and then create_theme says so.
+    add_theme: Optional[Callable[[str, str], str]] = None
+    max_new_themes: int = 2
+    new_themes: int = 0
 
     def __post_init__(self) -> None:
         self.data = copy.deepcopy(self.data)
@@ -947,6 +953,41 @@ def set_theme(w: Working, theme: Optional[str] = None) -> str:
     return w.commit(candidate, f"Set the theme to {w.themes[found]['name']!r}")
 
 
+def create_theme(w: Working, name: str, prompt: str, use: bool = True) -> str:
+    """A new theme in the user's list, made now, and by default the video's theme.
+
+    Made at once rather than on Apply, as generate_image starts at once: a theme is an
+    entry in the user's list, not part of the video, so it has no place in a proposal,
+    and the spec can only name a theme that exists. Discarding the proposal leaves the
+    theme in the list, where the user can delete it; the reply has to say it was made.
+    """
+    if w.add_theme is None:
+        raise ToolFailed("Making themes isn't available in this turn.")
+    if not isinstance(name, str) or not name.strip():
+        raise ToolFailed("Give the theme a short name.")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ToolFailed("Write the theme's text: the look it adds to every prompt.")
+    name, prompt = name.strip(), prompt.strip()
+    if len(name) > MAX_THEME_NAME or len(prompt) > MAX_THEME_PROMPT:
+        raise ToolFailed(f"A theme's name is at most {MAX_THEME_NAME} characters and its "
+                         f"text at most {MAX_THEME_PROMPT}.")
+    taken = next((tid for tid, t in w.themes.items()
+                  if t["name"].strip().lower() == name.lower()), None)
+    if taken is not None:
+        raise ToolFailed(f"There is already a theme called {w.themes[taken]['name']!r}; "
+                         "use set_theme for it, or choose another name.")
+    if w.new_themes >= w.max_new_themes:
+        raise ToolFailed(f"That's the {w.max_new_themes} themes one request may make. Use "
+                         "one of the themes listed with set_theme.")
+    theme_id = w.add_theme(name, prompt)
+    w.new_themes += 1
+    w.themes[theme_id] = {"name": name, "prompt": prompt}
+    made = f"Made the theme {name!r} in the user's list (id {theme_id})."
+    if not use:
+        return made
+    return f"{made} {set_theme(w, theme_id)}"
+
+
 def run_estimate(w: Working) -> str:
     spec, issues = parse_spec(w.data)
     if spec is None:
@@ -1084,6 +1125,15 @@ TOOLS: List[Tuple[ToolSpec, Callable[..., str]]] = [
               "by name or id, whose style is added to every picture and clip generated for "
               "the video. Omit theme (or \"none\") to remove it.",
               {"type": "object", "properties": {"theme": _STR}}), set_theme),
+    (ToolSpec("create_theme",
+              "Add a new theme to the user's list, and (unless use is false) make it this "
+              "video's theme. name: a short name. prompt: the look it adds after every "
+              "picture and clip prompt: style, medium, light, colour palette; never a "
+              "subject. It is saved at once, whatever happens to the proposal. Only when "
+              "the user asks for one, or wants a look none of their themes has.",
+              {"type": "object", "properties": {"name": _STR, "prompt": _STR,
+                                                "use": {"type": "boolean"}},
+               "required": ["name", "prompt"]}), create_theme),
     (ToolSpec("generate_image",
               "Generate a still picture with AI and put it in the video (as a segment's "
               "picture, an image overlay, or just in the registry). It starts at once and "

@@ -106,8 +106,8 @@ export default function ThemePanel() {
         A theme is a look: realistic, 3D, a colour scheme. Its text is added to every
         picture and clip prompt generated for a project that uses it, so a video&apos;s
         generated material matches. Choose a project&apos;s theme in its Settings tab; new
-        projects start with the default, and the assistant picks one for a video it
-        drafts.
+        projects start with the default. The assistant picks one for a video it drafts,
+        and makes a new one here when you ask it to or want a look none of these has.
       </p>
 
       {error && (

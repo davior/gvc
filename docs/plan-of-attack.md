@@ -261,6 +261,11 @@ assistant's `generate_image` both end up, so neither has to remember to.
   list, starts a draft from the default, and changes it with `set_theme` to the one the
   brief or the user asks for; a whole-draft `replace_spec` keeps the theme unless it
   names another. A draft whose theme the assistant removed stays without one.
+- **The assistant can make themes** (`create_theme`), when asked or when the brief wants
+  a look none of the user's has, at most two a turn. A theme is made at once, as
+  `generate_image` starts at once, not on Apply: it is an entry in the user's list,
+  not part of the video, and a spec can only name a theme that exists. Discarding the
+  proposal leaves it in the list, so the assistant says in its reply that it made one.
 
 ## Schema changes this goal needs
 
