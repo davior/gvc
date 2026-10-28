@@ -122,6 +122,7 @@ def _run(turn_id: str) -> None:
         attached = material(attachments, sees_images=sees_images)
         images = images_of(chat_id, attachments) if sees_images else []
         working = Working(base, gam=gam, max_generations=settings.assistant_max_generations,
+                          max_picks=settings.assistant_max_clip_picks,
                           note_media=media_ids(attachments))
 
         def generate(data, key, image_prompt, base_ids, outputs):
@@ -135,6 +136,16 @@ def _run(turn_id: str) -> None:
                 return row.model_label, row.estimate
 
         working.generate = generate
+
+        def ask(pick_system: str, pick_prompt: str) -> str:
+            # The clip-picking pass: the turn's own provider, a fresh conversation with no
+            # tools, its spend on the turn like any other call.
+            reply = provider.conversation(system=[pick_system], tools=[], history=[],
+                                          prompt=pick_prompt).ask()
+            on_reply(reply)
+            return reply.text
+
+        working.ask = ask
         system = [REFERENCE, attached,
                   context(base, focus=focus, from_scratch=project_id is None)]
         outcome = loop.run(provider, working, system=system, history=history, prompt=prompt,

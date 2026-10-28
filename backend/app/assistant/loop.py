@@ -76,10 +76,12 @@ def run(provider: ChatProvider, working: Working, *, system: Sequence[str],
                 raise Stopped()
             if call.name == "search_assets":
                 on_step("search", f"Searching the library: {call.arguments.get('query', '')!r}")
-            elif call.name == "read_transcript":
+            elif call.name in ("read_transcript", "find_clips"):
                 gam_id = call.arguments.get("gam_id", "")
                 seen = working.hits.get(gam_id)
-                on_step("search", f"Reading the transcript of {seen.name if seen else gam_id}")
+                doing = "Reading the transcript of" if call.name == "read_transcript" \
+                    else "Picking clips from"
+                on_step("search", f"{doing} {seen.name if seen else gam_id}")
             result = T.execute(working, call)
             results.append(result)
             if call.name in T.READS:

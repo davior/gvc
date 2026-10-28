@@ -1,7 +1,10 @@
 """The assistant's operations on a working copy of a spec: pure, with GAM faked."""
 
+import json
+
 import pytest
 
+from app.assistant import clips
 from app.assistant import tools as T
 from app.assistant.tools import Working
 from app.gam.client import GamClient
@@ -354,3 +357,85 @@ def test_only_the_ids_of_attached_notes_can_be_imported(siblings):
                            "caption": "", "after": ""}}
     result = run(w, "import_note_media", media_ids=["/etc/passwd"])
     assert result.is_error and "No such note file" in result.content
+
+
+def picker(*answers):
+    """A clip-picking pass that answers from a list, recording what it was asked."""
+    asked = []
+
+    def ask(system, prompt):
+        asked.append(prompt)
+        return answers[len(asked) - 1]
+    ask.asked = asked
+    return ask
+
+
+def test_find_clips_reads_the_whole_video_and_returns_ready_cuts(gam, siblings):
+    river_transcript(siblings)
+    w = Working(spec(), gam=gam)
+    run(w, "search_assets", query="water")
+    w.ask = picker('Here you go:\n```json\n[{"first": 1, "last": 2, "score": 9, '
+                   '"why": "Says the river dried up and that nobody planned for it."},'
+                   '{"first": 0, "last": 0, "score": 3, "why": "weak"}]\n```')
+    found = run(w, "find_clips", gam_id="r", idea="The river ran dry without warning")
+    assert not found.is_error, found.content
+    result = json.loads(found.content)
+    # Lines 1-2 run 36.5-52.0; padded into the gap before, the video's end after. The
+    # weak passage is dropped.
+    assert [c["trim"] for c in result["clips"]] == [{"in": 36.0, "out": 52.5}]
+    assert result["clips"][0]["says"].startswith("Back then the river ran clear")
+    # The picker saw every line, numbered, and the idea.
+    prompt = w.ask.asked[0]
+    assert "The idea: The river ran dry without warning" in prompt
+    assert "0 [30.0-36.0] We came here" in prompt and "2 [48.0-52.0] Nobody" in prompt
+
+    # Asked again, it isn't paid for again.
+    assert run(w, "find_clips", gam_id="r", idea="the river ran dry without warning ").content \
+        == found.content
+    assert len(w.ask.asked) == 1 and w.picks == 1
+
+
+def test_find_clips_never_cuts_what_the_picker_did_not_read(gam, siblings):
+    river_transcript(siblings)
+    w = Working(spec(), gam=gam)
+    w.ask = picker('[{"first": 2, "last": 9, "score": 10}, {"first": "x"}, '
+                   '{"first": 2, "last": 1, "score": 8}]')
+    assert "Nothing in this video" in run(w, "find_clips", gam_id="r", idea="water").content
+
+
+def test_find_clips_reads_a_long_video_in_windows_and_keeps_the_best(gam, siblings, monkeypatch):
+    river_transcript(siblings)
+    monkeypatch.setattr(clips, "MAX_PICK_CHARS", 90)
+    monkeypatch.setattr(clips, "WINDOW_OVERLAP", 1)
+    w = Working(spec(), gam=gam)
+    spans = clips.windows(T.sentences(w.transcript("r")))
+    assert spans[0][0] == 0 and spans[-1][1] == 3 and len(spans) > 1
+    answers = ['[{"first": %d, "last": %d, "score": %d}]' % (s, s, 5 + i)
+               for i, (s, _) in enumerate(spans)]
+    w.ask = picker(*answers)
+    result = json.loads(run(w, "find_clips", gam_id="r", idea="water", count=1).content)
+    assert len(result["clips"]) == 1 and result["clips"][0]["score"] == 5 + len(spans) - 1
+    assert w.picks == len(spans)
+    assert "lines" in w.ask.asked[0] and "read separately" in w.ask.asked[0]
+
+
+def test_find_clips_stops_at_its_budget_and_says_what_to_do_instead(gam, siblings):
+    river_transcript(siblings)
+    w = Working(spec(), gam=gam, max_picks=0)
+    w.ask = picker()
+    refused = run(w, "find_clips", gam_id="r", idea="water")
+    assert refused.is_error and "read_transcript" in refused.content
+
+
+def test_find_clips_without_a_picker_or_a_transcript_says_so(gam, siblings):
+    w = Working(spec(), gam=gam)
+    assert run(w, "find_clips", gam_id="r", idea="water").is_error
+    w.ask = picker()
+    assert "no transcript" in run(w, "find_clips", gam_id="r", idea="water").content
+    assert run(w, "find_clips", gam_id="r", idea="water", count="a few").is_error
+
+
+def test_overlapping_passages_are_kept_once_in_the_order_said():
+    found = [clips.Clip(4, 6, 7, ""), clips.Clip(5, 8, 9, ""), clips.Clip(0, 1, 6, ""),
+             clips.Clip(10, 10, 8, "")]
+    assert [(c.first, c.last) for c in clips.best(found, 3)] == [(0, 1), (5, 8), (10, 10)]

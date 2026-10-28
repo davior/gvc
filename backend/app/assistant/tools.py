@@ -26,8 +26,9 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from app.assistant import clips
 from app.gam.client import GamClient, GamError
-from app.providers.base import ToolCall, ToolResult, ToolSpec
+from app.providers.base import ProviderError, ToolCall, ToolResult, ToolSpec
 from app.schemas_gam import GamTranscript
 from app.render.estimate import estimate
 from app.services import note_media as note_files
@@ -160,6 +161,15 @@ class Working:
     # Transcripts fetched this turn by gam_id, so reading one and then cutting from it
     # asks GAM once.
     transcripts: Dict[str, GamTranscript] = field(default_factory=dict)
+    # One model call with no tools: (system, prompt) -> the reply's text, its spend
+    # recorded against the turn. Set by the worker; None where there is no provider,
+    # and then find_clips says to read the transcript instead.
+    ask: Optional[Callable[[str, str], str]] = None
+    # Calls the clip-picking pass may make in one turn (a long video takes several),
+    # and what it found, so asking the same thing twice pays once.
+    max_picks: int = 16
+    picks: int = 0
+    picked: Dict[Tuple[str, str, int], str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.data = copy.deepcopy(self.data)
@@ -381,6 +391,61 @@ def read_transcript(w: Working, gam_id: str, start: Optional[float] = None,
     return head + "\n" + "\n".join(out) + tail
 
 
+def find_clips(w: Working, gam_id: str, idea: str, count: int = 3) -> str:
+    if w.ask is None:
+        raise ToolFailed("Clip picking isn't available in this turn; use read_transcript.")
+    if not (idea or "").strip():
+        raise ToolFailed("Say the idea the clip has to put across.")
+    try:
+        count = max(1, min(5, int(count)))
+    except (TypeError, ValueError):
+        raise ToolFailed("count must be a whole number from 1 to 5.")
+    key = (gam_id, idea.strip().lower(), count)
+    if key in w.picked:
+        return w.picked[key]
+    lines = sentences(w.transcript(gam_id))
+    if not lines:
+        return ("This asset has no transcript: it hasn't been transcribed in the library, or "
+                "nothing is said in it.")
+    spans = clips.windows(lines)
+    left = w.max_picks - w.picks
+    if len(spans) > left:
+        raise ToolFailed(f"Clip picking has {left} of its {w.max_picks} calls left this turn "
+                         f"and this video needs {len(spans)}. Use read_transcript around a "
+                         "search hit's said_at instead.")
+    seen = w.hits.get(gam_id)
+    found: List[clips.Clip] = []
+    for span in spans:
+        w.picks += 1
+        try:
+            text = w.ask(clips.SYSTEM, clips.prompt_for(idea, count, lines, span,
+                                                        seen.name if seen else None))
+        except ProviderError as exc:
+            raise ToolFailed(f"The clip-picking pass failed ({exc}). Use read_transcript "
+                             "and choose the passage yourself.")
+        found += clips.parse(text, lines, span)
+    chosen = clips.best(found, count)
+    if not chosen:
+        result = ("Nothing in this video makes that point well. Try another video, or "
+                  "describe the idea differently.")
+    else:
+        duration = seen.duration if seen else None
+        rows = []
+        for clip in chosen:
+            first, last = lines[clip.first], lines[clip.last]
+            said = " ".join(lines[i].text for i in range(clip.first, clip.last + 1))
+            rows.append({
+                "trim": _padded(first.start, last.end, lines, clip.first, clip.last, duration),
+                "seconds": round(last.end - first.start, 1),
+                "score": clip.score,
+                "why": clip.why,
+                "says": said if len(said) <= 400 else said[:400] + "…",
+            })
+        result = _compact({"gam_id": gam_id, "idea": idea.strip(), "clips": rows})
+    w.picked[key] = result
+    return result
+
+
 def replace_spec(w: Working, spec: Dict[str, Any]) -> str:
     if not isinstance(spec, dict):
         raise ToolFailed("spec must be a VideoSpec object.")
@@ -523,30 +588,35 @@ def remove_segment(w: Working, segment_id: str) -> str:
     return result
 
 
+def _padded(a: float, b: float, lines: List[Sentence], first: Optional[int],
+            last: Optional[int], duration: Optional[float]) -> Optional[Dict[str, float]]:
+    """[a, b] as a trim, padded so a cut doesn't clip a word, but never into the
+    sentences either side of lines first..last."""
+    floor = lines[first - 1].end if first else 0.0
+    ceiling = lines[last + 1].start if last is not None and last + 1 < len(lines) else None
+    a = max(floor, a - MOMENT_PAD)
+    b = b + MOMENT_PAD if ceiling is None else min(b + MOMENT_PAD, max(b, ceiling))
+    if duration:
+        b = min(b, duration)
+    return {"in": round(a, 1), "out": round(b, 1)} if b > a else None
+
+
 def _moment_trim(hit: Hit, lines: List[Sentence] = ()) -> Optional[Dict[str, float]]:
     """The found moment as a cut, grown to the whole sentences it falls in when the
-    transcript is to hand, and padded without reaching into the next sentence."""
+    transcript is to hand."""
     if hit.start is None:
         return None
     a = hit.start
     b = hit.end if hit.end is not None else hit.start + DEFAULT_MOMENT_SECONDS
-    floor, ceiling = 0.0, None
     touching = [i for i, s in enumerate(lines) if s.end > a and s.start < b]
+    first = last = None
     if touching:
         first, last = touching[0], touching[-1]
         if a - lines[first].start <= MAX_SENTENCE_STRETCH:
             a = min(a, lines[first].start)
         if lines[last].end - b <= MAX_SENTENCE_STRETCH:
             b = max(b, lines[last].end)
-        if first > 0:
-            floor = lines[first - 1].end
-        if last + 1 < len(lines):
-            ceiling = lines[last + 1].start
-    a = max(floor, a - MOMENT_PAD)
-    b = b + MOMENT_PAD if ceiling is None else min(b + MOMENT_PAD, max(b, ceiling))
-    if hit.duration:
-        b = min(b, hit.duration)
-    return {"in": round(a, 1), "out": round(b, 1)} if b > a else None
+    return _padded(a, b, lines, first, last, hit.duration)
 
 
 def set_visual(w: Working, segment_id: str, gam_id: Optional[str] = None,
@@ -809,6 +879,17 @@ TOOLS: List[Tuple[ToolSpec, Callable[..., str]]] = [
               "transcript comes in pages and says where to carry on.",
               {"type": "object", "properties": {"gam_id": _STR, "start": _NUM, "end": _NUM},
                "required": ["gam_id"]}), read_transcript),
+    (ToolSpec("find_clips",
+              "Read a whole library video's transcript, in a separate pass, and return the "
+              "passages that best put across one idea, best scored, each with the trim to "
+              "pass to set_visual, what is said and why it fits. Use it on each candidate "
+              "video from search_assets before choosing a clip: it sees all of the video, "
+              "where a search shows one moment. idea: what the scene needs said, in a "
+              "sentence. count: passages wanted (1-5, default 3).",
+              {"type": "object", "properties": {
+                  "gam_id": _STR, "idea": _STR,
+                  "count": {"type": "integer", "minimum": 1, "maximum": 5}},
+               "required": ["gam_id", "idea"]}), find_clips),
     (ToolSpec("get_asset", "Details of one library asset by gam_id.",
               {"type": "object", "properties": {"gam_id": _STR}, "required": ["gam_id"]}),
      get_asset),
@@ -912,7 +993,8 @@ SPECS = [spec for spec, _ in TOOLS]
 _HANDLERS = {spec.name: handler for spec, handler in TOOLS}
 
 # Read-only tools, which neither change the video nor count as an edit in the steps.
-READS = {"get_spec", "search_assets", "read_transcript", "get_asset", "estimate"}
+READS = {"get_spec", "search_assets", "read_transcript", "find_clips", "get_asset",
+         "estimate"}
 
 
 def execute(w: Working, call: ToolCall) -> ToolResult:

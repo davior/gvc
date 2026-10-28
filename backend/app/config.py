@@ -98,6 +98,11 @@ class Settings(BaseSettings):
     # Pictures one request may generate on its own (each is a paid call to fal.ai through
     # GAM). Past it the assistant leaves placeholders for the user to generate.
     assistant_max_generations: int = 6
+    # Calls the clip-picking pass may make in one request. Each reads up to about 15k
+    # tokens of transcript, once (an hour of speech is one or two), so this is roughly
+    # how many candidate videos a request can weigh before it falls back to reading
+    # transcripts itself.
+    assistant_max_clip_picks: int = 16
     # Material attached to a conversation (files, notes, web pages), as text. Each turn
     # reads all of it on every round, so the limits are about cost as much as context
     # length: 150k characters is roughly 40k tokens, cached after the first round.

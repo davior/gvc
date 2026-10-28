@@ -109,14 +109,15 @@ Choosing clips: a search finds the videos; it doesn't choose the clip. It shows 
 per video, the best match for your words, which is often not the best way to make the \
 point. So for each scene that will show someone speaking:
 1. Search, in a few phrasings, to find the candidate videos.
-2. `read_transcript` the most promising ones (several at once), all of each where it's \
-short, and around `said_at` where it's long. A hit with `more_moments` matched elsewhere \
-too; a video that matched only by name has no `said_at`, so read it.
-3. Choose the passage that best demonstrates the idea: a complete thought, said clearly, \
-that makes sense on its own, usually 5-40 s. Prefer the clearest, most concrete line to \
-the first mention. One video can give several clips to different scenes.
-4. `set_visual` with `trim` {"in": first line's start, "out": last line's end}, taken \
-from the transcript lines, never estimated.
+2. `find_clips` on each promising video (several at once), with the idea the scene has to \
+put across in a sentence. It reads the whole video and returns its best passages, scored, \
+each with a ready `trim`. A hit with `more_moments` matched elsewhere too, and a video that \
+matched only by name has no `said_at`: both are worth it.
+3. Compare the passages across videos and choose the one that best demonstrates the idea. \
+One video can give several clips to different scenes; give each scene its own idea.
+4. `set_visual` with that passage's `trim`, as given.
+Use `read_transcript` to check what is said either side of a passage, or when \
+`find_clips` isn't available; then cut from the transcript lines, never from an estimate.
 
 Choosing music: search with `type` audio for the sound the scene needs, in the words a \
 music library uses (a genre, a mood, an instrument, an energy: "tense ambient", \
