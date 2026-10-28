@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import uuid
 from typing import Dict, List, Optional, Tuple
 
@@ -123,6 +124,7 @@ def _run(turn_id: str) -> None:
         images = images_of(chat_id, attachments) if sees_images else []
         working = Working(base, gam=gam, max_generations=settings.assistant_max_generations,
                           max_picks=settings.assistant_max_clip_picks,
+                          pick_concurrency=settings.assistant_clip_pick_concurrency,
                           note_media=media_ids(attachments))
 
         def generate(data, key, image_prompt, base_ids, outputs):
@@ -137,12 +139,17 @@ def _run(turn_id: str) -> None:
 
         working.generate = generate
 
+        recording = threading.Lock()
+
         def ask(pick_system: str, pick_prompt: str) -> str:
             # The clip-picking pass: the turn's own provider, a fresh conversation with no
-            # tools, its spend on the turn like any other call.
+            # tools, its spend on the turn like any other call. Called from several
+            # threads at once, so the spend is recorded one call at a time: the turn's
+            # running total is read, added to and written back.
             reply = provider.conversation(system=[pick_system], tools=[], history=[],
                                           prompt=pick_prompt).ask()
-            on_reply(reply)
+            with recording:
+                on_reply(reply)
             return reply.text
 
         working.ask = ask

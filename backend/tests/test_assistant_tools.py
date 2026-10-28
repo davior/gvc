@@ -1,14 +1,16 @@
 """The assistant's operations on a working copy of a spec: pure, with GAM faked."""
 
 import json
+import threading
 
 import pytest
 
-from app.assistant import clips
+from app.assistant import clips, loop
 from app.assistant import tools as T
 from app.assistant.tools import Working
 from app.gam.client import GamClient
-from app.providers.base import ToolCall
+from app.providers.base import ProviderError, ToolCall
+from tests.fake_provider import ScriptedProvider, call, says
 from tests.fake_siblings import gam_asset, hit, transcript
 
 
@@ -360,12 +362,16 @@ def test_only_the_ids_of_attached_notes_can_be_imported(siblings):
 
 
 def picker(*answers):
-    """A clip-picking pass that answers from a list, recording what it was asked."""
+    """A clip-picking pass, recording what it was asked. Answers from a list in order, or
+    from a function of the prompt where calls run at once and their order isn't fixed."""
     asked = []
+    lock = threading.Lock()
 
     def ask(system, prompt):
-        asked.append(prompt)
-        return answers[len(asked) - 1]
+        with lock:
+            asked.append(prompt)
+            n = len(asked)
+        return answers[0](prompt) if callable(answers[0]) else answers[n - 1]
     ask.asked = asked
     return ask
 
@@ -410,9 +416,11 @@ def test_find_clips_reads_a_long_video_in_windows_and_keeps_the_best(gam, siblin
     w = Working(spec(), gam=gam)
     spans = clips.windows(T.sentences(w.transcript("r")))
     assert spans[0][0] == 0 and spans[-1][1] == 3 and len(spans) > 1
-    answers = ['[{"first": %d, "last": %d, "score": %d}]' % (s, s, 5 + i)
-               for i, (s, _) in enumerate(spans)]
-    w.ask = picker(*answers)
+    def answer(prompt):
+        # Each window offers its own first line, scored by how late the window comes.
+        i = next(n for n, (start, _) in enumerate(spans) if f"\n{start} [" in prompt)
+        return '[{"first": %d, "last": %d, "score": %d}]' % (spans[i][0], spans[i][0], 5 + i)
+    w.ask = picker(answer)
     result = json.loads(run(w, "find_clips", gam_id="r", idea="water", count=1).content)
     assert len(result["clips"]) == 1 and result["clips"][0]["score"] == 5 + len(spans) - 1
     assert w.picks == len(spans)
@@ -439,3 +447,95 @@ def test_overlapping_passages_are_kept_once_in_the_order_said():
     found = [clips.Clip(4, 6, 7, ""), clips.Clip(5, 8, 9, ""), clips.Clip(0, 1, 6, ""),
              clips.Clip(10, 10, 8, "")]
     assert [(c.first, c.last) for c in clips.best(found, 3)] == [(0, 1), (5, 8), (10, 10)]
+
+
+def two_videos(siblings):
+    river_transcript(siblings)
+    siblings.assets["d"] = gam_asset("d", "Dam engineer", "video", duration_seconds=300.0)
+    siblings.transcripts["d"] = transcript(
+        "d", (10.0, 16.0, "We built the dam in nineteen eighty."),
+        (16.5, 24.0, "Nobody downstream was asked."))
+
+
+def clip_call(gam_id, idea="water"):
+    return ToolCall(id=f"pick-{gam_id}", name="find_clips",
+                    arguments={"gam_id": gam_id, "idea": idea})
+
+
+def test_the_picker_calls_of_one_round_run_at_once(gam, siblings):
+    two_videos(siblings)
+    w = Working(spec(), gam=gam)
+    # Each call waits for the other: made one after another, the first would wait
+    # forever (here, until the barrier gives up and the test fails).
+    both = threading.Barrier(2, timeout=5)
+
+    def ask(system, prompt):
+        both.wait()
+        return '[{"first": 1, "last": 1, "score": 8}]'
+    w.ask = ask
+    jobs = [T.plan(w, clip_call("r")), T.plan(w, clip_call("d"))]
+    assert all(isinstance(job, T.ClipJob) for job in jobs) and w.picks == 2
+    answers = T.finish_clip_jobs(w, jobs)
+    assert [json.loads(content)["gam_id"] for content, _ in answers] == ["r", "d"]
+    assert "Back then" in answers[0][0] and "Nobody downstream" in answers[1][0]
+
+
+def test_no_more_picker_calls_run_at_once_than_allowed(gam, siblings, monkeypatch):
+    two_videos(siblings)
+    monkeypatch.setattr(clips, "MAX_PICK_CHARS", 60)
+    w = Working(spec(), gam=gam, pick_concurrency=2)
+    running, most, lock = [0], [0], threading.Lock()
+
+    def ask(system, prompt):
+        with lock:
+            running[0] += 1
+            most[0] = max(most[0], running[0])
+        threading.Event().wait(0.05)
+        with lock:
+            running[0] -= 1
+        return "[]"
+    w.ask = ask
+    jobs = [T.plan(w, clip_call("r")), T.plan(w, clip_call("d"))]
+    assert sum(len(job.prompts) for job in jobs) > 2
+    T.finish_clip_jobs(w, jobs)
+    assert most[0] == 2
+
+
+def test_one_videos_failed_pick_leaves_the_others_standing(gam, siblings):
+    two_videos(siblings)
+    w = Working(spec(), gam=gam)
+
+    def ask(system, prompt):
+        if "Dam engineer" in prompt:
+            raise ProviderError("Claude: overloaded")
+        return '[{"first": 1, "last": 1, "score": 8}]'
+    w.ask = ask
+    run(w, "search_assets", query="water")
+    siblings.hits = [hit(siblings.assets["d"], start=10.0, end=16.0)]
+    run(w, "search_assets", query="dam")
+    river, dam = T.finish_clip_jobs(w, [T.plan(w, clip_call("r")), T.plan(w, clip_call("d"))])
+    assert not river[1] and "Back then" in river[0]
+    assert dam[1] and "overloaded" in dam[0] and "read_transcript" in dam[0]
+    # Only the answer that came back is kept for asking again.
+    assert ("d", "water", 3) not in w.picked and ("r", "water", 3) in w.picked
+
+
+def test_a_round_answers_its_calls_in_order_with_the_picks_made_together(gam, siblings):
+    two_videos(siblings)
+    w = Working(spec(), gam=gam)
+    w.ask = picker(lambda prompt: '[{"first": 0, "last": 0, "score": 7}]')
+    provider = ScriptedProvider(script=[
+        says("", clip_call("r"), call("get_spec", segment_id="s_title"), clip_call("d"),
+             call("find_clips", gam_id="r", idea="")),
+        says("Found them."),
+    ])
+    steps = []
+    loop.run(provider, w, system=[], history=[], prompt="clips", on_step=lambda k, t:
+             steps.append(t), on_reply=lambda r: None, cancelled=lambda: False, max_rounds=3)
+    results = provider.results()
+    assert [r.call_id for r in results] == ["pick-r", results[1].call_id, "pick-d",
+                                            results[3].call_id]
+    assert "We came here" in results[0].content and "s_title" in results[1].content
+    assert "We built the dam" in results[2].content and results[3].is_error
+    assert len(w.ask.asked) == 2
+    assert "Picking clips from d" in steps
