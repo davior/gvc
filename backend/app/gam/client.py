@@ -18,7 +18,9 @@ import httpx
 
 from app import outbound
 from app.config import settings
-from app.schemas_gam import GamAssetRead, GamHit, GamMusic, GamSearch, GamTranscript, GamWaveform
+from app.schemas_gam import (
+    GamAssetRead, GamHit, GamMusic, GamSearch, GamTranscript, GamVersion, GamWaveform,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +183,33 @@ class GamClient:
             code, message = self._detail(response)
             raise GamError(code, message)
         return GamTranscript.model_validate(response.json()["data"])
+
+    def versions(self, asset_id: str) -> List[GamVersion]:
+        """A video's standard-resolution versions, largest first.
+
+        Empty, never an error, whenever there are none to use: an asset that is not a
+        video, one nobody has made versions of, a GAM older than gam#56 (no such route,
+        a 404), and a GAM that fails to answer this one call. The original file is
+        always there to render from, so a missing list costs sharpness or speed, never
+        the render.
+        """
+        try:
+            response = self._request("GET", f"/api/assets/{asset_id}/versions")
+        except GamError:
+            return []
+        if response.status_code != 200:
+            return []
+        return [
+            GamVersion(
+                id=raw["id"],
+                short_side=raw["short_side"],
+                width=raw.get("width"),
+                height=raw.get("height"),
+                size_bytes=raw.get("size_bytes") or 0,
+                file_url=_absolute(raw.get("file_url")),
+            )
+            for raw in response.json().get("data") or []
+        ]
 
     def peaks(self, asset_id: str) -> Optional[GamWaveform]:
         """An audio asset's waveform, or None if GAM has none to give.

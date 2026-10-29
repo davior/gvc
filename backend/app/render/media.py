@@ -19,12 +19,13 @@ import os
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, NamedTuple, Optional, Set
 
 from PIL import Image
 
 from app.config import settings
 from app.gam.client import GamClient
+from app.schemas_gam import GamAssetRead, GamVersion
 from app.render import compose
 from app.render import ffmpeg as F
 from app.render.compile import Media
@@ -65,6 +66,73 @@ def used_keys(spec: VideoSpec) -> Set[str]:
     if spec.chrome.watermark and spec.chrome.watermark.asset:
         keys.add(spec.chrome.watermark.asset)
     return keys
+
+
+def fills_frame(spec: VideoSpec, key: str) -> bool:
+    """Whether any shot shows this asset cropped to fill the frame.
+
+    That is the shot that needs the most pixels: `crop` scales the picture until it
+    covers the whole frame, so a 16:9 video in a 9:16 frame is shown at its height,
+    while `blur` and `pad` only have to fit it inside.
+    """
+    return any(
+        (segment.visual.fit or spec.style.fit) == "crop"
+        for segment in spec.segments
+        if segment.visual is not None and segment.visual.asset == key
+    )
+
+
+class SourceFile(NamedTuple):
+    # The render cache's key: GAM's file id, plus the size for a version, so a 720p
+    # and the original of one video are cached side by side.
+    cache_id: str
+    url: str
+    size_bytes: int
+    width: Optional[int]
+    height: Optional[int]
+    # None for the original.
+    short_side: Optional[int] = None
+
+
+# Rounding to even dimensions can leave a version a pixel or two short of a frame it
+# was made for (a 1002x750 original's 1080p is 1442x1080), which should still count.
+_SLACK_PX = 2
+
+
+def pick_source(
+    asset: GamAssetRead, file_id: str, versions: List[GamVersion], frame: tuple, *, fill: bool
+) -> SourceFile:
+    """The best match among a video's original and its versions for this frame.
+
+    The smallest file that is still at least as sharp as the frame shows it: a 1080p
+    render of a 4K original reads its 1080p version, a quarter of the bytes to fetch
+    and decode for the same picture, and a preview reads its 480p. When no file is big
+    enough the biggest one is used, which is the original. A file whose size GAM does
+    not know is never chosen over one it does.
+    """
+    frame_w, frame_h = frame
+    original = SourceFile(file_id, asset.file_url or "", asset.size_bytes, asset.width, asset.height)
+    candidates = [original] + [
+        SourceFile(f"{file_id}@{v.short_side}", v.file_url, v.size_bytes, v.width, v.height,
+                   v.short_side)
+        for v in versions
+        if v.file_url and v.width and v.height
+    ]
+    if len(candidates) == 1 or not (asset.width and asset.height):
+        return original
+
+    def sharp_enough(c: SourceFile) -> bool:
+        wide = c.width + _SLACK_PX >= frame_w
+        tall = c.height + _SLACK_PX >= frame_h
+        # Covering the frame needs both; fitting inside it needs whichever edge the
+        # frame's shape makes the limit, which is the same as either reaching it.
+        return (wide and tall) if fill else (wide or tall)
+
+    def pixels(c: SourceFile) -> int:
+        return (c.width or 0) * (c.height or 0)
+
+    enough = [c for c in candidates if sharp_enough(c)]
+    return min(enough, key=pixels) if enough else max(candidates, key=pixels)
 
 
 def _probe(path: str, kind: str) -> Media:
@@ -175,8 +243,16 @@ def resolve(
         # A GAM clip plays its parent's bytes, so the parent's file is what is cached.
         file_id = asset.parent_asset_id if asset.parent_asset_id and asset.in_point is not None \
             else asset.id
-        path = cache.fetch(gam, file_id, asset.file_url, asset.size_bytes)
         kind = asset.asset_type if asset.asset_type in ("image", "video", "audio") else "video"
+        source = SourceFile(file_id, asset.file_url, asset.size_bytes, asset.width, asset.height)
+        if kind == "video":
+            # A clip's versions are its parent's: the same file at other sizes, over
+            # the same timeline, so its in and out points still hold.
+            source = pick_source(asset, file_id, gam.versions(file_id), frame,
+                                 fill=fills_frame(spec, key))
+            if source.short_side is not None:
+                logger.info("Rendering “%s” from its %sp version", asset.name, source.short_side)
+        path = cache.fetch(gam, source.cache_id, source.url, source.size_bytes)
         media = _probe(path, kind)
         if file_id != asset.id:
             media.offset = asset.in_point or 0.0

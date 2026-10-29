@@ -57,6 +57,23 @@ class GamAssetRead(BaseModel):
     audio_kind: Optional[str] = None
 
 
+class GamVersion(BaseModel):
+    """One standard-resolution file of a GAM video: its 1080p, its 720p (gam#56).
+
+    The same video as the asset's own file, timeline included, at another size. GVC
+    renders from whichever is the best match for the output frame (`render/media.py`).
+    """
+
+    id: str
+    # The standard size, as the frame's short side in pixels: 1080 is 1920x1080 and
+    # 1080x1920 alike. `width`/`height` are what the file really is.
+    short_side: int
+    width: Optional[int] = None
+    height: Optional[int] = None
+    size_bytes: int = 0
+    file_url: Optional[str] = None
+
+
 class GamHit(BaseModel):
     asset: GamAssetRead
     score: float = 0.0

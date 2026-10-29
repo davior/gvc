@@ -37,6 +37,9 @@ class FakeSiblings:
     transcripts: Dict[str, dict] = field(default_factory=dict)
     # GAM waveforms by asset id ({"duration", "peaks"}), as /peaks gives.
     peaks: Dict[str, dict] = field(default_factory=dict)
+    # GAM video versions by asset id, as /versions gives (gam#56). An asset with no
+    # entry answers 404, which is what a GAM older than versions says.
+    versions: Dict[str, List[dict]] = field(default_factory=dict)
     notes_files: Dict[str, bytes] = field(default_factory=dict)
     requests: List[httpx.Request] = field(default_factory=list)
     # Set to make GAM answer every request with this status.
@@ -122,6 +125,12 @@ class FakeSiblings:
             if waveform is None:
                 return httpx.Response(422, json={"detail": {"code": "waveform_unavailable", "message": "no"}})
             return httpx.Response(200, json={"data": waveform})
+        if path.endswith("/versions") and request.method == "GET":
+            rows = self.versions.get(path.split("/")[3])
+            if rows is None:
+                return httpx.Response(404)
+            return httpx.Response(200, json={"data": rows, "total": len(rows),
+                                             "limit": len(rows), "offset": 0})
         if path.endswith("/transcript") and request.method == "GET":
             asset_id = path.split("/")[3]
             if asset_id not in self.assets:
