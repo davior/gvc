@@ -1372,6 +1372,30 @@ def build_video_copy_command(source: str, output: str) -> List[str]:
             "-map", "0:v", "-c", "copy", "-an", "-video_track_timescale", "90000", output]
 
 
+def build_audio_join_command(shot_files: Sequence[str], samples: Sequence[int], output: str,
+                             *, options: RenderOptions, preview: bool) -> List[str]:
+    """Every shot's sound, decoded, cut to `samples[i]` and joined end to end.
+
+    The cut stitch's counterpart to `build_stitch_command(streams="audio")`. Copying
+    the shots' AAC packets with the concat demuxer kept each shot's encoder padding,
+    about 25 ms, and a player plays it: over ninety shots the sound fell two and a
+    half seconds behind the picture. Decoded, the padding is gone, and each shot is
+    then made exactly as long as its picture (`samples`), which is whole frames and
+    so up to a frame longer than the narration asked for.
+    """
+    argv = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
+    for name in shot_files:
+        argv += ["-threads", "1", "-vn", "-i", name]
+    chains = [f"[{i}:a]apad,atrim=end_sample={n},asetpts=PTS-STARTPTS[a{i}]"
+              for i, n in enumerate(samples)]
+    chains.append("".join(f"[a{i}]" for i in range(len(samples)))
+                  + f"concat=n={len(samples)}:v=0:a=1[a]")
+    shared = encode_args(options, preview)
+    argv += ["-filter_complex", ";".join(chains), "-map", "[a]",
+             *shared[shared.index("-c:a"):], "-vn", output]
+    return argv
+
+
 def build_join_av_command(video_list: str, audio: str, output: str) -> List[str]:
     """Remux the partial stitch's picture pieces and its sound into one file."""
     return [
