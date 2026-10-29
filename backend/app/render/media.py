@@ -24,7 +24,7 @@ from typing import Dict, List, Optional, Set
 from PIL import Image
 
 from app.config import settings
-from app.gam.client import GamClient
+from app.gam.client import GamClient, GamError
 from app.render import compose
 from app.render import ffmpeg as F
 from app.render.compile import Media
@@ -86,6 +86,14 @@ def _slate(work_dir: str, key: str, title: str, subtitle: str, width: int, heigh
     return Media(path=path, kind="slate", width=width, height=height)
 
 
+def _too_large(name: str, size: Optional[int]) -> str:
+    """Names the file and the setting to raise: the message alone has to be enough to fix it."""
+    limit = f"{settings.render_max_file_mb / 1024:.1f} GB"
+    actual = f" is {size / 1024 ** 3:.1f} GB, " if size else " is "
+    return (f"“{name}”{actual}larger than the {limit} a render will fetch. "
+            "Raise RENDER_MAX_FILE_MB to render it.")
+
+
 class MediaCache:
     """GAM files on local disk, pruned oldest-used first past the size cap."""
 
@@ -142,6 +150,7 @@ def resolve(
 ) -> Resolution:
     out = Resolution()
     width, height = frame
+    max_file_bytes = settings.render_max_file_mb * 1024 * 1024
     for key in sorted(used_keys(spec)):
         ref = spec.assets[key]
         if isinstance(ref, NotesAsset):
@@ -175,7 +184,19 @@ def resolve(
         # A GAM clip plays its parent's bytes, so the parent's file is what is cached.
         file_id = asset.parent_asset_id if asset.parent_asset_id and asset.in_point is not None \
             else asset.id
-        path = cache.fetch(gam, file_id, asset.file_url, asset.size_bytes)
+        # Refused on GAM's word before fetching, so an oversized file costs no download.
+        # Only for the asset's own file: a clip's size is not its parent's, which the
+        # streaming guard in `download` still catches.
+        if file_id == asset.id and asset.size_bytes > max_file_bytes:
+            out.problems.append(_too_large(asset.name, asset.size_bytes))
+            continue
+        try:
+            path = cache.fetch(gam, file_id, asset.file_url, asset.size_bytes)
+        except GamError as exc:
+            if exc.code != "gam_media_too_large":
+                raise
+            out.problems.append(_too_large(asset.name, None))
+            continue
         kind = asset.asset_type if asset.asset_type in ("image", "video", "audio") else "video"
         media = _probe(path, kind)
         if file_id != asset.id:

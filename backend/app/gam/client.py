@@ -210,7 +210,8 @@ class GamClient:
                 for chunk in response.iter_bytes(1024 * 1024):
                     written += len(chunk)
                     if written > max_bytes:
-                        raise GamError("gam_media_too_large", "A file in this video is too large to render")
+                        raise GamError("gam_media_too_large", "A file in this video is larger than "
+                                       f"{max_bytes // (1024 * 1024)} MB, too large to render")
                     sink.write(chunk)
         except httpx.HTTPError as exc:
             raise GamError("gam_unavailable", "Could not fetch a file from the asset library") from exc
