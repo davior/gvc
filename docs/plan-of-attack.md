@@ -385,6 +385,7 @@ Specified here, applied in GAM's repository, not from this one.
 | GAM-5 | `CORS_ORIGIN` / CSP for `gvc.geckopico.com`, only where GVC's browser code calls GAM directly | Server-side calls with a Bearer token need neither |
 | GAM-6 | A music profile on audio assets (genres, moods, instruments, BPM, key, vocals, energy), read from ID3/Vorbis/MP4 tags and searchable. **[davior/gam#46](https://github.com/davior/gam/pull/46).** GVC reads it as `GamAssetRead.music`; against a GAM without it, `music` is null and tracks are chosen by name as before | The assistant choosing a soundtrack by how it sounds, and the Sound picker saying so |
 | GAM-7 | `audio_kind` (music / speech / sfx) on audio assets. **[davior/gam#49](https://github.com/davior/gam/pull/49).** GVC reads it as `GamAssetRead.audio_kind`; null against a GAM without it | Keeping voice recordings out of a soundtrack, in the assistant and the Sound picker |
+| GAM-8 | `options.custom_size` on catalogue rows and `params.width`/`height` on `POST /api/generate`, sent to fal as `image_size: {width, height}`; on for the seeded FLUX rows. **[davior/gam#53](https://github.com/davior/gam/pull/53).** Against a GAM without it, GVC asks for the nearest size tier (Nano Banana's `2K`, Seedream's `auto_2K`) or FLUX's 1024 px preset as before | Generated pictures sized for the video: 1.5x its frame, so a Ken Burns zoom or a crop stays sharp |
 
 GAM-1 and GAM-2 come first. They're small, and M1 below depends on them.
 
