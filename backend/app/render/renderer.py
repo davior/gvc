@@ -588,6 +588,12 @@ def render(
     if layers or waves:
         count = len(layers) + len(waves)
         progress("Drawing overlays", 88, f"{count} overlay{'s' if count != 1 else ''}")
+        # What the pass was asked to draw, and when: the working files are gone once
+        # the render ends, and this is what tells a missing overlay's placement apart
+        # from the pass failing to draw it.
+        logger.info("Overlay pass over %.1f s: %s", timeline.total,
+                    ", ".join(f"{i.segment_id} {i.overlay.type} {i.start:.1f}-{i.end:.1f}"
+                              for i in timed))
         F.run(F.build_overlay_pass(final, layers, "overlaid.mp4", options=options,
                                    preview=preview, duration=timeline.total,
                                    waves=waves, width=width, height=height),
