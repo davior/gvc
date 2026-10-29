@@ -110,7 +110,8 @@ def _run(job_id: str) -> None:
     finally:
         gam.close()
         speech.close()
-        shutil.rmtree(work_dir, ignore_errors=True)
+        if not settings.render_keep_work:
+            shutil.rmtree(work_dir, ignore_errors=True)
         _tokens.pop(job_id, None)
 
 

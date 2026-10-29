@@ -86,6 +86,9 @@ class Settings(BaseSettings):
     render_cache_max_gb: float = 20
     # The largest single file a render will fetch from GAM.
     render_max_file_mb: int = 8192
+    # Keep a render's working files (data/work/<job id>) instead of deleting them,
+    # to look at what a step was given after the fact. Each one is gigabytes.
+    render_keep_work: bool = False
     # The assistant (M4/M5). A turn is a job: it keeps running with the browser closed.
     # Rounds are model calls in one turn; a from-scratch draft takes a handful, the
     # rest of the budget is for searching and fixing. Two workers: a turn is
