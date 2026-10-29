@@ -166,7 +166,7 @@ def test_every_video_chain_ends_normalised():
         graph = _graph(F.build_shot_command(
             kind=kind, background="x", audio=audio, duration=3, output="o.mp4",
             options=RenderOptions(), preview=False, background_has_audio=has_audio))
-        assert "setsar=1,format=yuv420p[v]" in graph
+        assert f"{F.NORMALISE}[v]" in graph
 
 
 def test_waveform_splits_the_audio_it_shares_with_the_muxed_track():
@@ -207,7 +207,7 @@ def test_waveform_is_dropped_when_the_host_ffmpeg_lacks_it(monkeypatch):
     graph = _graph(F.build_shot_command(kind="still", background="bg.png", audio="n.wav",
                                         duration=3, output="s.mp4", options=options, preview=False))
     assert "showwaves" not in graph
-    assert "setsar=1,format=yuv420p[v]" in graph  # still a valid graph
+    assert f"{F.NORMALISE}[v]" in graph  # still a valid graph
 
 
 def test_overlay_and_subtitles_are_layered_in_order():
@@ -1360,16 +1360,6 @@ def test_each_overlay_layer_is_one_frame_repeated_for_its_window_only():
     assert "-itsoffset" not in argv and "-loop" not in argv
     assert ("[1:v]format=rgba,loop=loop=-1:size=1,trim=end_frame=105,settb=AVTB,"
             "setpts=N/(30*TB)+1.000/TB,") in _graph(argv)
-
-
-def test_the_overlay_pass_counts_the_picture_from_its_frames():
-    """A stitch starts 21 ms in, off the frame grid, and Debian's ffmpeg 7.1.5 then
-    drew no layer at all: the windows are on the grid, so the picture is put there."""
-    graph = _graph(F.build_overlay_pass(
-        "stitched.mp4", [F.TimedLayer("a.png", 1.0, 4.5, 0.3)], "out.mp4",
-        options=RenderOptions(), preview=True, duration=10.0))
-    assert graph.startswith("[0:v]setpts=N/(30*TB)[base];")
-    assert "[base][l1]overlay=" in graph
 
 
 # ── the partial stitch: only the blends are encoded again ───────────────────

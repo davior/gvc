@@ -283,3 +283,33 @@ def test_shots_joined_by_cuts_keep_their_sound_with_their_picture(tmp_path):
                           "-ac", "1", "-ar", "48000", "-"], capture_output=True, check=True).stdout
     picture = sum(frames) / options.fps
     assert len(pcm) / 2 / 48000 == pytest.approx(picture, abs=0.015)
+
+
+def test_every_shot_comes_out_described_the_same_whatever_its_footage(tmp_path):
+    from app.render.options import RenderOptions
+
+    # Footage tagged the ways a real project's was: untagged, full range, and a
+    # full-range JPEG pixel format with BT.470BG colour. Left as they came, the
+    # stitch changed description at each, and Debian's ffmpeg 7.1.5 rebuilt the
+    # overlay pass there and dropped every timed overlay from then on.
+    sources = {
+        "plain": [],
+        "full": ["-color_range", "pc"],
+        "jpeg": ["-pix_fmt", "yuvj420p", "-color_range", "pc", "-colorspace", "bt470bg"],
+    }
+    described = set()
+    for name, tags in sources.items():
+        clip = f"{name}.mp4"
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "testsrc=size=320x180:rate=25",
+                        "-f", "lavfi", "-i", "sine=frequency=220", "-t", "2", "-c:v", "libx264",
+                        *(tags if "-pix_fmt" in tags else ["-pix_fmt", "yuv420p", *tags]),
+                        "-c:a", "aac", str(tmp_path / clip)], check=True)
+        F.run(F.build_shot_command(kind="video_sound", background=clip, audio=None, duration=1.5,
+                                   output=f"shot_{name}.mp4", options=RenderOptions(), preview=True,
+                                   background_has_audio=True), cwd=str(tmp_path))
+        out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-read_intervals", "%+#1",
+                              "-show_entries", "frame=pix_fmt,color_range,color_space,color_primaries,"
+                              "color_transfer", "-of", "csv=p=0", str(tmp_path / f"shot_{name}.mp4")],
+                             capture_output=True, text=True, check=True).stdout.strip().splitlines()[0]
+        described.add(out.rstrip(","))
+    assert described == {"yuv420p,tv,bt709,bt709,bt709"}

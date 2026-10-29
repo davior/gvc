@@ -8,7 +8,7 @@ The one invariant the whole pipeline rests on: every shot is encoded with
 byte-identical codec parameters (see `encode_args`), which is what lets the final
 stitch be a `concat -c copy` remux instead of a second full encode. A stray SAR
 or pixel format is the usual way that silently breaks, so every video chain ends
-with `setsar=1,format=yuv420p`.
+with `NORMALISE`.
 """
 
 import logging
@@ -221,11 +221,25 @@ def encode_args(options: RenderOptions, preview: bool) -> List[str]:
     return [
         "-c:v", "libx264", "-preset", preset, "-crf", str(crf),
         "-pix_fmt", "yuv420p", "-profile:v", "high", "-level", "4.1",
+        # What `NORMALISE` made the frames, written into the stream as well.
+        "-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709",
+        "-color_trc", "bt709",
         "-r", str(fps), "-g", str(fps * 2), "-keyint_min", str(fps),
         "-video_track_timescale", "90000",
         "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
         "-max_muxing_queue_size", "1024",
     ]
+
+
+# The end of every video chain, so every shot's picture is described the same way.
+# Footage arrives tagged every which way (full range from a phone, BT.601 from an
+# old broadcast, nothing at all from a still), and the shots keep those tags through
+# a `-c copy` stitch. Wherever the description changed, Debian's ffmpeg 7.1.5 rebuilt
+# the overlay pass's filters, and each timed overlay, fed in once as a single frame,
+# was gone for the rest of the video: a 40-minute render lost every one of them from
+# the first clip on. Converted here to limited range and BT.709, and tagged so.
+NORMALISE = ("setsar=1,scale=out_range=tv:out_color_matrix=bt709,format=yuv420p,"
+             "setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709")
 
 
 def _hex_to_ffmpeg(colour: str) -> str:
@@ -665,7 +679,7 @@ def build_shot_command(
         chains.append(f"[{stage}]{','.join(fades)}[fd]")
         stage = "fd"
 
-    chains.append(f"[{stage}]setsar=1,format=yuv420p[v]")
+    chains.append(f"[{stage}]{NORMALISE}[v]")
 
     # Pad the audio so a shot always reaches its target length even when the
     # narration is shorter (a media block with little text under it).
@@ -762,7 +776,7 @@ def build_xfade_command(
         video, audio = f"vx{index}", f"ax{index}"
         total += durations[index] - overlap
 
-    chains.append(f"[{video}]setsar=1,format=yuv420p[v]")
+    chains.append(f"[{video}]{NORMALISE}[v]")
     argv += ["-filter_complex", ";".join(chains), "-map", "[v]", "-map", f"[{audio}]"]
     argv += encode_args(options, preview)
     argv += ["-movflags", "+faststart", output]
@@ -1153,7 +1167,7 @@ def build_stitch_command(
             achains.append(f"[at{index}][{sounds[index]}]concat=n=2:v=0:a=1[ax{index}]")
             total += durations[index] - overlap
         video, audio = f"vx{index}", f"ax{index}"
-    vchains.append(f"[{video}]setsar=1,format=yuv420p[v]")
+    vchains.append(f"[{video}]{NORMALISE}[v]")
 
     shared = encode_args(options, preview)
     split = shared.index("-c:a")
@@ -1618,20 +1632,12 @@ def build_overlay_pass(
     one-frame input is finished before the picture starts, and from then on the
     overlay only pulls the layer's frames through the graph as it needs them, so
     nothing is left waiting on ffmpeg's scheduling of inputs.
-
-    The picture itself is put back on the frame grid first. The stitch joins shots
-    with the concat demuxer, and what comes out starts 21 ms in (the first shot's
-    AAC priming, carried over to the picture) with its frames slightly off the grid.
-    Debian's ffmpeg 7.1.5 then drew none of the layers at all, over a whole video,
-    while 6.1 drew them all; the same picture encoded again got them back. Counted
-    from its frames it is exactly the timeline every window was placed on, since
-    each shot is whole frames.
     """
     fps = max(1, options.fps)
     total = max(0.1, duration)
     argv = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", source]
-    chains: List[str] = [f"[0:v]setpts=N/({fps}*TB)[base]"]
-    stage = "base"
+    chains: List[str] = []
+    stage = "0:v"
     # Waves go under the text and pictures, as Notes draws its waveform under its text.
     # Each reads the video's own sound, and a pad can be read once, hence the split.
     if waves:
