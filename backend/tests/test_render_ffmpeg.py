@@ -1572,3 +1572,25 @@ def test_the_wave_pass_really_runs_and_draws_only_in_its_window(tmp_path):
         return any(g > 150 and r < 100 for r, g, _ in img.getdata())
 
     assert green_at(2.0) and not green_at(0.5) and not green_at(3.6)
+
+
+def test_a_raised_ffmpeg_loglevel_reaches_every_step_and_its_output_the_log(monkeypatch, caplog):
+    from app.config import settings
+
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen["argv"] = argv
+        return types.SimpleNamespace(returncode=0, stderr=b"frame=  10 fps=0.0\rframe=  20 fps=9\r"
+                                                         b"Reconfiguring filter graph because video "
+                                                         b"parameters changed\nframe=  30 fps=9\r")
+
+    monkeypatch.setattr(F.subprocess, "run", fake_run)
+    F.run(["ffmpeg", "-y", "-loglevel", "error", "-i", "in.mp4", "out.mp4"])
+    assert seen["argv"][3] == "error" and "Reconfiguring" not in caplog.text
+
+    monkeypatch.setattr(settings, "render_ffmpeg_loglevel", "info")
+    F.run(["ffmpeg", "-y", "-loglevel", "error", "-i", "in.mp4", "out.mp4"])
+    assert seen["argv"][3] == "info"
+    assert "writing out.mp4" in caplog.text and "Reconfiguring filter graph" in caplog.text
+    assert "frame=" not in caplog.text

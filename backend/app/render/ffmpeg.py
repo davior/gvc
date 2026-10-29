@@ -14,11 +14,13 @@ with `NORMALISE`.
 import logging
 import math
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from app.config import settings
 from app.render.options import (
     DIP_TRANSITIONS, KENBURNS_MIN_LEG_SECONDS, XFADE_NAMES, MusicSpec, TransitionSpec,
     RenderOptions, encoder_tier, frame_size, is_crossfade, kenburns_geometry,
@@ -109,9 +111,19 @@ def run(argv: Sequence[str], *, cwd: Optional[str] = None, timeout: int = SHOT_T
     reason has been cut off the end and all the user sees is a severed command
     line. The original is chained, so the full argv still reaches the log, which
     is where it is actually useful.
+
+    `RENDER_FFMPEG_LOGLEVEL` above "error" swaps into every `-loglevel` here and
+    logs what ffmpeg said even when it succeeded. A step can succeed and still
+    have done the wrong thing: Debian's 7.1.5 rebuilt the overlay pass's filters
+    wherever the picture's colour tags changed, losing every timed overlay, and
+    said so only at "info" and above.
     """
+    level = settings.render_ffmpeg_loglevel
+    argv = list(argv)
+    if level != "error" and "-loglevel" in argv:
+        argv[argv.index("-loglevel") + 1] = level
     try:
-        result = subprocess.run(list(argv), capture_output=True, timeout=timeout, cwd=cwd)
+        result = subprocess.run(argv, capture_output=True, timeout=timeout, cwd=cwd)
     except subprocess.TimeoutExpired as exc:
         raise FFmpegError(
             f"ffmpeg gave up on a segment after {timeout}s. It is probably a very "
@@ -132,6 +144,14 @@ def run(argv: Sequence[str], *, cwd: Optional[str] = None, timeout: int = SHOT_T
             reason = f"exit code {code}"
         logger.error("ffmpeg %s\nargv: %s\nstderr: %s", reason, " ".join(argv), stderr or "<empty>")
         raise FFmpegError(f"ffmpeg failed ({reason}): {tail}".rstrip(": "))
+    if level != "error":
+        # Without the progress lines, which at "info" and above arrive several a
+        # second and would push what matters out of any tail kept of them.
+        said = [line for line in re.split(r"[\r\n]+", result.stderr.decode(errors="replace"))
+                if line.strip() and not line.lstrip().startswith(("frame=", "size="))]
+        if said:
+            more = f"\n… and {len(said) - 200} lines more" if len(said) > 200 else ""
+            logger.warning("ffmpeg said, writing %s:\n%s%s", argv[-1], "\n".join(said[:200]), more)
 
 
 def probe_duration(path: str) -> float:
