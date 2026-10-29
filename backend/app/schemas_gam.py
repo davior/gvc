@@ -93,6 +93,14 @@ class GamTranscript(BaseModel):
     segments: List[GamSegment] = Field(default_factory=list)
 
 
+class GamWaveform(BaseModel):
+    """What the audio player draws its scrub bar from: peak amplitudes in 0..1, evenly
+    over `duration` seconds. GAM computes it on first view and caches it (gam#54)."""
+
+    duration: float
+    peaks: List[float]
+
+
 class GamSearch(BaseModel):
     data: List[GamHit]
     total: int

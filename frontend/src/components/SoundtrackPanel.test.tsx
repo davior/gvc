@@ -1,9 +1,17 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { gamApi } from '@/api/gam'
 import type { VideoSpec } from '@/api/projects'
 import SoundtrackPanel from '@/components/SoundtrackPanel'
+
+// Each track's player asks GAM for its waveform. Left pending: what it draws is
+// WaveformPlayer's own test, and a real request here would go to nowhere.
+beforeEach(() => {
+  vi.spyOn(gamApi, 'peaks').mockReturnValue(new Promise(() => {}))
+})
+afterEach(() => vi.restoreAllMocks())
 
 const start: VideoSpec = {
   title: 'T',

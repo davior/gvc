@@ -35,6 +35,8 @@ class FakeSiblings:
     hits: List[dict] = field(default_factory=list)
     # GAM transcripts by asset id: {"asset_id", "segments": [...]}, as /transcript gives.
     transcripts: Dict[str, dict] = field(default_factory=dict)
+    # GAM waveforms by asset id ({"duration", "peaks"}), as /peaks gives.
+    peaks: Dict[str, dict] = field(default_factory=dict)
     notes_files: Dict[str, bytes] = field(default_factory=dict)
     requests: List[httpx.Request] = field(default_factory=list)
     # Set to make GAM answer every request with this status.
@@ -115,6 +117,11 @@ class FakeSiblings:
                 "data": self.hits, "total": len(self.hits),
                 "query": request.url.params.get("q"), "semantic": False, "semantic_error": None,
             })
+        if path.endswith("/peaks") and request.method == "GET":
+            waveform = self.peaks.get(path.split("/")[3])
+            if waveform is None:
+                return httpx.Response(422, json={"detail": {"code": "waveform_unavailable", "message": "no"}})
+            return httpx.Response(200, json={"data": waveform})
         if path.endswith("/transcript") and request.method == "GET":
             asset_id = path.split("/")[3]
             if asset_id not in self.assets:
