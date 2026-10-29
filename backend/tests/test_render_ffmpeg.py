@@ -1362,6 +1362,16 @@ def test_each_overlay_layer_is_one_frame_repeated_for_its_window_only():
             "setpts=N/(30*TB)+1.000/TB,") in _graph(argv)
 
 
+def test_the_overlay_pass_counts_the_picture_from_its_frames():
+    """A stitch starts 21 ms in, off the frame grid, and Debian's ffmpeg 7.1.5 then
+    drew no layer at all: the windows are on the grid, so the picture is put there."""
+    graph = _graph(F.build_overlay_pass(
+        "stitched.mp4", [F.TimedLayer("a.png", 1.0, 4.5, 0.3)], "out.mp4",
+        options=RenderOptions(), preview=True, duration=10.0))
+    assert graph.startswith("[0:v]setpts=N/(30*TB)[base];")
+    assert "[base][l1]overlay=" in graph
+
+
 # ── the partial stitch: only the blends are encoded again ───────────────────
 
 def _keys(*lists):

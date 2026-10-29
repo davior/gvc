@@ -1618,12 +1618,20 @@ def build_overlay_pass(
     one-frame input is finished before the picture starts, and from then on the
     overlay only pulls the layer's frames through the graph as it needs them, so
     nothing is left waiting on ffmpeg's scheduling of inputs.
+
+    The picture itself is put back on the frame grid first. The stitch joins shots
+    with the concat demuxer, and what comes out starts 21 ms in (the first shot's
+    AAC priming, carried over to the picture) with its frames slightly off the grid.
+    Debian's ffmpeg 7.1.5 then drew none of the layers at all, over a whole video,
+    while 6.1 drew them all; the same picture encoded again got them back. Counted
+    from its frames it is exactly the timeline every window was placed on, since
+    each shot is whole frames.
     """
     fps = max(1, options.fps)
     total = max(0.1, duration)
     argv = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", source]
-    chains: List[str] = []
-    stage = "0:v"
+    chains: List[str] = [f"[0:v]setpts=N/({fps}*TB)[base]"]
+    stage = "base"
     # Waves go under the text and pictures, as Notes draws its waveform under its text.
     # Each reads the video's own sound, and a pad can be read once, hence the split.
     if waves:
