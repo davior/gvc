@@ -227,3 +227,47 @@ describe('FootageSearch', () => {
     )
   })
 })
+
+describe('FootageSearch: a sound’s moment', () => {
+  async function pick(hit: GamHit) {
+    vi.spyOn(gamApi, 'search').mockResolvedValue(result([hit]))
+    // Resolved, so the waveform knows its length and can place the shading.
+    vi.spyOn(gamApi, 'peaks').mockResolvedValue({ duration: 120, peaks: [1] })
+    render(
+      <FootageSearch title="Music" purpose="track" onPick={vi.fn()} onClose={vi.fn()} />
+    )
+    await userEvent.type(screen.getByLabelText('Search the asset library'), 'x')
+    await userEvent.click(screen.getByRole('button', { name: 'Search' }))
+    await userEvent.click(await screen.findByRole('button', { name: /Voice memo/ }))
+  }
+
+  const memo = asset({
+    id: 'v1',
+    name: 'Voice memo',
+    asset_type: 'audio',
+    duration_seconds: 120,
+    thumb_url: null,
+  })
+
+  it('shows the line that matched on the waveform', async () => {
+    await pick({ asset: memo, score: 1, snippet: '', start_time: 12, end_time: 18 })
+
+    expect(await screen.findAllByTestId('outside-moment')).toHaveLength(2)
+    expect(screen.getByText('2:00 long · matched at 0:11–0:18')).toBeInTheDocument()
+  })
+
+  it('shows a GAM clip’s own window when nothing was said', async () => {
+    const clip = { ...memo, parent_asset_id: 'p1', in_point: 30, out_point: 90 }
+    await pick({ asset: clip, score: 1, snippet: '', start_time: null, end_time: null })
+
+    expect(await screen.findAllByTestId('outside-moment')).toHaveLength(2)
+    expect(screen.getByText('2:00 long · clip of 0:30–1:30')).toBeInTheDocument()
+  })
+
+  it('shades nothing for a hit on the name of a whole file', async () => {
+    await pick({ asset: memo, score: 1, snippet: '', start_time: null, end_time: null })
+
+    expect(await screen.findByText('2:00 long')).toBeInTheDocument()
+    expect(screen.queryByTestId('outside-moment')).not.toBeInTheDocument()
+  })
+})
