@@ -9,6 +9,7 @@ import {
   type MediaKind,
 } from '@/api/gam'
 import { clock, momentTrim, type MomentSize, type PlaceMode } from '@/spec/footage'
+import WaveformPlayer from '@/components/WaveformPlayer'
 
 /**
  * - `scene`: footage for one scene, as b-roll under its narration or as a clip with
@@ -221,12 +222,11 @@ export default function FootageSearch({
                   }
                 />
               ) : selected.asset.asset_type === 'audio' && selected.asset.file_url ? (
-                <audio
+                <WaveformPlayer
                   key={selected.asset.id}
-                  controls
-                  preload="metadata"
-                  className="w-full"
+                  assetId={selected.asset.id}
                   src={selected.asset.file_url}
+                  name={selected.asset.name}
                 />
               ) : selected.asset.file_url ? (
                 <img

@@ -2,12 +2,12 @@
 
 from typing import Iterator, Literal, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.auth import CallerToken, CurrentUser
 from app.gam.client import GamClient
 from app.schemas import DataResponse
-from app.schemas_gam import AssetLookup, AssetLookupResult, GamSearch
+from app.schemas_gam import AssetLookup, AssetLookupResult, GamSearch, GamWaveform
 
 router = APIRouter()
 
@@ -50,3 +50,19 @@ def lookup(body: AssetLookup, gam: GamClient = Depends(get_gam)) -> DataResponse
     """
     assets = {asset_id: gam.get_asset(asset_id) for asset_id in dict.fromkeys(body.ids)}
     return DataResponse(data=AssetLookupResult(assets=assets))
+
+
+@router.get("/assets/{asset_id}/peaks", response_model=DataResponse[GamWaveform])
+def peaks(asset_id: str, gam: GamClient = Depends(get_gam)) -> DataResponse[GamWaveform]:
+    """The waveform an audio player in the editor scrubs on, from GAM's cache.
+
+    Through this backend like every other GAM read, so the browser never needs GAM's
+    address or a CORS rule for it (GAM-5).
+    """
+    waveform = gam.peaks(asset_id)
+    if waveform is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "waveform_unavailable", "message": "The asset library has no waveform for this"},
+        )
+    return DataResponse(data=waveform)

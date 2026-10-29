@@ -18,9 +18,12 @@ import httpx
 
 from app import outbound
 from app.config import settings
-from app.schemas_gam import GamAssetRead, GamHit, GamMusic, GamSearch, GamTranscript
+from app.schemas_gam import GamAssetRead, GamHit, GamMusic, GamSearch, GamTranscript, GamWaveform
 
 logger = logging.getLogger(__name__)
+
+# See `GamClient.peaks`.
+PEAKS_TIMEOUT_SECONDS = 120
 
 
 class GamError(Exception):
@@ -178,6 +181,23 @@ class GamClient:
             code, message = self._detail(response)
             raise GamError(code, message)
         return GamTranscript.model_validate(response.json()["data"])
+
+    def peaks(self, asset_id: str) -> Optional[GamWaveform]:
+        """An audio asset's waveform, or None if GAM has none to give.
+
+        None covers an unknown asset, one GAM cannot decode, and a GAM older than gam#54,
+        which has no such route and answers 404: the player then scrubs on a flat line,
+        which is a lesser player rather than an error.
+
+        A longer timeout than every other call. GAM decodes a recording the first time
+        anyone asks, which took ~21 s for an hour in testing, so the default 30 s would
+        cut off a long interview. Even then nothing is lost: GAM's handler runs to the
+        end and caches, so the next open is instant.
+        """
+        response = self._request("GET", f"/api/assets/{asset_id}/peaks", timeout=PEAKS_TIMEOUT_SECONDS)
+        if response.status_code != 200:
+            return None
+        return GamWaveform.model_validate(response.json()["data"])
 
     def download(self, file_url: str, sink, *, max_bytes: int) -> int:
         """Stream one of GAM's signed media URLs into `sink`. Returns the bytes written."""

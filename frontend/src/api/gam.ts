@@ -79,6 +79,16 @@ export interface GamSearch {
 
 export type MediaKind = 'image' | 'video' | 'audio'
 
+/**
+ * What an audio player draws its scrub bar from: peak amplitudes in 0..1, evenly over
+ * `duration` seconds. GAM computes it once per file and caches it (gam#54), so the
+ * browser never has to download a whole track to draw one.
+ */
+export interface GamWaveform {
+  duration: number
+  peaks: number[]
+}
+
 interface DataResponse<T> {
   data: T
 }
@@ -99,6 +109,13 @@ export const gamApi = {
         { ids }
       )
       .then((r) => r.data.data.assets)
+  },
+
+  /** Rejects when GAM has no waveform (422), so the player keeps its flat line. */
+  peaks(id: string): Promise<GamWaveform> {
+    return client
+      .get<DataResponse<GamWaveform>>(`/gam/assets/${id}/peaks`)
+      .then((r) => r.data.data)
   },
 }
 

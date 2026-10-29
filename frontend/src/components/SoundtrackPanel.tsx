@@ -5,6 +5,7 @@ import type { AudioTrack, VideoSpec } from '@/api/projects'
 import AnchorSelect from '@/components/AnchorSelect'
 import { sceneOptions } from '@/spec/anchors'
 import FootageSearch from '@/components/FootageSearch'
+import WaveformPlayer from '@/components/WaveformPlayer'
 import { addTrack, crossfadeInto, removeTrack, updateTrack } from '@/spec/soundtrack'
 
 interface Props {
@@ -31,10 +32,12 @@ export default function SoundtrackPanel({ spec, gamAssets, onChange }: Props) {
   }
   // The signed URL expires, so it is read from the fresh lookup each render and never
   // stored; a missing or not-yet-looked-up asset simply has no player.
-  const audioUrl = (track: AudioTrack) => {
+  const playable = (track: AudioTrack) => {
     const ref = spec.assets?.[track.asset]
     const asset = ref?.from === 'gam' ? gamAssets[ref.id] : null
-    return asset && !asset.missing ? (asset.file_url ?? undefined) : undefined
+    return asset && !asset.missing && asset.file_url
+      ? { id: asset.id, url: asset.file_url }
+      : null
   }
   const set = (index: number, patch: Partial<AudioTrack>) =>
     onChange(updateTrack(spec, index, patch))
@@ -51,6 +54,7 @@ export default function SoundtrackPanel({ spec, gamAssets, onChange }: Props) {
       )}
       {tracks.map((track, index) => {
         const music = (track.kind ?? 'music') === 'music'
+        const file = playable(track)
         return (
           <section
             key={track.id}
@@ -83,15 +87,14 @@ export default function SoundtrackPanel({ spec, gamAssets, onChange }: Props) {
                 <Trash2 className="h-4 w-4" />
               </button>
             </div>
-            {audioUrl(track) && (
+            {file && (
               // Plays the whole file, not the stretch between the anchors: the
               // anchors are scene edges, which only mean something on the timeline.
-              <audio
-                controls
-                preload="none"
-                className="h-8 w-full"
-                aria-label={`Listen to ${nameOf(track)}`}
-                src={audioUrl(track)}
+              <WaveformPlayer
+                compact
+                assetId={file.id}
+                src={file.url}
+                name={nameOf(track)}
               />
             )}
             <div className="flex flex-wrap items-center gap-3">

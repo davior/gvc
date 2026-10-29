@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   audioSummary,
   gamApi,
@@ -42,6 +42,11 @@ const spoken: GamHit = {
   end_time: 741.5,
 }
 
+// A picked track's player asks GAM for its waveform; left pending, as WaveformPlayer's
+// own test covers what it draws.
+beforeEach(() => {
+  vi.spyOn(gamApi, 'peaks').mockReturnValue(new Promise(() => {}))
+})
 afterEach(() => vi.restoreAllMocks())
 
 describe('FootageSearch', () => {

@@ -125,3 +125,36 @@ def test_lookup_returns_fresh_urls_and_null_for_what_is_gone(auth_client, siblin
     assert assets["gone"] is None
     # Asked once each, however often a spec mentions it.
     assert len(siblings.gam_requests()) == 2
+
+
+def test_peaks_are_passed_through_as_the_caller(client, siblings):
+    siblings.peaks = {"m1": {"duration": 92.5, "peaks": [0.1, 1.0, 0.4]}}
+    token = _token()
+
+    res = client.get("/api/gam/assets/m1/peaks", headers={"Authorization": f"Bearer {token}"})
+
+    assert res.status_code == 200
+    assert res.json()["data"] == {"duration": 92.5, "peaks": [0.1, 1.0, 0.4]}
+    request = siblings.gam_requests()[0]
+    assert request.url.path == "/api/assets/m1/peaks"
+    assert request.headers["authorization"] == f"Bearer {token}"
+
+
+def test_no_waveform_from_gam_is_unavailable_not_an_error(auth_client, siblings):
+    """GAM cannot decode it, or is older than gam#54 and answers 404: the player then
+    scrubs on a flat line, so this is a 422 the editor expects, not a 502."""
+    res = auth_client.get("/api/gam/assets/m1/peaks")
+    assert res.status_code == 422
+    assert res.json()["detail"]["code"] == "waveform_unavailable"
+
+    siblings.gam_status = 404
+    res = auth_client.get("/api/gam/assets/m1/peaks")
+    assert res.status_code == 422
+    assert res.json()["detail"]["code"] == "waveform_unavailable"
+
+
+def test_gam_failing_on_peaks_is_still_named(auth_client, siblings):
+    siblings.gam_status = 500
+    res = auth_client.get("/api/gam/assets/m1/peaks")
+    assert res.status_code == 502
+    assert res.json()["detail"]["code"] == "gam_unavailable"
