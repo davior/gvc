@@ -376,3 +376,97 @@ def test_a_theme_the_assistant_removed_is_not_put_back_by_the_default(auth_clien
     made = auth_client.post(f"/api/assistant/turns/{turn['id']}/new-project").json()["data"]
     project = auth_client.get(f"/api/projects/{made['project_id']}").json()["data"]
     assert "theme" not in project["spec"]["style"]
+
+
+# ── the assistant editing and deleting themes ───────────────────────────────
+
+def theme_writes(w):
+    log = []
+    w.edit_theme = lambda tid, name, prompt, is_default: log.append(
+        ("edit", tid, name, prompt, is_default))
+    w.remove_theme = lambda tid: log.append(("delete", tid))
+    return log
+
+
+def test_update_theme_changes_the_list_not_the_video_and_says_what_it_was():
+    themes = {"t-noir": {**NOIR, "is_default": True}, "t-clay": {**CLAY, "is_default": False}}
+    w = Working({"title": "T", "style": {"theme": "t-noir"}}, themes=themes)
+    log = theme_writes(w)
+    result = tool(w, "update_theme", theme="noir", prompt=" Sepia, grainy ")
+    assert not result.is_error
+    assert log == [("edit", "t-noir", None, "Sepia, grainy", None)]
+    assert NOIR["prompt"] in result.content  # what it was, to put back
+    assert w.themes["t-noir"]["prompt"] == "Sepia, grainy"
+    assert w.changes == [] and w.data["style"]["theme"] == "t-noir"
+
+    tool(w, "update_theme", theme="Claymation", make_default=True)
+    assert (w.themes["t-clay"]["is_default"], w.themes["t-noir"]["is_default"]) == (True, False)
+    tool(w, "update_theme", theme="t-clay", name="Clay")
+    assert not tool(w, "set_theme", theme="clay").is_error
+
+
+def test_update_theme_refuses_what_it_cannot_do():
+    w = Working({"title": "T"}, themes=dict(THEMES), max_theme_changes=1)
+    log = theme_writes(w)
+    assert tool(w, "update_theme", theme="Watercolour", name="X").is_error
+    assert tool(w, "update_theme", theme="Noir").is_error            # nothing to change
+    assert tool(w, "update_theme", theme="Noir", prompt="  ").is_error
+    assert tool(w, "update_theme", theme="Noir", name="claymation").is_error  # taken
+    assert tool(w, "update_theme", theme="Noir", prompt="x" * 1501).is_error
+    assert log == []
+    assert not tool(w, "update_theme", theme="Noir", name="Film noir").is_error
+    assert tool(w, "update_theme", theme="Claymation", name="Clay").is_error  # over the cap
+    assert len(log) == 1
+    assert tool(Working({"title": "T"}, themes=dict(THEMES)), "update_theme",
+                theme="Noir", name="X").is_error  # no database in this turn
+
+
+def test_delete_theme_removes_it_and_this_videos_use_of_it():
+    w = Working({"title": "T", "style": {"theme": "t-noir"}}, themes=dict(THEMES))
+    log = theme_writes(w)
+    result = tool(w, "delete_theme", theme="Noir")
+    assert not result.is_error and NOIR["prompt"] in result.content
+    assert log == [("delete", "t-noir")]
+    assert "t-noir" not in w.themes and "theme" not in w.data["style"]
+    assert w.changes == ["Removed the deleted theme"]
+    assert tool(w, "set_theme", theme="Noir").is_error
+
+    # Another video's theme: the list changes, this video doesn't.
+    tool(w, "delete_theme", theme="Claymation")
+    assert w.changes == ["Removed the deleted theme"]
+
+
+def test_from_the_project_list_editing_and_deleting_themes_makes_no_project(
+        auth_client, provider):
+    noir = make(auth_client, **NOIR, is_default=True)
+    clay = make(auth_client, **CLAY)
+    provider.script += [
+        says("", call("update_theme", theme="Claymation", prompt="Plasticine, warm light",
+                      make_default=True)),
+        says("", call("delete_theme", theme="Noir")),
+        says("Changed Claymation and made it the default; deleted Noir."),
+    ]
+    turn = auth_client.post("/api/assistant/turns", json={
+        "prompt": "Make Claymation warmer and the default, and delete Noir"}).json()["data"]
+    worker._run(turn["id"])
+    assert f"Noir (id {noir['id']}) [current] [default]" in provider.started["system"][-1]
+    [left] = auth_client.get("/api/themes").json()["data"]
+    assert (left["id"], left["prompt"], left["is_default"]) == (
+        clay["id"], "Plasticine, warm light", True)
+    done = auth_client.get(f"/api/assistant/turns/{turn['id']}").json()["data"]
+    assert done["status"] == "done" and done["proposed_spec"] is None
+    assert auth_client.get("/api/projects").json()["total"] == 0
+
+
+def test_on_an_open_video_deleting_its_theme_is_proposed_as_removing_it(
+        auth_client, provider):
+    noir = make(auth_client, **NOIR, is_default=True)
+    project = auth_client.post("/api/projects", json={"title": "Rivers"}).json()["data"]
+    assert project["spec"]["style"]["theme"] == noir["id"]
+    provider.script += [says("", call("delete_theme", theme="Noir")), says("Deleted Noir.")]
+    turn = auth_client.post("/api/assistant/turns", json={
+        "prompt": "Delete the Noir theme", "project_id": project["id"]}).json()["data"]
+    worker._run(turn["id"])
+    assert auth_client.get("/api/themes").json()["data"] == []
+    done = auth_client.get(f"/api/assistant/turns/{turn['id']}").json()["data"]
+    assert "theme" not in done["proposed_spec"]["style"]

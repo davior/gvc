@@ -184,6 +184,15 @@ class Working:
     add_theme: Optional[Callable[[str, str], str]] = None
     max_new_themes: int = 2
     new_themes: int = 0
+    # Change or delete one of the user's themes, now: (id, name, prompt, is_default),
+    # None leaving a field alone; and (id). Set by the worker, like add_theme.
+    edit_theme: Optional[Callable[[str, Optional[str], Optional[str], Optional[bool]],
+                                  None]] = None
+    remove_theme: Optional[Callable[[str], None]] = None
+    # Edits and deletes one request may make. Each restyles every project using the
+    # theme, so a model looping on them should be stopped well before the round limit.
+    max_theme_changes: int = 4
+    theme_changes: int = 0
 
     def __post_init__(self) -> None:
         self.data = copy.deepcopy(self.data)
@@ -941,6 +950,15 @@ def set_theme(w: Working, theme: Optional[str] = None) -> str:
     if theme is None or not theme.strip() or theme.strip().lower() == "none":
         style.pop("theme", None)
         return w.commit(candidate, "Removed the theme")
+    found = _find_theme(w, theme)
+    style["theme"] = found
+    return w.commit(candidate, f"Set the theme to {w.themes[found]['name']!r}")
+
+
+def _find_theme(w: Working, theme: Any) -> str:
+    """The id of one of the user's themes, given its id or its name (any case)."""
+    if not isinstance(theme, str) or not theme.strip():
+        raise ToolFailed("Say which theme, by its name or id.")
     wanted = theme.strip()
     found = wanted if wanted in w.themes else next(
         (tid for tid, t in w.themes.items() if t["name"].strip().lower() == wanted.lower()),
@@ -949,8 +967,7 @@ def set_theme(w: Working, theme: Optional[str] = None) -> str:
         names = ", ".join(repr(t["name"]) for t in w.themes.values()) or "none; the user " \
             "hasn't made any (they are made in Settings)"
         raise ToolFailed(f"No theme {wanted!r}. The themes are: {names}.")
-    style["theme"] = found
-    return w.commit(candidate, f"Set the theme to {w.themes[found]['name']!r}")
+    return found
 
 
 def create_theme(w: Working, name: str, prompt: str, use: bool = False) -> str:
@@ -990,6 +1007,79 @@ def create_theme(w: Working, name: str, prompt: str, use: bool = False) -> str:
     if not use:
         return made
     return f"{made} {set_theme(w, theme_id)}"
+
+
+def _theme_change_allowed(w: Working) -> None:
+    if w.theme_changes >= w.max_theme_changes:
+        raise ToolFailed(f"That's the {w.max_theme_changes} theme changes one request may "
+                         "make. Tell the user what is left to do.")
+
+
+def update_theme(w: Working, theme: str, name: Optional[str] = None,
+                 prompt: Optional[str] = None, make_default: Optional[bool] = None) -> str:
+    """Change one of the user's themes, now.
+
+    Made at once, as create_theme is: a theme is the user's list, not this video. The
+    result carries what it was, so the reply can say how to put it back, since an edit
+    restyles every project using the theme and there is no undo for the list.
+    """
+    if w.edit_theme is None:
+        raise ToolFailed("Changing themes isn't available in this turn.")
+    found = _find_theme(w, theme)
+    if name is not None and (not isinstance(name, str) or not name.strip()):
+        raise ToolFailed("A theme's name can't be empty.")
+    if prompt is not None and (not isinstance(prompt, str) or not prompt.strip()):
+        raise ToolFailed("A theme's text can't be empty; to stop using it, delete it or "
+                         "set another theme.")
+    if make_default is not None and not isinstance(make_default, bool):
+        raise ToolFailed("make_default is true or false.")
+    if name is None and prompt is None and make_default is None:
+        raise ToolFailed("Say what to change: name, prompt or make_default.")
+    name = name.strip() if name is not None else None
+    prompt = prompt.strip() if prompt is not None else None
+    if (name and len(name) > MAX_THEME_NAME) or (prompt and len(prompt) > MAX_THEME_PROMPT):
+        raise ToolFailed(f"A theme's name is at most {MAX_THEME_NAME} characters and its "
+                         f"text at most {MAX_THEME_PROMPT}.")
+    if name is not None and any(t["name"].strip().lower() == name.lower()
+                                for tid, t in w.themes.items() if tid != found):
+        raise ToolFailed(f"There is already a theme called {name!r}.")
+    _theme_change_allowed(w)
+    before = dict(w.themes[found])
+    w.edit_theme(found, name, prompt, make_default)
+    w.theme_changes += 1
+    # Entries are replaced, never changed in place: the worker's dict is the turn's
+    # own, but nothing here should depend on that.
+    if make_default:
+        w.themes = {tid: {**t, "is_default": False} for tid, t in w.themes.items()}
+    after = {**w.themes[found],
+             **{k: v for k, v in (("name", name), ("prompt", prompt),
+                                  ("is_default", make_default)) if v is not None}}
+    w.themes[found] = after
+    changed = [f"{field} was {before.get(field)!r}" for field, value in
+               (("name", name), ("prompt", prompt), ("is_default", make_default))
+               if value is not None]
+    return (f"Changed the theme {after['name']!r} in the user's list ({'; '.join(changed)}). "
+            "Every project using it generates with the new version from now on.")
+
+
+def delete_theme(w: Working, theme: str) -> str:
+    """Delete one of the user's themes, now. Projects naming it generate unstyled; this
+    video, if it is one of them, stops naming it."""
+    if w.remove_theme is None:
+        raise ToolFailed("Deleting themes isn't available in this turn.")
+    found = _find_theme(w, theme)
+    _theme_change_allowed(w)
+    gone = w.themes[found]
+    w.remove_theme(found)
+    w.theme_changes += 1
+    del w.themes[found]
+    result = (f"Deleted the theme {gone['name']!r} from the user's list. Its text was "
+              f"{gone['prompt']!r}. Other projects using it now generate without a theme.")
+    if theme_id_of(w.data) == found:
+        candidate = copy.deepcopy(w.data)
+        candidate["style"].pop("theme", None)
+        result += " " + w.commit(candidate, "Removed the deleted theme")
+    return result
 
 
 def run_estimate(w: Working) -> str:
@@ -1139,6 +1229,20 @@ TOOLS: List[Tuple[ToolSpec, Callable[..., str]]] = [
               {"type": "object", "properties": {"name": _STR, "prompt": _STR,
                                                 "use": {"type": "boolean"}},
                "required": ["name", "prompt"]}), create_theme),
+    (ToolSpec("update_theme",
+              "Change one of the user's themes (by name or id): its name, its prompt (the "
+              "look it adds), or make_default (true: new projects start with it; false: "
+              "no default). Saved at once, and restyles every project using it from then "
+              "on. Only when the user asks for that theme to change.",
+              {"type": "object", "properties": {"theme": _STR, "name": _STR, "prompt": _STR,
+                                                "make_default": {"type": "boolean"}},
+               "required": ["theme"]}), update_theme),
+    (ToolSpec("delete_theme",
+              "Delete one of the user's themes (by name or id), at once and for good. "
+              "Projects using it generate without a theme afterwards. Only when the user "
+              "asks for that theme to be deleted.",
+              {"type": "object", "properties": {"theme": _STR}, "required": ["theme"]}),
+     delete_theme),
     (ToolSpec("generate_image",
               "Generate a still picture with AI and put it in the video (as a segment's "
               "picture, an image overlay, or just in the registry). It starts at once and "

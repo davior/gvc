@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlmodel import Session, select
 
+from app.clock import utcnow
 from app.models.theme import Theme
 from app.spec.model import VideoSpec
 
@@ -73,3 +74,32 @@ def settle(session: Session, user_id: str, spec: VideoSpec, *, use_default: bool
         default = default_for(session, user_id)
         if default is not None:
             spec.style.theme = default.id
+
+
+def clear_default(session: Session, user_id: str, keep: Optional[str]) -> None:
+    """At most one default per user."""
+    for other in session.exec(select(Theme).where(Theme.user_id == user_id,
+                                                  Theme.is_default == True)).all():  # noqa: E712
+        if other.id != keep:
+            other.is_default = False
+            other.updated_at = utcnow()
+            session.add(other)
+
+
+def update(session: Session, row: Theme, *, name: Optional[str] = None,
+           prompt: Optional[str] = None, is_default: Optional[bool] = None) -> Theme:
+    """Change a theme; None leaves a field alone. Shared by the API and the assistant,
+    so both keep the one-default rule."""
+    if name is not None:
+        row.name = name.strip()
+    if prompt is not None:
+        row.prompt = prompt.strip()
+    if is_default is not None:
+        row.is_default = is_default
+        if is_default:
+            clear_default(session, row.user_id, keep=row.id)
+    row.updated_at = utcnow()
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return row

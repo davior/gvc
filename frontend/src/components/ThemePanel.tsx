@@ -107,7 +107,7 @@ export default function ThemePanel() {
         picture and clip prompt generated for a project that uses it, so a video&apos;s
         generated material matches. Choose a project&apos;s theme in its Settings tab; new
         projects start with the default. The assistant picks one for a video it drafts,
-        and makes a new one here when you ask it to or want a look none of these has.
+        and can make, change or delete themes here when you ask it to.
       </p>
 
       {error && (
