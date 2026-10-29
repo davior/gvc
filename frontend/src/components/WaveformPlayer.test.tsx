@@ -151,4 +151,33 @@ describe('WaveformPlayer', () => {
     expect(surfer.destroy).toHaveBeenCalledTimes(1)
     expect(lastCreateOptions().waveColor).not.toBe(light)
   })
+
+  it('dims everything outside a moment, and opens at its start', () => {
+    pending()
+    const view = render(
+      <WaveformPlayer
+        assetId="m1"
+        src="https://gam.test/media/m1.mp3?sig=x"
+        name="Caravan theme"
+        moment={{ in: 30, out: 90 }}
+      />
+    )
+    const audio = view.container.querySelector('audio') as HTMLAudioElement
+    Object.defineProperty(audio, 'duration', { configurable: true, value: 120 })
+    fireEvent.loadedMetadata(audio)
+
+    const shades = screen.getAllByTestId('outside-moment')
+    expect(shades.map((s) => s.style.width)).toEqual(['25%', '25%'])
+    expect(audio.currentTime).toBe(30)
+  })
+
+  it('dims nothing without a moment', () => {
+    pending()
+    const { audio } = renderPlayer()
+    Object.defineProperty(audio, 'duration', { configurable: true, value: 120 })
+    fireEvent.loadedMetadata(audio)
+
+    expect(screen.queryByTestId('outside-moment')).not.toBeInTheDocument()
+    expect(audio.currentTime).toBe(0)
+  })
 })

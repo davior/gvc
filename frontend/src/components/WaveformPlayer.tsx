@@ -24,6 +24,9 @@ interface Props {
   name: string
   /** A soundtrack card's slim strip rather than the picker's full player. */
   compact?: boolean
+  /** A stretch to show as the window that matters: the line a search matched, or a
+   *  GAM clip's bounds. The rest is dimmed, and the player opens at its start. */
+  moment?: { in: number; out: number }
 }
 
 /**
@@ -37,7 +40,13 @@ interface Props {
  * load or when GAM has none (an older GAM, a file it cannot decode). The placeholder
  * still scrubs.
  */
-export default function WaveformPlayer({ assetId, src, name, compact = false }: Props) {
+export default function WaveformPlayer({
+  assetId,
+  src,
+  name,
+  compact = false,
+  moment,
+}: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [audio, setAudio] = useState<HTMLAudioElement | null>(null)
   const [waveform, setWaveform] = useState<GamWaveform | null>(null)
@@ -122,6 +131,21 @@ export default function WaveformPlayer({ assetId, src, name, compact = false }: 
     if (Number.isFinite(value)) setMediaDuration(value)
   }
 
+  // Here, not on mount: a seek before the browser knows the duration is silently
+  // ignored, and the player would open at zero instead of at the line that matched.
+  const onLoadedMetadata = (e: React.SyntheticEvent<HTMLAudioElement>) => {
+    readDuration(e)
+    if (moment) e.currentTarget.currentTime = moment.in
+  }
+
+  const shade =
+    moment && duration > 0
+      ? {
+          before: (Math.min(Math.max(moment.in, 0), duration) / duration) * 100,
+          after: (Math.max(duration - moment.out, 0) / duration) * 100,
+        }
+      : null
+
   const icon = compact ? 'h-3.5 w-3.5' : 'h-5 w-5'
 
   return (
@@ -133,7 +157,7 @@ export default function WaveformPlayer({ assetId, src, name, compact = false }: 
         preload={compact ? 'none' : 'metadata'}
         aria-label={`Listen to ${name}`}
         onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
-        onLoadedMetadata={readDuration}
+        onLoadedMetadata={onLoadedMetadata}
         onDurationChange={readDuration}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
@@ -164,7 +188,31 @@ export default function WaveformPlayer({ assetId, src, name, compact = false }: 
       >
         {/* Behind the bars, so the placeholder reads as a track rather than as nothing. */}
         <div className="pointer-events-none absolute inset-x-0 top-1/2 h-px bg-gray-200 dark:bg-gray-700" />
+        {/* Also behind the bars: a tint over the moment itself. Dimming the rest alone is
+            too faint in dark mode, where a dimmed gray bar and a plain one look alike. */}
+        {shade && (
+          <div
+            className="pointer-events-none absolute inset-y-0 rounded bg-primary-500/10 dark:bg-primary-400/20"
+            style={{ left: `${shade.before}%`, right: `${shade.after}%` }}
+          />
+        )}
         <div ref={containerRef} data-testid="waveform" />
+        {/* z-10: wavesurfer stacks its progress layer and cursor at z-index 2 and 5,
+            which would otherwise paint over the shading. */}
+        {shade && (
+          <>
+            <div
+              data-testid="outside-moment"
+              className="pointer-events-none absolute inset-y-0 left-0 z-10 bg-white/85 dark:bg-gray-800/85"
+              style={{ width: `${shade.before}%` }}
+            />
+            <div
+              data-testid="outside-moment"
+              className="pointer-events-none absolute inset-y-0 right-0 z-10 bg-white/85 dark:bg-gray-800/85"
+              style={{ width: `${shade.after}%` }}
+            />
+          </>
+        )}
       </div>
 
       <span className="shrink-0 font-mono text-xs tabular-nums text-gray-500 dark:text-gray-400">

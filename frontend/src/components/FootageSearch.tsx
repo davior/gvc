@@ -87,6 +87,14 @@ export default function FootageSearch({
 
   const trim = selected ? momentTrim(selected, moment) : undefined
   const isVideo = selected?.asset.asset_type === 'video'
+  // What the waveform shows as the stretch that matters: the line that matched, or
+  // else a GAM clip's own bounds (its file is the parent's, so they line up). Display
+  // only — a track is still used whole.
+  const audioMoment =
+    trim ??
+    (selected && selected.asset.in_point !== null && selected.asset.out_point !== null
+      ? { in: selected.asset.in_point, out: selected.asset.out_point }
+      : undefined)
 
   return (
     <div
@@ -223,10 +231,11 @@ export default function FootageSearch({
                 />
               ) : selected.asset.asset_type === 'audio' && selected.asset.file_url ? (
                 <WaveformPlayer
-                  key={selected.asset.id}
+                  key={`${selected.asset.id}-${audioMoment?.in}`}
                   assetId={selected.asset.id}
                   src={selected.asset.file_url}
                   name={selected.asset.name}
+                  moment={audioMoment}
                 />
               ) : selected.asset.file_url ? (
                 <img
@@ -237,9 +246,15 @@ export default function FootageSearch({
               ) : null}
               <p className="text-sm text-gray-700 dark:text-gray-300">
                 {purpose === 'track'
-                  ? selected.asset.duration_seconds
-                    ? `${clock(selected.asset.duration_seconds)} long`
-                    : 'A sound'
+                  ? [
+                      selected.asset.duration_seconds
+                        ? `${clock(selected.asset.duration_seconds)} long`
+                        : 'A sound',
+                      audioMoment &&
+                        `${trim ? 'matched at' : 'clip of'} ${clock(audioMoment.in)}–${clock(audioMoment.out)}`,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')
                   : trim
                     ? `Uses ${clock(trim.in)}–${clock(trim.out)} (${Math.round(trim.out - trim.in)} s)`
                     : isVideo
