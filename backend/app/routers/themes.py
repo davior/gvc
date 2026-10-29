@@ -1,13 +1,11 @@
 """The theme list: named prompt modifiers, and which one new projects start with."""
 
 import uuid
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from app.auth import CurrentUser
-from app.clock import utcnow
 from app.database import get_session
 from app.models.theme import Theme
 from app.schemas import DataResponse, ListResponse
@@ -24,16 +22,6 @@ def _owned(session: Session, user_id: str, theme_id: str) -> Theme:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail={"code": "not_found", "message": "Theme not found"})
     return row
-
-
-def _clear_default(session: Session, user_id: str, keep: Optional[str]) -> None:
-    """At most one default per user."""
-    for other in session.exec(select(Theme).where(Theme.user_id == user_id,
-                                                  Theme.is_default == True)).all():  # noqa: E712
-        if other.id != keep:
-            other.is_default = False
-            other.updated_at = utcnow()
-            session.add(other)
 
 
 def _read(row: Theme) -> ThemeRead:
@@ -55,7 +43,7 @@ def create_theme(body: ThemeCreate, user: CurrentUser,
     row = Theme(id=str(uuid.uuid4()), user_id=user.id, name=body.name.strip(),
                 prompt=body.prompt.strip(), is_default=body.is_default)
     if row.is_default:
-        _clear_default(session, user.id, keep=None)
+        service.clear_default(session, user.id, keep=None)
     session.add(row)
     session.commit()
     session.refresh(row)
@@ -67,19 +55,8 @@ def update_theme(theme_id: str, body: ThemeUpdate, user: CurrentUser,
                  session: Session = Depends(get_session)) -> DataResponse[ThemeRead]:
     """Edits apply to every project using the theme, from its next generation on.
     What was already generated keeps the look it was made with."""
-    row = _owned(session, user.id, theme_id)
-    if body.name is not None:
-        row.name = body.name.strip()
-    if body.prompt is not None:
-        row.prompt = body.prompt.strip()
-    if body.is_default is not None:
-        row.is_default = body.is_default
-        if body.is_default:
-            _clear_default(session, user.id, keep=row.id)
-    row.updated_at = utcnow()
-    session.add(row)
-    session.commit()
-    session.refresh(row)
+    row = service.update(session, _owned(session, user.id, theme_id), name=body.name,
+                         prompt=body.prompt, is_default=body.is_default)
     return DataResponse(data=_read(row))
 
 

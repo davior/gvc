@@ -269,6 +269,11 @@ assistant's `generate_image` both end up, so neither has to remember to.
   It doesn't put the new theme on the video unless asked to (`use`). Asking for a
   theme is not asking for a video: from the project list, a turn that only chose or
   made a theme proposes nothing, so there is no Apply to turn it into a project.
+- **It can edit and delete them too** (`update_theme`, `delete_theme`), at once, for
+  the same reason, and only when asked: an edit restyles every project using the theme
+  and the list has no undo, so it is capped at four a turn and the tool hands back
+  what the theme was, for the reply to say. Deleting the open video's theme also takes
+  it off the video, as a proposed edit; other projects naming it just generate unstyled.
 
 ## Schema changes this goal needs
 

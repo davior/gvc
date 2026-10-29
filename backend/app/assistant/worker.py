@@ -22,7 +22,7 @@ from sqlmodel import Session
 from app.assistant import loop
 from app.assistant.attachments import images_of, material, media_ids
 from app.assistant.prompt import REFERENCE, context
-from app.assistant.tools import Working
+from app.assistant.tools import ToolFailed, Working
 from app.clock import utcnow
 from app.config import settings
 from app.gam.client import GamClient
@@ -127,7 +127,7 @@ def _run(turn_id: str) -> None:
             provider = build_provider(session, user_id)
             row = active_provider(session, user_id)
             sees_images = bool(row and row.supports_images)
-            themes = {t.id: {"name": t.name, "prompt": t.prompt}
+            themes = {t.id: {"name": t.name, "prompt": t.prompt, "is_default": t.is_default}
                       for t in theme_service.listed(session, user_id)}
         if provider is None:
             raise ProviderError("No AI provider is set up. Add one in Settings first.")
@@ -173,6 +173,26 @@ def _run(turn_id: str) -> None:
                 return row.id
 
         working.add_theme = add_theme
+
+        # The tools only offer ids from the list read above, all the user's own; owned()
+        # is still asked, so a theme deleted elsewhere mid-turn is a refusal, not a 500.
+        def edit_theme(theme_id, name, theme_prompt, is_default) -> None:
+            with queue.session() as session:
+                row = theme_service.owned(session, user_id, theme_id)
+                if row is None:
+                    raise ToolFailed("That theme was deleted in the meantime.")
+                theme_service.update(session, row, name=name, prompt=theme_prompt,
+                                     is_default=is_default)
+
+        def remove_theme(theme_id) -> None:
+            with queue.session() as session:
+                row = theme_service.owned(session, user_id, theme_id)
+                if row is not None:
+                    session.delete(row)
+                    session.commit()
+
+        working.edit_theme = edit_theme
+        working.remove_theme = remove_theme
         system = [REFERENCE, attached,
                   context(base, focus=focus, from_scratch=project_id is None, themes=themes)]
         outcome = loop.run(provider, working, system=system, history=history, prompt=prompt,

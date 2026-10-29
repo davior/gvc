@@ -165,6 +165,10 @@ It is saved at once even if the proposal is discarded, so say in your reply that
 it. Asking for a theme is not asking for a video: when that is all the request is, make \
 the theme and stop, with no other edits. Pass `use` only when the user wants this video \
 in that look, or you are drafting a video in it.
+`update_theme` and `delete_theme` change the user's list itself, at once, with no undo, \
+and every project using the theme is affected. Use them only when the user asks for that \
+theme to be changed or deleted, never to tidy up on your own; when it isn't clear which \
+theme they mean, ask. In your reply, say what the theme was before, so it can be put back.
 
 ## Pacing
 Narration reads at about 15 characters a second. A 3-minute video is about 2,500 characters \
@@ -208,7 +212,8 @@ def _theme_lines(data: Dict[str, Any], themes: Dict[str, Dict[str, str]]) -> str
     current = style.get("theme")
     if not themes:
         return "Themes: the user has none (they are made in Settings), so leave the theme unset."
-    lines = [f"- {t['name']} (id {tid}){' [current]' if tid == current else ''}: "
+    lines = [f"- {t['name']} (id {tid}){' [current]' if tid == current else ''}"
+             f"{' [default]' if t.get('is_default') else ''}: "
              f"{t['prompt'] or '(adds nothing)'}" for tid, t in themes.items()]
     if current and current not in themes:
         lines.append("The video names a theme that no longer exists; it adds nothing.")
