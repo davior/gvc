@@ -3,11 +3,20 @@
 import pytest
 
 from app.generation.catalogue import (
-    CatalogueError, default_params, estimate, kind_for, pick_model,
+    CatalogueError, default_params, estimate, kind_for, pick_model, target_size,
 )
 from tests.fake_siblings import GEN_MODELS
 
 FLUX, EDIT, KLING, VEO = GEN_MODELS
+
+# FLUX as a GAM with `custom_size` lists it (gam: the FLUX custom-size migration).
+LIMITS = {"max_width": 3072, "max_height": 3072, "multiple_of": 16, "max_pixels": 5_000_000}
+SIZED_FLUX = {**FLUX, "options": {**FLUX["options"], "custom_size": LIMITS}}
+NANO_BANANA = {"id": "m-nano", "kind": "text_to_image", "unit_price": 0.08, "price_unit": "image",
+               "options": {"aspect_ratios": ["auto", "16:9", "1:1", "9:16"],
+                           "resolutions": ["0.5K", "1K", "2K", "4K"], "max_outputs": 4}}
+SEEDREAM = {"id": "m-seedream", "kind": "image_to_image", "unit_price": 0.04, "price_unit": "image",
+            "options": {"image_sizes": ["auto_2K", "auto_4K"], "max_outputs": 4}}
 
 
 # ── choosing models and options (pure) ───────────────────────────────────────
@@ -44,10 +53,75 @@ def test_options_come_from_the_models_own_lists_with_their_own_types():
 def test_estimates_by_price_unit():
     assert estimate(KLING, {"duration": "10", "num_outputs": 1}) == pytest.approx(0.7)
     assert estimate(EDIT, {"num_outputs": 2}) == pytest.approx(0.078)
-    # FLUX is priced per megapixel: 1024x576 is 0.59 MP.
-    assert estimate(FLUX, {"image_size": "landscape_16_9", "num_outputs": 1}) == pytest.approx(
-        0.003 * 1024 * 576 / 1e6, abs=1e-4)
+    # FLUX is priced per megapixel, which fal counts as whole units of 1024², rounded up:
+    # 1024x576 is one, and 2880x1616 (4.4 of them) is five.
+    assert estimate(FLUX, {"image_size": "landscape_16_9", "num_outputs": 1}) == pytest.approx(0.003)
+    assert estimate(FLUX, {"width": 2880, "height": 1616, "num_outputs": 2}) == pytest.approx(0.03)
     assert estimate({"unit_price": None}, {}) is None
+
+
+# ── sizing a picture for the video ───────────────────────────────────────────
+
+def test_the_target_is_the_frame_with_headroom_in_the_pictures_own_aspect():
+    assert target_size("16:9", "1080p") == (2880, 1620)
+    assert target_size("16:9", "720p") == (1920, 1080)
+    # The output's short edge sets the scale, whatever shape the picture is.
+    assert target_size("1:1", "1080p") == (1620, 1620)
+    assert target_size("9:16", "4k") == (3240, 5760)
+
+
+def test_a_model_that_takes_any_size_is_asked_for_the_target():
+    params = default_params(SIZED_FLUX, aspect="16:9", outputs=2, target=(2880, 1620))
+    # 1620 is rounded down to FLUX's sixteens here rather than by GAM.
+    assert params == {"width": 2880, "height": 1616, "num_outputs": 2}
+
+
+def test_a_target_beyond_the_models_limits_shrinks_with_its_aspect_kept():
+    params = default_params(SIZED_FLUX, aspect="16:9", target=target_size("16:9", "4k"))
+    width, height = params["width"], params["height"]
+    assert width * height <= LIMITS["max_pixels"]
+    assert width <= 3072 and height <= 3072
+    assert width % 16 == 0 and height % 16 == 0
+    assert width / height == pytest.approx(16 / 9, rel=0.01)
+    # Portrait is clamped by its height.
+    tall = default_params(SIZED_FLUX, aspect="9:16", target=target_size("9:16", "4k"))
+    assert tall["height"] <= 3072 and tall["width"] < tall["height"]
+
+
+def test_size_tiers_take_the_nearest_to_the_target_never_below_the_frame():
+    def resolution(output):
+        return default_params(NANO_BANANA, aspect="16:9", target=target_size("16:9", output))["resolution"]
+
+    # 2K is 1.43x a 1080p frame: near enough to 1.5x, where 4K would be three times it.
+    assert resolution("1080p") == "2K"
+    assert resolution("4k") == "4K"
+    # 720p's target sits between 1K and 2K, a little nearer 1K, which is still above
+    # the frame (about 1376x768 at 16:9).
+    assert resolution("720p") == "1K"
+    params = default_params(NANO_BANANA, aspect="16:9", target=target_size("16:9", "1080p"))
+    assert params["aspect_ratio"] == "16:9"
+
+
+def test_a_tier_below_the_frame_is_never_chosen_while_a_larger_one_exists():
+    small = {**NANO_BANANA, "options": {**NANO_BANANA["options"], "resolutions": ["1K", "4K"]}}
+    # 1K is nearer 1.5x a 1080p frame by ratio than 4K is, but it is smaller than the frame.
+    assert default_params(small, aspect="16:9", target=target_size("16:9", "1080p"))["resolution"] == "4K"
+    # With nothing larger, the largest there is.
+    only_small = {**NANO_BANANA, "options": {**NANO_BANANA["options"], "resolutions": ["0.5K", "1K"]}}
+    assert default_params(only_small, aspect="16:9", target=target_size("16:9", "4k"))["resolution"] == "1K"
+
+
+def test_seedreams_automatic_sizes_are_tiers_too():
+    assert default_params(SEEDREAM, aspect="16:9", target=target_size("16:9", "1080p"))["image_size"] == "auto_2K"
+    assert default_params(SEEDREAM, aspect="16:9", target=target_size("16:9", "4k"))["image_size"] == "auto_4K"
+
+
+def test_without_custom_sizes_flux_keeps_its_preset():
+    # A GAM older than `custom_size`: the preset for the aspect, as before.
+    assert default_params(FLUX, aspect="16:9", target=(2880, 1620)) == {
+        "image_size": "landscape_16_9", "num_outputs": 1}
+    # And no target, no change at all.
+    assert default_params(SIZED_FLUX, aspect="16:9") == {"image_size": "landscape_16_9", "num_outputs": 1}
 
 
 # ── over HTTP ────────────────────────────────────────────────────────────────
@@ -87,11 +161,30 @@ def test_a_picture_placeholder_is_generated_as_its_owner_in_the_videos_aspect(
     row = res.json()["data"]
     assert (row["kind"], row["status"], row["model_label"]) == (
         "text_to_image", "queued", "FLUX.1 [schnell]")
-    assert row["estimate"] == pytest.approx(2 * 0.003 * 1024 * 576 / 1e6, abs=1e-4)
+    assert row["estimate"] == pytest.approx(2 * 0.003)
     [sent] = siblings.generations
     assert sent["authorization"] == "Bearer user-token"
     assert sent["prompt"] == "A dam at dusk" and sent["base_asset_ids"] == []
     assert sent["params"] == {"image_size": "landscape_16_9", "num_outputs": 2}
+
+
+def test_a_picture_is_sized_for_the_video_when_the_model_takes_any_size(
+        auth_client, project, siblings):
+    siblings.gen_models[0] = dict(SIZED_FLUX)
+    res = start(auth_client, project["id"], asset_key="a_dam")
+    assert res.status_code == 202, res.text
+    # 1.5x a 1080p 16:9 frame, in FLUX's sixteens; five fal megapixels.
+    assert siblings.generations[0]["params"] == {"width": 2880, "height": 1616, "num_outputs": 1}
+    assert res.json()["data"]["estimate"] == pytest.approx(5 * 0.003)
+
+
+def test_the_videos_resolution_and_the_pictures_aspect_set_the_size(auth_client, siblings):
+    siblings.gen_models[0] = dict(SIZED_FLUX)
+    spec = {**SPEC, "output": {"aspect": "16:9", "resolution": "720p"},
+            "assets": {**SPEC["assets"], "a_dam": {**SPEC["assets"]["a_dam"], "aspect": "1:1"}}}
+    project = auth_client.post("/api/projects", json={"spec": spec}).json()["data"]
+    assert start(auth_client, project["id"], asset_key="a_dam").status_code == 202
+    assert siblings.generations[0]["params"] == {"width": 1072, "height": 1072, "num_outputs": 1}
 
 
 def test_a_clip_is_made_from_its_base_picture(auth_client, project, siblings):
@@ -208,7 +301,7 @@ def test_a_clip_from_a_prompt_makes_its_picture_first_then_animates_it(
     assert row["stage"].startswith("Making the picture")
     assert row["model_label"] == "FLUX.1 [schnell] → Veo 3.1 Fast"
     # Both runs, priced together.
-    assert row["estimate"] == pytest.approx(0.1 * 8 + 0.003 * 1024 * 576 / 1e6, abs=1e-3)
+    assert row["estimate"] == pytest.approx(0.1 * 8 + 0.003)
 
     siblings.gen_jobs["job-1"].update(status="processing", stage="Generating", progress=50)
     listed = _list(auth_client, project["id"])[0]

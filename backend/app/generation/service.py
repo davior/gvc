@@ -11,7 +11,9 @@ from sqlmodel import Session
 
 from app.clock import utcnow
 from app.gam.client import GamClient, GamError
-from app.generation.catalogue import CatalogueError, default_params, estimate, kind_for, pick_model
+from app.generation.catalogue import (
+    CatalogueError, default_params, estimate, kind_for, pick_model, target_size,
+)
 from app.models.generation import Generation
 from app.services import themes
 
@@ -90,7 +92,12 @@ def start(session: Session, gam: GamClient, *, user_id: str, project_id: Optiona
         raise GenerationRefused("needs_base_image",
                                 "A clip is made from a picture: choose the picture to start from, "
                                 "or have one made from the prompt.")
-    aspect = ref.get("aspect") or (spec.get("output") or {}).get("aspect") or "16:9"
+    output = spec.get("output") or {}
+    aspect = ref.get("aspect") or output.get("aspect") or "16:9"
+    # Pictures are sized for the video they go into. Clips, and the picture a clip is
+    # animated from, keep their models' defaults for now: a video model's resolution is
+    # its own choice and the picture it starts from is only read at that resolution.
+    target = target_size(aspect, output.get("resolution") or "1080p") if ref["type"] == "image" else None
     try:
         models = gam.generation_models()
         kind = kind_for(ref["type"], bool(bases) or chained)
@@ -99,7 +106,7 @@ def start(session: Session, gam: GamClient, *, user_id: str, project_id: Optiona
     except CatalogueError as exc:
         raise GenerationRefused("no_model", str(exc))
     params = default_params(model, aspect=aspect, outputs=outputs if ref["type"] == "image" else 1,
-                            duration=duration)
+                            duration=duration, target=target)
     label = model.get("label") or model.get("endpoint_id", "")
     cost = estimate(model, params)
     then = None
