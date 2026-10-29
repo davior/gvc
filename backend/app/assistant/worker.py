@@ -67,6 +67,13 @@ def _canonical(data: dict) -> Optional[dict]:
     return dump_spec(spec) if spec is not None else None
 
 
+def _without_theme(data: Optional[dict]) -> Optional[dict]:
+    if not data:
+        return data
+    style = {k: v for k, v in (data.get("style") or {}).items() if k != "theme"}
+    return {**data, "style": style}
+
+
 def _run(turn_id: str) -> None:
     with queue.session() as session:
         turn = session.get(AssistantTurn, turn_id)
@@ -196,7 +203,12 @@ def _run(turn_id: str) -> None:
         if canonical is None:
             reply += ("\n\nI couldn't get the video into a valid state, so there's nothing to "
                       "apply. Ask me to try again, or say what to change.")
-        elif canonical != _canonical(base):
+        elif canonical != _canonical(base) and not (
+                project_id is None and _without_theme(canonical) == _without_theme(
+                    _canonical(base))):
+            # From the project list, applying makes a project. A turn that only chose
+            # or made a theme (the user asked for a theme, not a video) leaves a blank
+            # starter with a theme on it, which is nothing to make a project of.
             proposed = canonical
     if outcome.cut_short:
         reply = (reply + "\n\n" if reply else "") + f"_{outcome.cut_short}_"

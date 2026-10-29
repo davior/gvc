@@ -239,20 +239,21 @@ def made_themes(w):
     return made
 
 
-def test_create_theme_makes_one_and_uses_it_unless_told_not_to():
+def test_create_theme_makes_one_and_uses_it_only_when_told_to():
     w = Working({"title": "T", "style": {"theme": "t-noir"}}, themes=dict(THEMES))
     made = made_themes(w)
     result = tool(w, "create_theme", name=" Ink wash ", prompt=" Sumi-e ink, rice paper ")
     assert not result.is_error and "Made the theme" in result.content
     assert made == [("Ink wash", "Sumi-e ink, rice paper")]
-    assert w.data["style"]["theme"] == "t-new1"
-    assert w.changes == ["Set the theme to 'Ink wash'"]
+    # A theme for the list, not for this video: the video is untouched.
+    assert w.data["style"]["theme"] == "t-noir" and w.changes == []
     # Known from then on, by name too.
-    assert not tool(w, "set_theme", theme="noir").is_error
     assert not tool(w, "set_theme", theme="ink wash").is_error
+    assert w.data["style"]["theme"] == "t-new1"
 
-    tool(w, "create_theme", name="Pastel", prompt="Soft pastels", use=False)
-    assert w.data["style"]["theme"] == "t-new1" and len(made) == 2
+    tool(w, "create_theme", name="Pastel", prompt="Soft pastels", use=True)
+    assert w.data["style"]["theme"] == "t-new2" and len(made) == 2
+    assert w.changes == ["Set the theme to 'Ink wash'", "Set the theme to 'Pastel'"]
 
 
 def test_create_theme_refuses_a_taken_name_an_empty_look_and_too_many():
@@ -291,11 +292,19 @@ def provider(session, monkeypatch, engine):
     return scripted
 
 
+RIVERS = {
+    "title": "Rivers",
+    "segments": [{"id": "s_1", "kind": "scene", "label": "Rivers",
+                  "narration": {"beats": [{"id": "b1", "text": "Rivers run."}]}}],
+}
+
+
 def test_a_drafted_video_starts_from_the_default_and_keeps_the_assistants_choice(
         auth_client, provider):
     noir = make(auth_client, **NOIR, is_default=True)
     clay = make(auth_client, **CLAY)
     provider.script += [
+        says("", call("replace_spec", spec=RIVERS)),
         says("", call("set_theme", theme="Claymation")),
         says("A clay video."),
     ]
@@ -312,30 +321,55 @@ def test_a_drafted_video_starts_from_the_default_and_keeps_the_assistants_choice
     assert project["spec"]["style"]["theme"] == clay["id"]
 
 
-def test_a_theme_the_assistant_makes_is_in_the_list_even_if_the_draft_is_discarded(
-        auth_client, provider):
-    provider.script += [
-        # Built by hand: `call` takes the tool's name as `name`, as this tool's argument is.
-        says("", ToolCall(id="c-theme", name="create_theme",
-                          arguments={"name": "Ink wash", "prompt": "Sumi-e ink on rice paper"})),
-        says("I made an Ink wash theme and used it."),
-    ]
-    turn = auth_client.post("/api/assistant/turns", json={"prompt": "Ink-wash style, please"}
-                            ).json()["data"]
+def make_theme_call(**arguments):
+    # Built by hand: `call` takes the tool's name as `name`, as this tool's argument is.
+    return ToolCall(id="c-theme", name="create_theme",
+                    arguments={"name": "Ink wash", "prompt": "Sumi-e ink on rice paper",
+                               **arguments})
+
+
+@pytest.mark.parametrize("use", [False, True])
+def test_asking_for_a_theme_from_the_project_list_makes_a_theme_not_a_video(
+        auth_client, provider, use):
+    provider.script += [says("", make_theme_call(use=use)), says("I made Ink wash.")]
+    turn = auth_client.post("/api/assistant/turns",
+                            json={"prompt": "Make me an ink-wash theme"}).json()["data"]
     worker._run(turn["id"])
     [made] = auth_client.get("/api/themes").json()["data"]
     assert (made["name"], made["prompt"], made["is_default"]) == (
         "Ink wash", "Sumi-e ink on rice paper", False)
     done = auth_client.get(f"/api/assistant/turns/{turn['id']}").json()["data"]
-    assert done["proposed_spec"]["style"]["theme"] == made["id"]
+    assert done["status"] == "done" and done["reply"] == "I made Ink wash."
+    # Even when it set the theme on the blank starter, there is no video to apply.
+    assert done["proposed_spec"] is None and done["outcome"] == ""
+    assert auth_client.post(f"/api/assistant/turns/{turn['id']}/new-project").status_code == 409
+    assert auth_client.get("/api/projects").json()["total"] == 0
 
-    auth_client.post(f"/api/assistant/turns/{turn['id']}/discarded")
-    assert len(auth_client.get("/api/themes").json()["data"]) == 1
+
+def test_on_an_open_video_a_new_theme_is_proposed_only_when_used(auth_client, provider):
+    project = auth_client.post("/api/projects", json={"title": "Rivers"}).json()["data"]
+    provider.script += [says("", make_theme_call()), says("Made it.")]
+    turn = auth_client.post("/api/assistant/turns", json={
+        "prompt": "Make an ink-wash theme", "project_id": project["id"]}).json()["data"]
+    worker._run(turn["id"])
+    assert auth_client.get(f"/api/assistant/turns/{turn['id']}").json()["data"][
+        "proposed_spec"] is None
+
+    provider.script += [says("", make_theme_call(name="Ink wash 2", use=True)),
+                        says("Made it and used it.")]
+    turn = auth_client.post("/api/assistant/turns", json={
+        "prompt": "Make another and use it", "project_id": project["id"]}).json()["data"]
+    worker._run(turn["id"])
+    done = auth_client.get(f"/api/assistant/turns/{turn['id']}").json()["data"]
+    new = next(t for t in auth_client.get("/api/themes").json()["data"]
+               if t["name"] == "Ink wash 2")
+    assert done["proposed_spec"]["style"]["theme"] == new["id"]
 
 
 def test_a_theme_the_assistant_removed_is_not_put_back_by_the_default(auth_client, provider):
     make(auth_client, **NOIR, is_default=True)
-    provider.script += [says("", call("set_theme")), says("No theme.")]
+    provider.script += [says("", call("replace_spec", spec=RIVERS)),
+                        says("", call("set_theme")), says("No theme.")]
     turn = auth_client.post("/api/assistant/turns", json={"prompt": "Plain, please"}
                             ).json()["data"]
     worker._run(turn["id"])
