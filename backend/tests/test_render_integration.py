@@ -125,6 +125,33 @@ def test_a_full_render_refuses_placeholders_and_note_files_and_says_which(tmp_pa
     assert "a dry riverbed" in message and "the old map" in message
 
 
+def test_a_file_gam_says_is_too_large_is_refused_by_name_before_any_download(
+        tmp_path, library, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "render_max_file_mb", 1024)
+    library.assets["r"]["size_bytes"] = 9 * 1024 ** 3
+    with pytest.raises(RenderRefused) as refused:
+        _render(tmp_path, SPEC)
+    message = str(refused.value)
+    assert "asset r" in message and "9.0 GB" in message and "RENDER_MAX_FILE_MB" in message
+    assert not [r for r in library.requests if r.url.path == "/media/r.bin"]
+
+
+def test_a_file_that_streams_past_the_limit_is_refused_by_name(tmp_path, library, monkeypatch):
+    # GAM's size understated (or a clip, whose size is not its parent's): the
+    # streaming guard catches it, and the render still says which file.
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "render_max_file_mb", 0)
+    for asset in library.assets.values():
+        asset["size_bytes"] = 0
+    with pytest.raises(RenderRefused) as refused:
+        _render(tmp_path, SPEC)
+    message = str(refused.value)
+    assert "asset r" in message and "RENDER_MAX_FILE_MB" in message
+
+
 def test_a_preview_draws_a_placeholder_as_a_slate(tmp_path, library):
     data = json.loads(json.dumps(SPEC))
     data["assets"]["a_find"] = {"from": "search", "query": "a dry riverbed"}

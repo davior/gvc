@@ -24,7 +24,7 @@ from typing import Dict, List, NamedTuple, Optional, Set
 from PIL import Image
 
 from app.config import settings
-from app.gam.client import GamClient
+from app.gam.client import GamClient, GamError
 from app.schemas_gam import GamAssetRead, GamVersion
 from app.render import compose
 from app.render import ffmpeg as F
@@ -154,6 +154,14 @@ def _slate(work_dir: str, key: str, title: str, subtitle: str, width: int, heigh
     return Media(path=path, kind="slate", width=width, height=height)
 
 
+def _too_large(name: str, size: Optional[int]) -> str:
+    """Names the file and the setting to raise: the message alone has to be enough to fix it."""
+    limit = f"{settings.render_max_file_mb / 1024:.1f} GB"
+    actual = f" is {size / 1024 ** 3:.1f} GB, " if size else " is "
+    return (f"“{name}”{actual}larger than the {limit} a render will fetch. "
+            "Raise RENDER_MAX_FILE_MB to render it.")
+
+
 class MediaCache:
     """GAM files on local disk, pruned oldest-used first past the size cap."""
 
@@ -210,6 +218,7 @@ def resolve(
 ) -> Resolution:
     out = Resolution()
     width, height = frame
+    max_file_bytes = settings.render_max_file_mb * 1024 * 1024
     for key in sorted(used_keys(spec)):
         ref = spec.assets[key]
         if isinstance(ref, NotesAsset):
@@ -252,7 +261,22 @@ def resolve(
                                  fill=fills_frame(spec, key))
             if source.short_side is not None:
                 logger.info("Rendering “%s” from its %sp version", asset.name, source.short_side)
-        path = cache.fetch(gam, source.cache_id, source.url, source.size_bytes)
+        # Refused on GAM's word before fetching, so an oversized file costs no download.
+        # Only where that word is the file's own: the asset's file, or a version (each
+        # carries its own size). A clip's size is not its parent's, which the streaming
+        # guard in `download` still catches. Checked after choosing, so a 4K original
+        # over the limit still renders when a version that fits was made.
+        known_size = source.short_side is not None or file_id == asset.id
+        if known_size and source.size_bytes > max_file_bytes:
+            out.problems.append(_too_large(asset.name, source.size_bytes))
+            continue
+        try:
+            path = cache.fetch(gam, source.cache_id, source.url, source.size_bytes)
+        except GamError as exc:
+            if exc.code != "gam_media_too_large":
+                raise
+            out.problems.append(_too_large(asset.name, None))
+            continue
         media = _probe(path, kind)
         if file_id != asset.id:
             media.offset = asset.in_point or 0.0

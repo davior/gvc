@@ -144,3 +144,34 @@ def test_a_gam_without_versions_renders_the_original(tmp_path, reel):
 
     assert resolved.problems == []
     assert _media_fetched(reel) == ["/media/r.bin"]
+
+
+def test_an_original_over_the_size_limit_renders_from_a_version_that_fits(
+    tmp_path, reel, monkeypatch
+):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "render_max_file_mb", 1)
+    reel.assets["r"]["size_bytes"] = 5 * 1024 * 1024
+    reel.versions["r"] = [{"id": "v1", "short_side": 1080, "width": 1920, "height": 1080,
+                           "size_bytes": 2, "file_url": "/media/r1080.bin"}]
+
+    resolved = _resolve(tmp_path, FHD)
+
+    assert resolved.problems == []
+    assert _media_fetched(reel) == ["/media/r1080.bin"]
+
+
+def test_a_version_over_the_size_limit_is_refused_before_it_downloads(
+    tmp_path, reel, monkeypatch
+):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "render_max_file_mb", 1)
+    reel.versions["r"] = [{"id": "v1", "short_side": 1080, "width": 1920, "height": 1080,
+                           "size_bytes": 5 * 1024 * 1024, "file_url": "/media/r1080.bin"}]
+
+    resolved = _resolve(tmp_path, FHD)
+
+    assert len(resolved.problems) == 1 and "reel" in resolved.problems[0]
+    assert _media_fetched(reel) == []
