@@ -252,3 +252,64 @@ def test_credits_become_an_end_card_and_a_description(tmp_path, library):
     assert chapters.startswith("0:00 ")
     assert credits == ("Credits\nPhoto: Jane Doe / CC BY 4.0\nFootage: River Archive\n"
                        "Narrated by Rex")
+
+
+# ── shots joined by cuts keep their sound on their picture ──────────────────
+
+def test_shots_joined_by_cuts_keep_their_sound_with_their_picture(tmp_path):
+    from app.render.options import RenderOptions
+    from app.render.renderer import _stitch_cuts
+
+    # Each shot planned at 3.517 s is 106 frames (3.533 s) of picture. Joined by the
+    # concat demuxer with the sound copied, every shot's AAC padding was played too:
+    # these six came out 48 ms long, and a ninety-shot video two and a half seconds.
+    options = RenderOptions()
+    shared = F.encode_args(options, preview=True)
+    names = []
+    for i in range(6):
+        name = f"s{i}.mp4"
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i",
+                        "color=c=blue:s=320x180:r=30", "-f", "lavfi", "-i",
+                        f"sine=frequency={300 + 50 * i}", "-t", "3.517", *shared,
+                        str(tmp_path / name)], check=True)
+        names.append(name)
+
+    frames = _stitch_cuts(names, "joined.mp4", options=options, preview=True,
+                          work_dir=str(tmp_path))
+    assert frames == [106] * 6
+
+    joined = str(tmp_path / "joined.mp4")
+    pcm = subprocess.run(["ffmpeg", "-v", "error", "-i", joined, "-map", "0:a", "-f", "s16le",
+                          "-ac", "1", "-ar", "48000", "-"], capture_output=True, check=True).stdout
+    picture = sum(frames) / options.fps
+    assert len(pcm) / 2 / 48000 == pytest.approx(picture, abs=0.015)
+
+
+def test_every_shot_comes_out_described_the_same_whatever_its_footage(tmp_path):
+    from app.render.options import RenderOptions
+
+    # Footage tagged the ways a real project's was: untagged, full range, and a
+    # full-range JPEG pixel format with BT.470BG colour. Left as they came, the
+    # stitch changed description at each, and Debian's ffmpeg 7.1.5 rebuilt the
+    # overlay pass there and dropped every timed overlay from then on.
+    sources = {
+        "plain": [],
+        "full": ["-color_range", "pc"],
+        "jpeg": ["-pix_fmt", "yuvj420p", "-color_range", "pc", "-colorspace", "bt470bg"],
+    }
+    described = set()
+    for name, tags in sources.items():
+        clip = f"{name}.mp4"
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "testsrc=size=320x180:rate=25",
+                        "-f", "lavfi", "-i", "sine=frequency=220", "-t", "2", "-c:v", "libx264",
+                        *(tags if "-pix_fmt" in tags else ["-pix_fmt", "yuv420p", *tags]),
+                        "-c:a", "aac", str(tmp_path / clip)], check=True)
+        F.run(F.build_shot_command(kind="video_sound", background=clip, audio=None, duration=1.5,
+                                   output=f"shot_{name}.mp4", options=RenderOptions(), preview=True,
+                                   background_has_audio=True), cwd=str(tmp_path))
+        out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-read_intervals", "%+#1",
+                              "-show_entries", "frame=pix_fmt,color_range,color_space,color_primaries,"
+                              "color_transfer", "-of", "csv=p=0", str(tmp_path / f"shot_{name}.mp4")],
+                             capture_output=True, text=True, check=True).stdout.strip().splitlines()[0]
+        described.add(out.rstrip(","))
+    assert described == {"yuv420p,tv,bt709,bt709,bt709"}

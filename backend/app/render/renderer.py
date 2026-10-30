@@ -225,6 +225,26 @@ def _stitch_blended(
         F.run(F.build_concat_command("stitch.txt", output), cwd=work_dir, timeout=1800)
 
 
+def _stitch_cuts(
+    shot_files: List[str], output: str, *, options: RenderOptions, preview: bool,
+    work_dir: str,
+) -> List[int]:
+    """Join shots by cuts: the picture copied, the sound decoded and re-joined.
+
+    Returns how many frames each shot has. See `build_audio_join_command` for why the
+    sound is not simply copied with the picture.
+    """
+    fps = options.fps
+    frames = [F.probe_keyframes(os.path.join(work_dir, name), fps)[1] for name in shot_files]
+    F.run(F.build_audio_join_command(shot_files, [round(n * 48000 / fps) for n in frames],
+                                     "stitch_audio.m4a", options=options, preview=preview),
+          cwd=work_dir, timeout=1800)
+    F.write_concat_list(os.path.join(work_dir, "shots.txt"), shot_files)
+    F.run(F.build_join_av_command("shots.txt", "stitch_audio.m4a", output),
+          cwd=work_dir, timeout=1800)
+    return frames
+
+
 def _stitch_partial(
     shot_files: List[str], durations: List[float], joins: list, output: str,
     *, options: RenderOptions, preview: bool, work_dir: str,
@@ -547,8 +567,13 @@ def render(
             timeline = layout_without_overlaps(timeline)
             blends = []
     if not any(blends):
-        F.write_concat_list(os.path.join(work_dir, "shots.txt"), shot_files)
-        F.run(F.build_concat_command("shots.txt", stitched), cwd=work_dir, timeout=1800)
+        frames = _stitch_cuts(shot_files, stitched, options=options, preview=preview,
+                              work_dir=work_dir)
+        # A shot's picture is whole frames, so up to a frame longer than planned, and
+        # over ninety shots that is seconds. Everything placed from here on (overlays,
+        # music, chapters, subtitles) goes by where the shots really are.
+        timeline.durations = [count / options.fps for count in frames]
+        timeline = layout_without_overlaps(timeline)
     final = stitched
     where = placement(units, timeline, [n.beats for n in narrated])
 
@@ -563,6 +588,12 @@ def render(
     if layers or waves:
         count = len(layers) + len(waves)
         progress("Drawing overlays", 88, f"{count} overlay{'s' if count != 1 else ''}")
+        # What the pass was asked to draw, and when: the working files are gone once
+        # the render ends, and this is what tells a missing overlay's placement apart
+        # from the pass failing to draw it.
+        logger.info("Overlay pass over %.1f s: %s", timeline.total,
+                    ", ".join(f"{i.segment_id} {i.overlay.type} {i.start:.1f}-{i.end:.1f}"
+                              for i in timed))
         F.run(F.build_overlay_pass(final, layers, "overlaid.mp4", options=options,
                                    preview=preview, duration=timeline.total,
                                    waves=waves, width=width, height=height),

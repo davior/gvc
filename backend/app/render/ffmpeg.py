@@ -8,17 +8,19 @@ The one invariant the whole pipeline rests on: every shot is encoded with
 byte-identical codec parameters (see `encode_args`), which is what lets the final
 stitch be a `concat -c copy` remux instead of a second full encode. A stray SAR
 or pixel format is the usual way that silently breaks, so every video chain ends
-with `setsar=1,format=yuv420p`.
+with `NORMALISE`.
 """
 
 import logging
 import math
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from app.config import settings
 from app.render.options import (
     DIP_TRANSITIONS, KENBURNS_MIN_LEG_SECONDS, XFADE_NAMES, MusicSpec, TransitionSpec,
     RenderOptions, encoder_tier, frame_size, is_crossfade, kenburns_geometry,
@@ -109,9 +111,19 @@ def run(argv: Sequence[str], *, cwd: Optional[str] = None, timeout: int = SHOT_T
     reason has been cut off the end and all the user sees is a severed command
     line. The original is chained, so the full argv still reaches the log, which
     is where it is actually useful.
+
+    `RENDER_FFMPEG_LOGLEVEL` above "error" swaps into every `-loglevel` here and
+    logs what ffmpeg said even when it succeeded. A step can succeed and still
+    have done the wrong thing: Debian's 7.1.5 rebuilt the overlay pass's filters
+    wherever the picture's colour tags changed, losing every timed overlay, and
+    said so only at "info" and above.
     """
+    level = settings.render_ffmpeg_loglevel
+    argv = list(argv)
+    if level != "error" and "-loglevel" in argv:
+        argv[argv.index("-loglevel") + 1] = level
     try:
-        result = subprocess.run(list(argv), capture_output=True, timeout=timeout, cwd=cwd)
+        result = subprocess.run(argv, capture_output=True, timeout=timeout, cwd=cwd)
     except subprocess.TimeoutExpired as exc:
         raise FFmpegError(
             f"ffmpeg gave up on a segment after {timeout}s. It is probably a very "
@@ -132,6 +144,14 @@ def run(argv: Sequence[str], *, cwd: Optional[str] = None, timeout: int = SHOT_T
             reason = f"exit code {code}"
         logger.error("ffmpeg %s\nargv: %s\nstderr: %s", reason, " ".join(argv), stderr or "<empty>")
         raise FFmpegError(f"ffmpeg failed ({reason}): {tail}".rstrip(": "))
+    if level != "error":
+        # Without the progress lines, which at "info" and above arrive several a
+        # second and would push what matters out of any tail kept of them.
+        said = [line for line in re.split(r"[\r\n]+", result.stderr.decode(errors="replace"))
+                if line.strip() and not line.lstrip().startswith(("frame=", "size="))]
+        if said:
+            more = f"\n… and {len(said) - 200} lines more" if len(said) > 200 else ""
+            logger.warning("ffmpeg said, writing %s:\n%s%s", argv[-1], "\n".join(said[:200]), more)
 
 
 def probe_duration(path: str) -> float:
@@ -221,11 +241,25 @@ def encode_args(options: RenderOptions, preview: bool) -> List[str]:
     return [
         "-c:v", "libx264", "-preset", preset, "-crf", str(crf),
         "-pix_fmt", "yuv420p", "-profile:v", "high", "-level", "4.1",
+        # What `NORMALISE` made the frames, written into the stream as well.
+        "-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709",
+        "-color_trc", "bt709",
         "-r", str(fps), "-g", str(fps * 2), "-keyint_min", str(fps),
         "-video_track_timescale", "90000",
         "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
         "-max_muxing_queue_size", "1024",
     ]
+
+
+# The end of every video chain, so every shot's picture is described the same way.
+# Footage arrives tagged every which way (full range from a phone, BT.601 from an
+# old broadcast, nothing at all from a still), and the shots keep those tags through
+# a `-c copy` stitch. Wherever the description changed, Debian's ffmpeg 7.1.5 rebuilt
+# the overlay pass's filters, and each timed overlay, fed in once as a single frame,
+# was gone for the rest of the video: a 40-minute render lost every one of them from
+# the first clip on. Converted here to limited range and BT.709, and tagged so.
+NORMALISE = ("setsar=1,scale=out_range=tv:out_color_matrix=bt709,format=yuv420p,"
+             "setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709")
 
 
 def _hex_to_ffmpeg(colour: str) -> str:
@@ -665,7 +699,7 @@ def build_shot_command(
         chains.append(f"[{stage}]{','.join(fades)}[fd]")
         stage = "fd"
 
-    chains.append(f"[{stage}]setsar=1,format=yuv420p[v]")
+    chains.append(f"[{stage}]{NORMALISE}[v]")
 
     # Pad the audio so a shot always reaches its target length even when the
     # narration is shorter (a media block with little text under it).
@@ -762,7 +796,7 @@ def build_xfade_command(
         video, audio = f"vx{index}", f"ax{index}"
         total += durations[index] - overlap
 
-    chains.append(f"[{video}]setsar=1,format=yuv420p[v]")
+    chains.append(f"[{video}]{NORMALISE}[v]")
     argv += ["-filter_complex", ";".join(chains), "-map", "[v]", "-map", f"[{audio}]"]
     argv += encode_args(options, preview)
     argv += ["-movflags", "+faststart", output]
@@ -1153,7 +1187,7 @@ def build_stitch_command(
             achains.append(f"[at{index}][{sounds[index]}]concat=n=2:v=0:a=1[ax{index}]")
             total += durations[index] - overlap
         video, audio = f"vx{index}", f"ax{index}"
-    vchains.append(f"[{video}]setsar=1,format=yuv420p[v]")
+    vchains.append(f"[{video}]{NORMALISE}[v]")
 
     shared = encode_args(options, preview)
     split = shared.index("-c:a")
@@ -1370,6 +1404,30 @@ def build_video_copy_command(source: str, output: str) -> List[str]:
     streams, and the partial stitch's pieces carry no sound."""
     return ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", source,
             "-map", "0:v", "-c", "copy", "-an", "-video_track_timescale", "90000", output]
+
+
+def build_audio_join_command(shot_files: Sequence[str], samples: Sequence[int], output: str,
+                             *, options: RenderOptions, preview: bool) -> List[str]:
+    """Every shot's sound, decoded, cut to `samples[i]` and joined end to end.
+
+    The cut stitch's counterpart to `build_stitch_command(streams="audio")`. Copying
+    the shots' AAC packets with the concat demuxer kept each shot's encoder padding,
+    about 25 ms, and a player plays it: over ninety shots the sound fell two and a
+    half seconds behind the picture. Decoded, the padding is gone, and each shot is
+    then made exactly as long as its picture (`samples`), which is whole frames and
+    so up to a frame longer than the narration asked for.
+    """
+    argv = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
+    for name in shot_files:
+        argv += ["-threads", "1", "-vn", "-i", name]
+    chains = [f"[{i}:a]apad,atrim=end_sample={n},asetpts=PTS-STARTPTS[a{i}]"
+              for i, n in enumerate(samples)]
+    chains.append("".join(f"[a{i}]" for i in range(len(samples)))
+                  + f"concat=n={len(samples)}:v=0:a=1[a]")
+    shared = encode_args(options, preview)
+    argv += ["-filter_complex", ";".join(chains), "-map", "[a]",
+             *shared[shared.index("-c:a"):], "-vn", output]
+    return argv
 
 
 def build_join_av_command(video_list: str, audio: str, output: str) -> List[str]:

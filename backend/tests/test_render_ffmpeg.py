@@ -166,7 +166,7 @@ def test_every_video_chain_ends_normalised():
         graph = _graph(F.build_shot_command(
             kind=kind, background="x", audio=audio, duration=3, output="o.mp4",
             options=RenderOptions(), preview=False, background_has_audio=has_audio))
-        assert "setsar=1,format=yuv420p[v]" in graph
+        assert f"{F.NORMALISE}[v]" in graph
 
 
 def test_waveform_splits_the_audio_it_shares_with_the_muxed_track():
@@ -207,7 +207,7 @@ def test_waveform_is_dropped_when_the_host_ffmpeg_lacks_it(monkeypatch):
     graph = _graph(F.build_shot_command(kind="still", background="bg.png", audio="n.wav",
                                         duration=3, output="s.mp4", options=options, preview=False))
     assert "showwaves" not in graph
-    assert "setsar=1,format=yuv420p[v]" in graph  # still a valid graph
+    assert f"{F.NORMALISE}[v]" in graph  # still a valid graph
 
 
 def test_overlay_and_subtitles_are_layered_in_order():
@@ -1572,3 +1572,25 @@ def test_the_wave_pass_really_runs_and_draws_only_in_its_window(tmp_path):
         return any(g > 150 and r < 100 for r, g, _ in img.getdata())
 
     assert green_at(2.0) and not green_at(0.5) and not green_at(3.6)
+
+
+def test_a_raised_ffmpeg_loglevel_reaches_every_step_and_its_output_the_log(monkeypatch, caplog):
+    from app.config import settings
+
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen["argv"] = argv
+        return types.SimpleNamespace(returncode=0, stderr=b"frame=  10 fps=0.0\rframe=  20 fps=9\r"
+                                                         b"Reconfiguring filter graph because video "
+                                                         b"parameters changed\nframe=  30 fps=9\r")
+
+    monkeypatch.setattr(F.subprocess, "run", fake_run)
+    F.run(["ffmpeg", "-y", "-loglevel", "error", "-i", "in.mp4", "out.mp4"])
+    assert seen["argv"][3] == "error" and "Reconfiguring" not in caplog.text
+
+    monkeypatch.setattr(settings, "render_ffmpeg_loglevel", "info")
+    F.run(["ffmpeg", "-y", "-loglevel", "error", "-i", "in.mp4", "out.mp4"])
+    assert seen["argv"][3] == "info"
+    assert "writing out.mp4" in caplog.text and "Reconfiguring filter graph" in caplog.text
+    assert "frame=" not in caplog.text
