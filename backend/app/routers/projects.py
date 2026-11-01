@@ -1,5 +1,7 @@
 """Projects: list, create (blank, pasted or pushed from Notes), edit, history."""
 
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlmodel import Session, func, select
 
@@ -11,10 +13,11 @@ from app.gam.client import GamClient
 from app.routers.gam import get_gam
 from app.schemas_projects import (
     CopyFailureRead, NoteMediaCopy, ProjectCreate, ProjectImport, ProjectRead,
-    ProjectSummary, SpecSave, VersionDetail, VersionRead,
+    ProjectSummary, ScriptExport, SpecSave, VersionDetail, VersionRead,
 )
 from app.services import note_media
 from app.services import projects as service
+from app.services import script
 from app.spec.starter import starter_spec
 
 router = APIRouter()
@@ -170,3 +173,33 @@ def copy_note_media(
         copied=result.copied,
         failed=[CopyFailureRead(key=f.key, message=f.message) for f in result.failed],
     ))
+
+
+DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+@router.post("/{project_id}/script")
+def export_script(
+    project_id: str,
+    body: ScriptExport,
+    user: CurrentUser,
+    session: Session = Depends(get_session),
+    gam: GamClient = Depends(get_gam),
+) -> Response:
+    """The video's script as a Word document: narration, on-screen words, and what
+    is said in each clip, in order.
+
+    A POST so it can carry the editor's draft: the script someone reads through is
+    the one in front of them, saved or not. Nothing is written.
+    """
+    project = service.get_owned(session, user, project_id)
+    spec = service.require_spec(body.spec if body.spec is not None
+                                else service.decode(project.spec))
+    document = script.build_docx(spec, script.clip_texts(spec, gam))
+    name = script.filename(spec)
+    # filename* for a title in any script; the plain one for clients that ignore it.
+    ascii_name = name.encode("ascii", "ignore").decode() or "video-script.docx"
+    return Response(content=document, media_type=DOCX, headers={
+        "Content-Disposition": f"attachment; filename=\"{ascii_name}\"; "
+                               f"filename*=UTF-8''{quote(name)}",
+    })
