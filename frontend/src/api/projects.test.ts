@@ -1,6 +1,6 @@
 import { AxiosError } from 'axios'
 import { describe, expect, it } from 'vitest'
-import { formatPath, specIssuesOf } from '@/api/projects'
+import { blobError, formatPath, scriptFilename, specIssuesOf } from '@/api/projects'
 
 function rejection(detail: unknown, status = 422): AxiosError {
   const error = new AxiosError('failed')
@@ -36,5 +36,33 @@ describe('specIssuesOf', () => {
       []
     )
     expect(specIssuesOf(new Error('network'))).toEqual([])
+  })
+})
+
+describe('script export helpers', () => {
+  it('prefers the UTF-8 file name and falls back to the plain one', () => {
+    expect(
+      scriptFilename(
+        `attachment; filename="Caf-script.docx"; filename*=UTF-8''Caf%C3%A9-script.docx`
+      )
+    ).toBe('Café-script.docx')
+    expect(scriptFilename('attachment; filename="Plain-script.docx"')).toBe(
+      'Plain-script.docx'
+    )
+    expect(scriptFilename(undefined)).toBeNull()
+  })
+
+  it('reads a JSON error out of a blob response', async () => {
+    const error = {
+      response: {
+        data: new Blob([
+          JSON.stringify({ detail: { code: 'invalid_spec', message: 'Nope' } }),
+        ]),
+      },
+    }
+    const parsed = (await blobError(error)) as typeof error
+    expect(parsed.response.data).toEqual({
+      detail: { code: 'invalid_spec', message: 'Nope' },
+    })
   })
 })

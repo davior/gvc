@@ -77,6 +77,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # The script export's file name; a cross-origin page can't read it otherwise.
+    expose_headers=["Content-Disposition"],
 )
 
 

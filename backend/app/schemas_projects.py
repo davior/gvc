@@ -49,6 +49,12 @@ class SpecSave(BaseModel):
     message: str = Field(default="", max_length=500)
 
 
+class ScriptExport(BaseModel):
+    # The editor's draft, unsaved edits and all, so the script read is the one on
+    # screen. Absent: the saved spec.
+    spec: Optional[Dict[str, Any]] = None
+
+
 class VersionRead(BaseModel):
     id: str
     seq: int

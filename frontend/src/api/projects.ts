@@ -400,12 +400,67 @@ export const projectsApi = {
       .then((r) => r.data.data)
   },
 
+  /**
+   * The script as a Word document: narration, on-screen words and what each clip
+   * says. Sends the draft, so unsaved edits are in it.
+   */
+  script(id: string, spec: VideoSpec): Promise<{ blob: Blob; filename: string }> {
+    return client
+      .post<Blob>(`/projects/${id}/script`, { spec }, { responseType: 'blob' })
+      .then((r) => ({
+        blob: r.data,
+        filename: scriptFilename(r.headers['content-disposition']) ?? 'script.docx',
+      }))
+  },
+
   /** Always resolves for a reachable server: an invalid spec is an answer, not an error. */
   validate(spec: unknown): Promise<Validation> {
     return client
       .post<DataResponse<Validation>>('/spec/validate', spec)
       .then((r) => r.data.data)
   },
+}
+
+/** The name the server gave the file, preferring the UTF-8 `filename*` form. */
+export function scriptFilename(header: unknown): string | null {
+  if (typeof header !== 'string') return null
+  const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(header)
+  if (utf8) {
+    try {
+      return decodeURIComponent(utf8[1])
+    } catch {
+      /* fall through to the plain name */
+    }
+  }
+  return /filename="([^"]+)"/i.exec(header)?.[1] ?? null
+}
+
+/** `Blob.text()` is missing from older engines and from jsdom; FileReader isn't. */
+function readBlob(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsText(blob)
+  })
+}
+
+/**
+ * A failed blob request carries its JSON error as a Blob, which `apiErrorMessage`
+ * can't read. Parsed back into the usual shape here, so it can.
+ */
+export async function blobError(error: unknown): Promise<unknown> {
+  const response = (error as { response?: { data?: unknown } })?.response
+  if (response && response.data instanceof Blob) {
+    try {
+      const blob = response.data
+      const text = blob.text ? await blob.text() : await readBlob(blob)
+      response.data = JSON.parse(text)
+    } catch {
+      /* not JSON: leave it, and the generic message stands */
+    }
+  }
+  return error
 }
 
 /** The issues a 422 `invalid_spec` carries, or none. */

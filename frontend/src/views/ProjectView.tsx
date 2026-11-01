@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, CloudUpload, Save, Search, Sparkles, Undo2 } from 'lucide-react'
+import {
+  ArrowLeft,
+  CloudUpload,
+  FileText,
+  Save,
+  Search,
+  Sparkles,
+  Undo2,
+} from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
-import type { NoteMediaCopy } from '@/api/projects'
+import { apiErrorMessage } from '@/api/client'
+import { blobError, projectsApi, type NoteMediaCopy } from '@/api/projects'
 import FootageSearch from '@/components/FootageSearch'
 import GenerateDialog from '@/components/GenerateDialog'
 import HistoryPanel from '@/components/HistoryPanel'
@@ -63,6 +72,8 @@ export default function ProjectView() {
   const [finding, setFinding] = useState<Finding | null>(null)
   const [copyResult, setCopyResult] = useState<NoteMediaCopy | null>(null)
   const [generating, setGenerating] = useState<string | null>(null)
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
   const loadGenerations = useGenerationStore((s) => s.load)
   const generations = useGenerationStore((s) => s.rows)
   const generationError = useGenerationStore((s) => s.error)
@@ -111,6 +122,27 @@ export default function ProjectView() {
       ? toFind.find((p) => p.key === finding.key)?.ref
       : undefined
 
+  /** Downloads the draft's script as a .docx, through a link the page clicks: the
+   *  request carries the bearer token, so a plain `<a href>` couldn't. */
+  async function onExportScript() {
+    if (!project || !draft) return
+    setExporting(true)
+    setExportError(null)
+    try {
+      const { blob, filename } = await projectsApi.script(project.id, draft)
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setExportError(apiErrorMessage(await blobError(e), 'Could not export the script'))
+    } finally {
+      setExporting(false)
+    }
+  }
+
   async function onCopy() {
     setCopyResult(await copyNoteMedia())
   }
@@ -130,6 +162,16 @@ export default function ProjectView() {
             value={draft.title}
             onChange={(e) => edit({ ...draft, title: e.target.value })}
           />
+          <button
+            type="button"
+            className="btn btn-ghost"
+            disabled={exporting}
+            onClick={() => void onExportScript()}
+            title="Every word the video says, as a Word document: narration, on-screen text and what is said in each clip"
+          >
+            <FileText className="mr-1 inline h-4 w-4" />
+            {exporting ? 'Exporting…' : 'Script'}
+          </button>
           {dirty && (
             <button type="button" className="btn btn-ghost" onClick={discard}>
               <Undo2 className="mr-1 inline h-4 w-4" />
@@ -147,6 +189,11 @@ export default function ProjectView() {
           </button>
         </div>
 
+        {exportError && (
+          <p role="alert" className="text-xs text-red-600">
+            {exportError}
+          </p>
+        )}
         <p className="text-xs text-gray-500">
           Version {project.version}
           {source?.kind === 'note' &&
