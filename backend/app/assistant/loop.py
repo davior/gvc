@@ -1,5 +1,11 @@
 """One turn: the model and the tools, round after round, until the model is done.
 
+The loop itself, meaning when to stop, what a cut-off reply or a refusal means, and that
+every tool call is answered exactly once, is `gecko_suite_client.run_agent`, shared with
+the other apps' assistants. What is left here is what is this app's: its tools, the
+wording of its progress steps, the clip-picking jobs a round runs side by side, and the
+rule that a video still failing validation is not finished.
+
 Pure of the database and the job queue (`worker.py` owns those), so a whole turn can be
 run in a test against a scripted provider.
 """
@@ -7,8 +13,9 @@ run in a test against a scripted provider.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Sequence, Tuple
+
+from gecko_suite_client import Outcome, Stopped, run_agent
 
 from app.assistant import tools as T
 from app.assistant.tools import Working, _issues_text
@@ -20,19 +27,14 @@ logger = logging.getLogger(__name__)
 # Past that it would only be spending the user's money to repeat itself.
 MAX_REPAIR_NUDGES = 2
 
+OUTPUT_LIMIT = ("The reply hit the provider's output limit. Raise the maximum response "
+                "length in Settings, or ask for less at once.")
+
 Step = Callable[[str, str], None]
 
-
-class Stopped(Exception):
-    """The user pressed Stop."""
-
-
-@dataclass
-class Outcome:
-    reply: str
-    # Set when the turn ran out of rounds or output before finishing on its own.
-    cut_short: Optional[str] = None
-    replies: List[Reply] = field(default_factory=list)
+# Re-exported: the worker catches `loop.Stopped`, and it must be the class `run_agent`
+# raises, not a second one that only looks like it.
+__all__ = ["MAX_REPAIR_NUDGES", "Outcome", "Stopped", "run"]
 
 
 def _first_line(text: str) -> str:
@@ -45,35 +47,27 @@ def run(provider: ChatProvider, working: Working, *, system: Sequence[str],
         max_rounds: int, images: Sequence[Image] = ()) -> Outcome:
     conversation = provider.conversation(system=system, tools=T.SPECS, history=history,
                                          prompt=prompt, images=images)
-    outcome = Outcome(reply="")
     nudges = 0
-    for _ in range(max_rounds):
-        if cancelled():
-            raise Stopped()
-        reply = conversation.ask()
-        outcome.replies.append(reply)
-        on_reply(reply)
-        if reply.text:
-            outcome.reply = reply.text
-        if not reply.tool_calls:
-            if reply.stop == "max_tokens":
-                outcome.cut_short = ("The reply hit the provider's output limit. Raise the "
-                                     "maximum response length in Settings, or ask for less "
-                                     "at once.")
-                return outcome
-            if working.issues and working.changes and nudges < MAX_REPAIR_NUDGES:
-                nudges += 1
-                on_step("issue", f"{len(working.issues)} issue(s) left to fix")
-                conversation.tell("The video still has issues, so it can't be proposed yet. "
-                                  "Fix these, then finish:\n" + _issues_text(working.issues))
-                continue
-            return outcome
-        if reply.text:
-            on_step("think", reply.text)
+
+    def nudge(_reply) -> Optional[str]:
+        """The model stopped. If the video is still invalid, say so and let it fix it.
+
+        Counted here as well as by `run_agent`, because reporting the step is this
+        function's side effect and it must not fire for a nudge `run_agent` then declines.
+        """
+        nonlocal nudges
+        if not (working.issues and working.changes) or nudges >= MAX_REPAIR_NUDGES:
+            return None
+        nudges += 1
+        on_step("issue", f"{len(working.issues)} issue(s) left to fix")
+        return ("The video still has issues, so it can't be proposed yet. "
+                "Fix these, then finish:\n" + _issues_text(working.issues))
+
+    def run_round(calls) -> List[ToolResult]:
         results: List[Optional[ToolResult]] = []
         # find_clips calls wait here as jobs, so all the round's picker calls run at once.
         waiting: List[Tuple[int, str, T.ClipJob]] = []
-        for call in reply.tool_calls:
+        for call in calls:
             if cancelled():
                 raise Stopped()
             if call.name == "search_assets":
@@ -99,7 +93,16 @@ def run(provider: ChatProvider, working: Working, *, system: Sequence[str],
             answers = T.finish_clip_jobs(working, [job for _, _, job in waiting])
             for (index, call_id, _), (content, is_error) in zip(waiting, answers):
                 results[index] = ToolResult(call_id, content, is_error=is_error)
-        conversation.answer(results)
-    outcome.cut_short = (f"Stopped after {max_rounds} rounds without finishing. What it had "
-                         "done so far is below; ask again to carry on.")
-    return outcome
+        return results  # type: ignore[return-value]  # every None was filled above
+
+    return run_agent(
+        conversation,
+        run_round=run_round,
+        nudge=nudge,
+        max_nudges=MAX_REPAIR_NUDGES,
+        max_tokens_message=OUTPUT_LIMIT,
+        cancelled=cancelled,
+        on_reply=on_reply,
+        on_step=on_step,
+        max_rounds=max_rounds,
+    )

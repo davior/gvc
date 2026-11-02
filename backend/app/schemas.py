@@ -45,6 +45,10 @@ class ClientConfig(BaseModel):
     """
 
     notes_base_url: str
+    # Where the assistant's model comes from, and where to manage it when that is the
+    # suite. Not secret: they only change what Settings says and links to.
+    ai_backend: str
+    suite_base_url: str
 
 
 class HealthResponse(BaseModel):

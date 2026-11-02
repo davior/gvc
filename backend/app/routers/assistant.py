@@ -17,6 +17,7 @@ from app.assistant import attachments as attach
 from app.assistant import worker
 from app.auth import CallerToken, CurrentUser
 from app.clock import utcnow
+from app import suite
 from app.config import settings
 from app.database import get_session
 from app.jobs.runner import ACTIVE_STATUSES
@@ -163,9 +164,19 @@ def _refused(code: str, message: str, status_code: int) -> HTTPException:
     return HTTPException(status_code=status_code, detail={"code": code, "message": message})
 
 
-def _require_eyes(session: Session, user) -> None:
+def _require_eyes(session: Session, user, token: Optional[str] = None) -> None:
     """Refuse a picture the model would never see, rather than let it sit there
     silently ignored. With no provider yet there is nothing to judge, so it's taken."""
+    if suite.enabled():
+        # A conversation has no project yet at this point, so this asks about the model a
+        # draft would use. A suite that is down or unrouted is "nothing to judge" too.
+        model = suite.best_effort_model(token, None)
+        if model is not None and "vision" not in model.get("capabilities", []):
+            raise _refused("images_unsupported",
+                           f"{model['label']} can't look at images. Choose a model that can "
+                           "for the assistant in Gecko Suite (Routing).",
+                           status.HTTP_409_CONFLICT)
+        return
     provider = active_provider(session, user.id)
     if provider is not None and not provider.supports_images:
         raise _refused("images_unsupported",
@@ -191,7 +202,8 @@ def _attach(session: Session, row: AssistantSession, item: dict) -> AttachmentRe
 
 @router.post("/sessions/{session_id}/attachments/file", response_model=DataResponse[AttachmentRead],
              status_code=status.HTTP_201_CREATED)
-def attach_file(session_id: str, user: CurrentUser, file: UploadFile = File(...),
+def attach_file(session_id: str, user: CurrentUser, token: CallerToken,
+                file: UploadFile = File(...),
                 session: Session = Depends(get_session)) -> DataResponse[AttachmentRead]:
     row = _owned_session(session, user, session_id)
     limit = settings.assistant_attachment_max_mb * 1024 * 1024
@@ -203,7 +215,7 @@ def attach_file(session_id: str, user: CurrentUser, file: UploadFile = File(...)
     name = (file.filename or "file").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     try:
         if attach.is_image(name, file.content_type or ""):
-            _require_eyes(session, user)
+            _require_eyes(session, user, token)
             item = attach.make_image(row.id, name, name, data)
         else:
             item = attach.make("file", name, name,
@@ -232,7 +244,7 @@ def attach_note(session_id: str, body: NoteAttach, user: CurrentUser, token: Cal
 
 @router.post("/sessions/{session_id}/attachments/url", response_model=DataResponse[AttachmentRead],
              status_code=status.HTTP_201_CREATED)
-def attach_url(session_id: str, body: UrlAttach, user: CurrentUser,
+def attach_url(session_id: str, body: UrlAttach, user: CurrentUser, token: CallerToken,
                session: Session = Depends(get_session)) -> DataResponse[AttachmentRead]:
     row = _owned_session(session, user, session_id)
     url = body.url.strip()
@@ -242,7 +254,7 @@ def attach_url(session_id: str, body: UrlAttach, user: CurrentUser,
         page = web_fetch.fetch(url, max_bytes=settings.assistant_attachment_max_mb * 1024 * 1024,
                                accept=attach.URL_TYPES)
         if page.content_type in attach.IMAGE_TYPES:
-            _require_eyes(session, user)
+            _require_eyes(session, user, token)
             name = page.url.split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1] or page.url
             item = attach.make_image(row.id, name, page.url, page.body)
         else:
@@ -293,7 +305,9 @@ def find_notes(user: CurrentUser, token: CallerToken, q: str = "",
 def start_turn(body: TurnCreate, user: CurrentUser, token: CallerToken,
                session: Session = Depends(get_session)) -> DataResponse[TurnRead]:
     """Ask the assistant something. It runs in the background from here."""
-    if active_provider(session, user.id) is None:
+    if suite.enabled():
+        suite.require_ready(token, body.project_id)
+    elif active_provider(session, user.id) is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT,
                             detail={"code": "no_provider",
                                     "message": "Set up an AI provider in Settings first."})
@@ -404,7 +418,7 @@ def mark_discarded(turn_id: str, user: CurrentUser,
 
 @router.post("/turns/{turn_id}/new-project", response_model=DataResponse[NewProjectRead],
              status_code=status.HTTP_201_CREATED)
-def apply_as_new_project(turn_id: str, user: CurrentUser,
+def apply_as_new_project(turn_id: str, user: CurrentUser, token: CallerToken,
                          session: Session = Depends(get_session)) -> DataResponse[NewProjectRead]:
     """Apply a draft made from the project list: it becomes a project of its own, and the
     conversation moves with it."""
@@ -422,11 +436,17 @@ def apply_as_new_project(turn_id: str, user: CurrentUser,
         raise project_service.invalid_spec(issues)
     if spec.source is None:
         # Where it came from (S2), so a draft can be traced and redone.
-        provider = active_provider(session, user.id)
+        if suite.enabled():
+            model = suite.best_effort_model(token, None)
+            source_provider = model["vendor"] if model else None
+            source_model = model["model_id"] if model else None
+        else:
+            provider = active_provider(session, user.id)
+            source_provider = provider.provider_type if provider else None
+            source_model = provider.model if provider else None
         spec.source = BriefSource(kind="brief", prompt=turn.prompt,
                                   drafted_at=turn.created_at.isoformat(timespec="seconds") + "Z",
-                                  provider=provider.provider_type if provider else None,
-                                  model=provider.model if provider else None)
+                                  provider=source_provider, model=source_model)
     project = project_service.create(session, user, spec, origin="brief",
                                      message="Drafted by the assistant", author="ai",
                                      default_theme=False)
