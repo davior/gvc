@@ -22,8 +22,10 @@ the changes this repository's plan lists as S1–S3, which Notes' copy does not.
   the AI being there.
 - A note pushed in from Notes becomes an ordinary GVC project. Nothing re-reads the
   note afterwards, and `source` is provenance only.
-- The one runtime dependency on Notes is login: GVC verifies the JWT Notes issues and
-  has no accounts of its own.
+- The runtime dependencies on the rest of the suite are login (GVC verifies the JWT Notes
+  issues and has no accounts of its own) and, with `AI_BACKEND=suite`, the assistant's
+  model, which comes from [gecko-suite](https://github.com/davior/gecko-suite). With it
+  off, or the suite down, the assistant says so and everything else still works.
 
 Changes GVC needs from GAM or from Notes are specified in the plan ("Changes needed
 in GAM / in Notes"). Don't apply them from here, since those are separate repositories.

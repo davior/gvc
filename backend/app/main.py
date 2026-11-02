@@ -129,7 +129,13 @@ def client_config() -> DataResponse[ClientConfig]:
     Served at runtime rather than compiled into the bundle, so pointing a running
     container at a different Notes is a restart, not a rebuild (GAM learnt this one).
     """
-    return DataResponse(data=ClientConfig(notes_base_url=settings.notes_base_url))
+    return DataResponse(
+        data=ClientConfig(
+            notes_base_url=settings.notes_base_url,
+            ai_backend=settings.ai_backend,
+            suite_base_url=settings.suite_base_url,
+        )
+    )
 
 
 @app.get("/api/me", response_model=DataResponse[dict])

@@ -72,6 +72,16 @@ class Settings(BaseSettings):
     # already filled the disk.
     note_media_max_mb: int = 4096
 
+    # ─── AI ──────────────────────────────────────────────────────────────────
+    # Where the assistant's model comes from. "local" is the provider this app keeps
+    # itself (Settings → AI). "suite" asks Gecko Suite, which holds the keys, routes each
+    # job to a model and counts the spend for every app. Both exist for the length of M2
+    # so the move is one setting in either direction; "local" goes with the suite's M8.
+    ai_backend: str = "local"
+    # Reached with the caller's own Notes session, which the worker already holds for the
+    # turn. No app credential: nothing here uses the suite after that token is gone.
+    suite_base_url: str = "https://suite.geckopico.com"
+
     # ─── http ────────────────────────────────────────────────────────────────
     cors_origin: str = ""
 
@@ -139,6 +149,15 @@ class Settings(BaseSettings):
     # setting one variable.
     environment: str = "production"
     dev_auth_user: str = ""
+
+    @field_validator("ai_backend")
+    @classmethod
+    def _known_ai_backend(cls, value: str) -> str:
+        value = value.strip().lower()
+        if value not in {"local", "suite"}:
+            # A typo here would otherwise quietly leave the assistant on the old path.
+            raise ValueError('AI_BACKEND must be "local" or "suite"')
+        return value
 
     @field_validator("jwt_secret_key")
     @classmethod

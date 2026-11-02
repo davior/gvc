@@ -472,3 +472,8 @@ the order it hits them:
 4. **Default model for drafting.** The draft is one long structured-output call, which
    suits the most capable model a provider offers. Edits are short and can go to a
    cheaper one. GAM's provider settings already allow a choice per task.
+   **Settled by Gecko Suite.** With `AI_BACKEND=suite` a from-scratch draft is the job
+   `chat.draft`, an edit is `chat.edit`, and the clip-picking pass is `chat.quick`; each
+   is routed to a model in the suite's Routing screen, and each falls back to
+   `chat.assistant` when it has no choice of its own. No code here decides it. The local
+   provider keeps its single model until it goes (gecko-suite's M8).

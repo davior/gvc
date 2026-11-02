@@ -30,6 +30,7 @@ from app.generation import service as generation_service
 from app.jobs.runner import JobQueue, readable_error, set_fields
 from app.models.assistant import AssistantSession, AssistantTurn
 from app.models.theme import Theme
+from app import suite
 from app.providers import active_provider, build_provider
 from app.providers.base import ProviderError, Reply
 from app.services import themes as theme_service
@@ -100,6 +101,8 @@ def _run(turn_id: str) -> None:
     gam = GamClient(token)
     steps: List[dict] = []
     cost: List[float] = []
+    # Gecko Suite (AI_BACKEND=suite), opened with the turn's own token and closed with it.
+    connection = None
 
     def write(**fields) -> None:
         with queue.session() as session:
@@ -115,20 +118,40 @@ def _run(turn_id: str) -> None:
               stage="Working", detail=detail)
 
     def on_reply(reply: Reply) -> None:
-        with queue.session() as session:
-            spent = usage_events.record_reply(session, user_id=user_id, project_id=project_id,
-                                              turn_id=turn_id, reply=reply)
+        if suite.enabled():
+            # The suite has already written this call to its own ledger, under this app
+            # and this project. Writing it here too would count it twice wherever both
+            # are read, so only the turn's running total is kept.
+            spent = getattr(reply, "cost", None)
+        else:
+            with queue.session() as session:
+                spent = usage_events.record_reply(session, user_id=user_id,
+                                                  project_id=project_id, turn_id=turn_id,
+                                                  reply=reply)
         if spent is not None:
             cost.append(spent)
             write(cost=round(sum(cost), 6))
 
     try:
         with queue.session() as session:
-            provider = build_provider(session, user_id)
-            row = active_provider(session, user_id)
-            sees_images = bool(row and row.supports_images)
             themes = {t.id: {"name": t.name, "prompt": t.prompt, "is_default": t.is_default}
                       for t in theme_service.listed(session, user_id)}
+            if not suite.enabled():
+                provider = build_provider(session, user_id)
+                row = active_provider(session, user_id)
+                sees_images = bool(row and row.supports_images)
+        if suite.enabled():
+            connection = suite.client(token)
+            provider = suite.chat(connection, project_id)
+            if provider.resolve() is None:
+                raise ProviderError("No AI model is set up for the assistant. Choose one in "
+                                    "Gecko Suite (Routing).")
+            sees_images = provider.supports_images
+            # The clip-picking pass is a smaller job than the turn, so it is its own task
+            # and can be given a cheaper model. Unrouted, it falls back to the assistant's.
+            picker = suite.chat(connection, project_id, task="chat.quick")
+        else:
+            picker = provider
         if provider is None:
             raise ProviderError("No AI provider is set up. Add one in Settings first.")
         attached = material(attachments, sees_images=sees_images)
@@ -157,8 +180,8 @@ def _run(turn_id: str) -> None:
             # tools, its spend on the turn like any other call. Called from several
             # threads at once, so the spend is recorded one call at a time: the turn's
             # running total is read, added to and written back.
-            reply = provider.conversation(system=[pick_system], tools=[], history=[],
-                                          prompt=pick_prompt).ask()
+            reply = picker.conversation(system=[pick_system], tools=[], history=[],
+                                        prompt=pick_prompt).ask()
             with recording:
                 on_reply(reply)
             return reply.text
@@ -207,6 +230,13 @@ def _run(turn_id: str) -> None:
         _finish(turn_id, status="error", stage="", error_message=str(exc),
                 message=f"_{exc}_", steps=steps)
         return
+    except suite.SuiteError as exc:
+        # The suite said no or was not there. Its sentence is written to be shown, and
+        # the rest of the app is unaffected: only this turn ends.
+        sentence = suite.sentence(exc)
+        _finish(turn_id, status="error", stage="", error_message=sentence,
+                message=f"_{sentence}_", steps=steps)
+        return
     except Exception as exc:  # noqa: BLE001 - a failed turn is a job error, not a crash
         logger.exception("Assistant turn %s failed", turn_id)
         _finish(turn_id, status="error", stage="", error_message=readable_error(exc),
@@ -214,6 +244,8 @@ def _run(turn_id: str) -> None:
         return
     finally:
         gam.close()
+        if connection is not None:
+            connection.close()
         _tokens.pop(turn_id, None)
 
     reply = outcome.reply or ("Done." if working.changes else "")

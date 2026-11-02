@@ -22,6 +22,10 @@ services:
       - GAM_BASE_URL=${GAM_BASE_URL:-https://assets.geckopico.com}
       - GAM_TIMEOUT_SECONDS=${GAM_TIMEOUT_SECONDS:-30}
       - NOTE_MEDIA_MAX_MB=${NOTE_MEDIA_MAX_MB:-4096}
+      # Where the assistant's model comes from: "local" (this app's own provider) or
+      # "suite" (Gecko Suite). Changing it is a restart, not a rebuild.
+      - AI_BACKEND=${AI_BACKEND:-local}
+      - SUITE_BASE_URL=${SUITE_BASE_URL:-https://suite.geckopico.com}
       - RENDER_CONCURRENCY=${RENDER_CONCURRENCY:-1}
       - RENDER_MAX_SEGMENTS=${RENDER_MAX_SEGMENTS:-200}
       - RENDER_MAX_NARRATION_CHARS=${RENDER_MAX_NARRATION_CHARS:-60000}

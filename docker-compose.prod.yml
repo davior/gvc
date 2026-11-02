@@ -21,6 +21,8 @@ services:
     extra_hosts:
       - "assets.geckopico.com:host-gateway"
       - "notes.geckopico.com:host-gateway"
+      # Gecko Suite, for the same reason: the assistant calls it at its public name.
+      - "suite.geckopico.com:host-gateway"
 
   frontend:
     networks:

@@ -8,4 +8,4 @@ def test_config_is_public_and_carries_only_the_sign_in_address(client):
     res = client.get("/api/config")
     assert res.status_code == 200
     # Readable by anyone, so adding a field has to be a deliberate act.
-    assert set(res.json()["data"]) == {"notes_base_url"}
+    assert set(res.json()["data"]) == {"notes_base_url", "ai_backend", "suite_base_url"}

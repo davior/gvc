@@ -15,6 +15,10 @@ import client from '@/api/client'
 
 export interface ClientConfig {
   notes_base_url: string
+  /** Where the assistant's model comes from: this app's own provider, or Gecko Suite. */
+  ai_backend: 'local' | 'suite'
+  /** Where Gecko Suite lives, to link its settings and usage when `ai_backend` is 'suite'. */
+  suite_base_url: string
 }
 
 interface DataResponse<T> {
