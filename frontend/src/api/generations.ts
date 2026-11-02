@@ -36,6 +36,10 @@ export interface Generation {
 
 export interface GenerationModel {
   id: string
+  /** fal's id, e.g. `fal-ai/flux-pro/v1.1-ultra`: what a project's `style.models` names. */
+  endpoint_id: string
+  /** The user's own default for this kind, set in GAM's settings. GAM lists it first. */
+  is_default: boolean
   kind: string
   label: string
   note: string

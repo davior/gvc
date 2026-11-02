@@ -297,6 +297,22 @@ class CodeStyle(_Model):
     scrim: Unit = 0.72
 
 
+class GenerationModels(_Model):
+    """The GAM model each kind of generation uses for this video, by fal endpoint id
+    (`fal-ai/flux-pro/v1.1-ultra`). By endpoint rather than by GAM's row id: the id of a
+    catalogue row differs per install and changes if an admin re-adds it, while the
+    endpoint is what a note pushed from Notes, or a spec pasted from elsewhere, can name.
+
+    Absent kinds use the user's default in GAM, which GAM lists first. A named model
+    GAM no longer offers is skipped the same way, so a stale choice never blocks a
+    generation (`generation/catalogue.py::pick_model`).
+    """
+
+    text_to_image: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    image_to_image: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    image_to_video: Optional[str] = Field(default=None, min_length=1, max_length=200)
+
+
 class Style(_Model):
     background: Background = Field(default_factory=Background)
     fit: Fit = "blur"
@@ -311,6 +327,8 @@ class Style(_Model):
     # text, so rewording a theme restyles every project that uses it. Optional, so
     # specs without it are unchanged and stay "0.2".
     theme: Optional[str] = None
+    # Which GAM models generate for this video (S6). Optional for the same reason.
+    models: Optional[GenerationModels] = None
 
 
 class Watermark(_Model):

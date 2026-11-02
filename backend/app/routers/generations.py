@@ -65,6 +65,11 @@ class GenerationRead(BaseModel):
 
 class GenerationModelRead(BaseModel):
     id: str
+    # fal's id, which is what a project's `style.models` names.
+    endpoint_id: str = ""
+    # The user's own default for the kind, in GAM's settings. Absent from a GAM older
+    # than that setting, which then reads as no default.
+    is_default: bool = False
     kind: str
     label: str
     note: str = ""
@@ -108,7 +113,9 @@ def list_models(user: CurrentUser, token: CallerToken) -> ListResponse[Generatio
     finally:
         gam.close()
     wanted = set(KINDS.values()) | {"image_to_image"}
-    rows = [GenerationModelRead(id=m["id"], kind=m["kind"], label=m.get("label") or "",
+    rows = [GenerationModelRead(id=m["id"], endpoint_id=m.get("endpoint_id") or "",
+                                is_default=bool(m.get("is_default")),
+                                kind=m["kind"], label=m.get("label") or "",
                                 note=m.get("note") or "", price=price_line(m),
                                 unit_price=m.get("unit_price"), price_unit=m.get("price_unit"),
                                 options=m.get("options") or {})

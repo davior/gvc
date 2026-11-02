@@ -377,6 +377,34 @@ A ducked track already dips under clips, since the narration's key carries their
 sound. `"mute"` fades the track out around each clip and back after; `"play"` keeps
 it at its level through clips, ducked under the voice alone.
 
+### S6. Which GAM models generate for a video
+
+Nothing chose a model unless someone picked one in the Generate dialog, so the
+assistant's pictures, and any Generate left on its first choice, came from whatever
+GAM listed first. That was FLUX.1 [schnell], the draft model. One optional block, so
+specs without it are unchanged and stay `"0.2"`:
+
+```ts
+style.models?: {
+  text_to_image?: string   // a GAM endpoint id, e.g. "fal-ai/flux-pro/v1.1-ultra"
+  image_to_image?: string
+  image_to_video?: string
+}
+```
+
+A model is chosen in this order: the one named for this run (the dialog's select), the
+project's model for the kind, then GAM's first, which is the user's own default once
+GAM-11 is in. The project's choice applies to the picture a clip from a prompt starts
+from too, under `text_to_image`.
+- **By endpoint id, not GAM's row id.** A row id differs per install and changes when an
+  admin re-adds a model. An endpoint id is what a note pushed from Notes, or a pasted
+  spec, can name.
+- **A model GAM no longer offers is passed over, not refused.** It was chosen once for
+  the video, and blocking every generation on a stale spec would be the worse failure.
+  Project settings show it as "not in the library".
+- **In the spec, like the theme (D5).** Choosing one is an edit like any other, and the
+  dialog's "Use this model for everything generated for this video" writes it there.
+
 ## Changes needed in GAM
 
 Specified here, applied in GAM's repository, not from this one.
@@ -393,6 +421,7 @@ Specified here, applied in GAM's repository, not from this one.
 | GAM-8 | `options.custom_size` on catalogue rows and `params.width`/`height` on `POST /api/generate`, sent to fal as `image_size: {width, height}`; on for the seeded FLUX rows. **[davior/gam#53](https://github.com/davior/gam/pull/53).** Against a GAM without it, GVC asks for the nearest size tier (Nano Banana's `2K`, Seedream's `auto_2K`) or FLUX's 1024 px preset as before | Generated pictures sized for the video: 1.5x its frame, so a Ken Burns zoom or a crop stays sharp |
 | GAM-9 | `GET /api/assets/{id}/peaks`: an audio asset's waveform, computed with ffmpeg on first view and cached beside the file. **Done: [davior/gam#54](https://github.com/davior/gam/pull/54).** GVC reads it through `/api/gam/assets/{id}/peaks`; against a GAM without it, the audio players scrub on a flat line | Scrubbable waveform players for soundtrack tracks and the Sound picker, without the browser downloading whole files to draw one |
 | GAM-10 | Standard-resolution versions of a video (4K down to 360p) as files of the one asset, `GET /api/assets/{id}/versions`. **Done: [davior/gam#56](https://github.com/davior/gam/pull/56).** A render reads the smallest file that is still as sharp as the frame shows it (`render/media.py::pick_source`): a 1080p render of a 4K original reads its 1080p, a preview its 480p, and a shot cropped to fill the frame counts the edge the crop is limited by. Against a GAM without it, or a video with no versions, the original is used as before | Rendering a 4K original fetches and decodes four times the pixels the frame needs |
+| GAM-11 | FLUX Pro rows in the catalogue (FLUX1.1 [pro] ultra, FLUX.2 [pro], FLUX1.1 [pro]), sorted ahead of schnell, and a per-user default model per kind in GAM's Settings, applied by listing it first in `GET /api/generate/models` with `is_default`. Against a GAM without it, GVC takes GAM's sort order as before, and `style.models` (S6) still works for whatever endpoints that GAM has | Unattended generation came from the draft model, and there was no way to choose any other |
 
 GAM-1 and GAM-2 come first. They're small, and M1 below depends on them.
 

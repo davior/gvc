@@ -11,6 +11,8 @@ import { useProjectStore } from '@/stores/projects'
 const MODELS: GenerationModel[] = [
   {
     id: 'm-flux',
+    endpoint_id: 'fal-ai/flux/schnell',
+    is_default: false,
     kind: 'text_to_image',
     label: 'FLUX',
     note: '',
@@ -21,6 +23,8 @@ const MODELS: GenerationModel[] = [
   },
   {
     id: 'm-edit',
+    endpoint_id: 'fal-ai/nano-banana-2',
+    is_default: false,
     kind: 'text_to_image',
     label: 'Nano',
     note: '',
@@ -31,6 +35,8 @@ const MODELS: GenerationModel[] = [
   },
   {
     id: 'm-veo',
+    endpoint_id: 'fal-ai/veo3.1/fast/image-to-video',
+    is_default: false,
     kind: 'image_to_video',
     label: 'Veo',
     note: '',
@@ -146,6 +152,57 @@ describe('GenerateDialog', () => {
       picture_prompt: 'A flooded valley',
     })
     expect(body.base_gam_ids).toBeUndefined()
+  })
+
+  it('starts on the project’s model, then on the user’s default in GAM', async () => {
+    vi.mocked(generationsApi.models).mockResolvedValue([
+      MODELS[0],
+      { ...MODELS[1], is_default: true },
+      MODELS[2],
+    ])
+    useGenerationStore.getState().reset()
+    await useGenerationStore.getState().load('p')
+    const { unmount } = render(<GenerateDialog assetKey="a_dam" onClose={vi.fn()} />)
+    await screen.findByRole('option', { name: /Nano/ })
+    expect(screen.getByRole('combobox', { name: 'Model' })).toHaveValue('m-edit')
+    unmount()
+
+    vi.mocked(projectsApi.get).mockResolvedValue({
+      ...project,
+      spec: {
+        ...project.spec,
+        style: { models: { text_to_image: 'fal-ai/flux/schnell' } },
+      },
+    })
+    await useProjectStore.getState().open('p')
+    render(<GenerateDialog assetKey="a_dam" onClose={vi.fn()} />)
+    await screen.findByRole('option', { name: /Nano/ })
+    expect(screen.getByRole('combobox', { name: 'Model' })).toHaveValue('m-flux')
+    // Already the project's model: nothing to keep.
+    expect(screen.queryByRole('checkbox')).toBeNull()
+  })
+
+  it('keeps the chosen models on the project when asked', async () => {
+    const start = vi.spyOn(generationsApi, 'start').mockResolvedValue({} as never)
+    render(<GenerateDialog assetKey="a_flood" onClose={vi.fn()} />)
+    await screen.findByRole('option', { name: /Veo/ })
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: 'Made from' }),
+      'new'
+    )
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: 'Picture model' }),
+      'm-edit'
+    )
+    await userEvent.click(screen.getByRole('checkbox', { name: /these models/ }))
+    await userEvent.click(screen.getByRole('button', { name: /Generate/ }))
+
+    const models = {
+      text_to_image: 'fal-ai/nano-banana-2',
+      image_to_video: 'fal-ai/veo3.1/fast/image-to-video',
+    }
+    expect(start.mock.calls[0][1].draft_spec?.style?.models).toEqual(models)
+    expect(useProjectStore.getState().draft?.style?.models).toEqual(models)
   })
 
   it('says why it could not start, and stays open', async () => {

@@ -12,7 +12,7 @@ from sqlmodel import Session
 from app.clock import utcnow
 from app.gam.client import GamClient, GamError
 from app.generation.catalogue import (
-    CatalogueError, default_params, estimate, kind_for, pick_model, target_size,
+    CatalogueError, default_params, estimate, kind_for, pick_model, project_models, target_size,
 )
 from app.models.generation import Generation
 from app.services import themes
@@ -101,8 +101,13 @@ def start(session: Session, gam: GamClient, *, user_id: str, project_id: Optiona
     try:
         models = gam.generation_models()
         kind = kind_for(ref["type"], bool(bases) or chained)
-        model = pick_model(models, kind, model_id)
-        picture_model = pick_model(models, "text_to_image", picture_model_id) if chained else None
+        # The project's choice of model applies wherever no model was named: the
+        # assistant's pictures, and the picture a clip from a prompt is made from.
+        chosen = project_models(spec)
+        model = pick_model(models, kind, model_id, project=chosen.get(kind))
+        picture_model = (pick_model(models, "text_to_image", picture_model_id,
+                                    project=chosen.get("text_to_image"))
+                         if chained else None)
     except CatalogueError as exc:
         raise GenerationRefused("no_model", str(exc))
     params = default_params(model, aspect=aspect, outputs=outputs if ref["type"] == "image" else 1,

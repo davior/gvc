@@ -21,6 +21,8 @@ const spec: VideoSpec = {
 
 const model = (over: Partial<GenerationModel>): GenerationModel => ({
   id: 'm',
+  endpoint_id: 'fal-ai/m',
+  is_default: false,
   kind: 'image_to_video',
   label: 'M',
   note: '',

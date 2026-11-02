@@ -349,3 +349,81 @@ def test_stopping_while_the_picture_is_made_starts_no_clip(auth_client, project,
     siblings.gen_jobs["job-1"].update(status="done", result_asset_ids=["pic-1"])
     assert _list(auth_client, project["id"])[0]["status"] == "cancelled"
     assert len(siblings.generations) == 1
+
+
+# ── the project's own models (S6) ────────────────────────────────────────────
+
+ULTRA = {"id": "m-ultra", "endpoint_id": "fal-ai/flux-pro/v1.1-ultra", "kind": "text_to_image",
+         "label": "FLUX1.1 [pro] ultra", "is_active": True, "unit_price": 0.06,
+         "price_unit": "image",
+         "options": {"aspect_ratios": ["21:9", "16:9", "1:1", "9:16"], "image_sizes": [],
+                     "max_outputs": 4}}
+
+
+def test_a_projects_model_is_used_unless_one_is_asked_for():
+    models = [*GEN_MODELS, ULTRA]
+    assert pick_model(models, "text_to_image", project=ULTRA["endpoint_id"])["id"] == "m-ultra"
+    # Asking by id wins over the project's choice.
+    assert pick_model(models, "text_to_image", "m-flux", project=ULTRA["endpoint_id"])["id"] == "m-flux"
+    # A project's model GAM no longer offers, or of another kind, is passed over.
+    assert pick_model(models, "text_to_image", project="fal-ai/gone")["id"] == "m-flux"
+    assert pick_model(models, "text_to_image", project=VEO["endpoint_id"])["id"] == "m-flux"
+    switched_off = [*GEN_MODELS, {**ULTRA, "is_active": False}]
+    assert pick_model(switched_off, "text_to_image", project=ULTRA["endpoint_id"])["id"] == "m-flux"
+
+
+def _project_with_models(client, **models):
+    spec = {**SPEC, "style": {"models": models}}
+    res = client.post("/api/projects", json={"spec": spec})
+    assert res.status_code == 201, res.text
+    return res.json()["data"]
+
+
+def test_a_picture_is_generated_with_the_projects_model(auth_client, siblings):
+    siblings.gen_models.append(dict(ULTRA))
+    project = _project_with_models(auth_client, text_to_image=ULTRA["endpoint_id"])
+    assert project["spec"]["style"]["models"] == {"text_to_image": ULTRA["endpoint_id"]}
+
+    row = start(auth_client, project["id"], asset_key="a_dam").json()["data"]
+
+    assert row["model_label"] == "FLUX1.1 [pro] ultra"
+    [sent] = siblings.generations
+    assert sent["model_id"] == "m-ultra"
+    # Ultra sizes by ratio alone, so the video's aspect is what it is asked for.
+    assert sent["params"]["aspect_ratio"] == "16:9"
+
+
+def test_a_projects_model_the_library_dropped_falls_back_to_the_users_default(auth_client,
+                                                                              siblings):
+    project = _project_with_models(auth_client, text_to_image="fal-ai/flux-pro/v1.1-ultra")
+
+    res = start(auth_client, project["id"], asset_key="a_dam")
+
+    assert res.status_code == 202, res.text
+    assert siblings.generations[0]["model_id"] == "m-flux"
+
+
+def test_the_picture_for_a_clip_uses_the_projects_picture_model(auth_client, siblings):
+    siblings.gen_models.append(dict(ULTRA))
+    project = _project_with_models(auth_client, text_to_image=ULTRA["endpoint_id"],
+                                   image_to_video=VEO["endpoint_id"])
+
+    res = start(auth_client, project["id"], asset_key="a_flood", make_picture=True)
+
+    assert res.status_code == 202, res.text
+    [picture] = siblings.generations
+    assert picture["model_id"] == "m-ultra"
+    assert res.json()["data"]["model_label"] == "FLUX1.1 [pro] ultra → Veo 3.1 Fast"
+
+
+def test_a_spec_refuses_a_model_for_a_kind_that_does_not_exist(auth_client, siblings):
+    spec = {**SPEC, "style": {"models": {"text_to_video": "fal-ai/x/y"}}}
+    res = auth_client.post("/api/projects", json={"spec": spec})
+    assert res.status_code == 422, res.text
+
+
+def test_the_catalogue_says_which_model_is_the_users_default(auth_client, siblings):
+    siblings.gen_models[0]["is_default"] = True
+    models = auth_client.get("/api/gam/generation-models").json()["data"]
+    assert (models[0]["endpoint_id"], models[0]["is_default"]) == ("fal-ai/flux/schnell", True)
+    assert models[1]["is_default"] is False

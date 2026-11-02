@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Sparkles, X } from 'lucide-react'
-import type { VideoSpec } from '@/api/projects'
+import type { GenerationModel } from '@/api/generations'
+import type { ProjectModels, VideoSpec } from '@/api/projects'
 import {
   canGenerate,
   dollars,
@@ -34,6 +35,23 @@ function picturesIn(spec: VideoSpec): { id: string; name: string }[] {
     seen.add(id)
     return [{ id, name: ref.label ?? (ref.from === 'generate' ? ref.prompt : key) }]
   })
+}
+
+/**
+ * The model a list starts on: the project's own for the kind, then the user's default
+ * in GAM, then GAM's first. The same order the server picks in when no model is named
+ * (`generation/catalogue.py::pick_model`), so what the select shows is what an
+ * assistant-made picture for this video would use too.
+ */
+function startingModel(
+  list: GenerationModel[],
+  projectEndpoint: string | undefined
+): GenerationModel | undefined {
+  return (
+    (projectEndpoint ? list.find((m) => m.endpoint_id === projectEndpoint) : undefined) ??
+    list.find((m) => m.is_default) ??
+    list[0]
+  )
 }
 
 /** The GAM id of a registry key, when it is something in the library. */
@@ -91,14 +109,25 @@ export default function GenerateDialog({ assetKey, onClose }: Props) {
       ? (ref?.base_assets ?? []).flatMap((k) => gamIdOf(draft, k) ?? [])
       : []
   const kind = ref ? kindFor(ref, isVideo ? true : imageBases.length > 0) : ''
+  const projectModels: ProjectModels = draft?.style?.models ?? {}
   const choices = (models ?? []).filter((m) => m.kind === kind)
   const [modelId, setModelId] = useState('')
-  const model = choices.find((m) => m.id === modelId) ?? choices[0]
+  const model =
+    choices.find((m) => m.id === modelId) ??
+    startingModel(choices, projectModels[kind as keyof ProjectModels])
   const pictureModels = (models ?? []).filter((m) => m.kind === 'text_to_image')
   const [pictureModelId, setPictureModelId] = useState('')
   const pictureModel = makePicture
-    ? (pictureModels.find((m) => m.id === pictureModelId) ?? pictureModels[0])
+    ? (pictureModels.find((m) => m.id === pictureModelId) ??
+      startingModel(pictureModels, projectModels.text_to_image))
     : undefined
+  // The project's models, as they would be with this run's choices kept. Offered only
+  // when that changes something, so the box never reads as a no-op.
+  const keptModels: ProjectModels = { ...projectModels }
+  if (model?.endpoint_id) keptModels[kind as keyof ProjectModels] = model.endpoint_id
+  if (pictureModel?.endpoint_id) keptModels.text_to_image = pictureModel.endpoint_id
+  const canKeep = JSON.stringify(keptModels) !== JSON.stringify(projectModels)
+  const [keep, setKeep] = useState(false)
   const [outputs, setOutputs] = useState(1)
   const [duration, setDuration] = useState('')
 
@@ -119,13 +148,16 @@ export default function GenerateDialog({ assetKey, onClose }: Props) {
   async function generate() {
     if (!draft || !ref) return
     // The prompt as sent is the prompt on the placeholder, so "Try again" starts from it.
-    const next =
+    let next =
       prompt.trim() === ref.prompt
         ? draft
         : {
             ...draft,
             assets: { ...draft.assets, [assetKey]: { ...ref, prompt: prompt.trim() } },
           }
+    // Kept as an edit to the draft like the prompt is, so it is saved, undone and
+    // reverted with everything else, and this run's draft_spec already carries it.
+    if (keep && canKeep) next = { ...next, style: { ...next.style, models: keptModels } }
     if (next !== draft) edit(next)
     const ok = await start({
       asset_key: assetKey,
@@ -281,6 +313,18 @@ export default function GenerateDialog({ assetKey, onClose }: Props) {
                   </label>
                 </>
               ))}
+
+            {canKeep && (
+              <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={keep}
+                  onChange={(e) => setKeep(e.target.checked)}
+                />
+                Use {makePicture ? 'these models' : 'this model'} for everything generated
+                for this video
+              </label>
+            )}
 
             <div className="flex gap-3">
               {maxOutputs > 1 && (
