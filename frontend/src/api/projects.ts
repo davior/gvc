@@ -248,7 +248,16 @@ export interface Style {
   code?: { position?: Band; size_pct?: number; color?: string; scrim?: number }
   /** The id of one of the user's themes (`api/themes.ts`), styling what is generated. */
   theme?: string
+  /** The GAM model per kind for this video, by fal endpoint id (S6). */
+  models?: ProjectModels
   [key: string]: unknown
+}
+
+/** Kinds left out use the user's default in GAM, as does one GAM no longer offers. */
+export interface ProjectModels {
+  text_to_image?: string
+  image_to_image?: string
+  image_to_video?: string
 }
 
 export interface Watermark {

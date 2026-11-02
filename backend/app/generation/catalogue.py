@@ -56,18 +56,38 @@ def kind_for(asset_type: str, has_base: bool) -> str:
 
 
 def pick_model(models: List[Dict[str, Any]], kind: str,
-               preferred: Optional[str] = None) -> Dict[str, Any]:
-    """The model asked for if it can do this kind, else the catalogue's first of the kind
-    (GAM lists them in its own preferred order)."""
+               preferred: Optional[str] = None,
+               project: Optional[str] = None) -> Dict[str, Any]:
+    """The model for one run, in this order: the one asked for (`preferred`, a GAM row
+    id); the project's model for the kind (`project`, an endpoint id from the spec's
+    `style.models`); the catalogue's first of the kind.
+
+    The first of the kind is the user's own default, since GAM lists that first (gam:
+    app/generation/defaults.py), and otherwise GAM's sort order. A model asked for by id
+    that cannot do this kind is refused, because someone chose it just now. A project's
+    model that GAM no longer offers is passed over instead: it was chosen once for the
+    video, and refusing every generation on it until someone edits the spec would be
+    the worse failure.
+    """
     of_kind = [m for m in models if m.get("kind") == kind and m.get("is_active", True)]
     if preferred:
         for model in of_kind:
             if model.get("id") == preferred:
                 return model
         raise CatalogueError("That model can't do this kind of generation.")
+    if project:
+        for model in of_kind:
+            if model.get("endpoint_id") == project:
+                return model
     if not of_kind:
         raise CatalogueError(f"The asset library has no active model for {kind.replace('_', ' ')}.")
     return of_kind[0]
+
+
+def project_models(spec: Dict[str, Any]) -> Dict[str, str]:
+    """The spec's `style.models`, as `{kind: endpoint_id}`. Empty for a spec without."""
+    chosen = ((spec.get("style") or {}).get("models")) or {}
+    return {kind: value for kind, value in chosen.items() if isinstance(value, str) and value}
 
 
 def _seconds(value: Any) -> Optional[float]:
