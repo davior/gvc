@@ -6,6 +6,7 @@ import {
   History,
   Loader2,
   MessageSquarePlus,
+  Mic,
   PanelRightClose,
   PanelRightOpen,
   Search,
@@ -19,7 +20,9 @@ import {
 import { Link, useMatch, useNavigate } from 'react-router-dom'
 import { ACTIVE_TURN, type Turn, type TurnStep } from '@/api/assistant'
 import { formatCost } from '@/api/usage'
+import { suiteSpeechApi } from '@/api/suiteSpeech'
 import { AttachControls, AttachmentList } from '@/components/AssistantAttachments'
+import { useDictation } from '@/hooks/useDictation'
 import { MAX_WIDTH, MIN_WIDTH, useAssistantStore } from '@/stores/assistant'
 import { useGenerationStore } from '@/stores/generations'
 import { useProjectStore } from '@/stores/projects'
@@ -281,6 +284,22 @@ export default function AssistantPanel() {
   const project = useProjectStore((s) => s.project)
   const draft = useProjectStore((s) => s.draft)
   const [prompt, setPrompt] = useState('')
+  // Dictation (SV-7): each finished phrase is appended to what is typed; nothing is sent
+  // until the person presses Send. Offered only when the suite has a Deepgram key.
+  const [canDictate, setCanDictate] = useState(false)
+  const dictation = useDictation((text) =>
+    setPrompt((prev) => (prev.trim() ? `${prev.trimEnd()} ${text}` : text))
+  )
+  useEffect(() => {
+    let live = true
+    suiteSpeechApi
+      .ready()
+      .then((ready) => live && setCanDictate(ready))
+      .catch(() => live && setCanDictate(false))
+    return () => {
+      live = false
+    }
+  }, [])
   const [showList, setShowList] = useState(false)
   const bottom = useRef<HTMLDivElement>(null)
 
@@ -309,6 +328,8 @@ export default function AssistantPanel() {
   async function submit() {
     const text = prompt.trim()
     if (!text || sending || running) return
+    // Sending ends a dictation: what was said so far is what is sent.
+    if (dictation.status === 'recording') dictation.stop()
     const ok = await send({
       prompt: text,
       draft_spec: here ? draft : null,
@@ -545,6 +566,27 @@ export default function AssistantPanel() {
               }
             }}
           />
+          {canDictate && (
+            <button
+              type="button"
+              className={`btn p-2 ${
+                dictation.status === 'recording'
+                  ? 'btn-danger animate-pulse'
+                  : 'btn-secondary'
+              }`}
+              aria-label={dictation.status === 'recording' ? 'Stop dictating' : 'Dictate'}
+              aria-pressed={dictation.status === 'recording'}
+              title={dictation.status === 'recording' ? 'Stop dictating' : 'Dictate'}
+              disabled={dictation.status === 'finishing'}
+              onClick={dictation.toggle}
+            >
+              {dictation.status === 'finishing' ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Mic className="h-4 w-4" />
+              )}
+            </button>
+          )}
           <button
             type="button"
             className="btn btn-primary p-2"
@@ -555,6 +597,16 @@ export default function AssistantPanel() {
             <Send className="h-4 w-4" />
           </button>
         </div>
+        {dictation.interim && (
+          <p className="truncate text-xs italic text-gray-500" aria-live="polite">
+            {dictation.interim}…
+          </p>
+        )}
+        {dictation.status === 'error' && dictation.error && (
+          <p role="alert" className="text-xs text-red-600 dark:text-red-400">
+            {dictation.error}
+          </p>
+        )}
         {chat && chat.cost > 0 && (
           <p className="text-[11px] text-gray-400">
             This conversation: about {formatCost(chat.cost)} (estimate)
