@@ -79,4 +79,10 @@ describe('Content-Security-Policy', () => {
       expect(directive(name)).not.toContain('geckopico.com')
     }
   })
+  it('lets the theme picker reach Gecko Suite and draw theme backgrounds', () => {
+    // M7: the picker calls the suite from the browser, and a theme background is any
+    // https address, drawn by CSS (img-src).
+    expect(directive('connect-src')).toContain('${SUITE_BASE_URL}')
+    expect(directive('img-src')).toContain('https:')
+  })
 })
