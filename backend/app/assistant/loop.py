@@ -45,7 +45,7 @@ def run(provider: ChatProvider, working: Working, *, system: Sequence[str],
         history: Sequence[Tuple[str, str]], prompt: str, on_step: Step,
         on_reply: Callable[[Reply], None], cancelled: Callable[[], bool],
         max_rounds: int, images: Sequence[Image] = ()) -> Outcome:
-    conversation = provider.conversation(system=system, tools=T.SPECS, history=history,
+    conversation = provider.conversation(system=system, tools=T.specs_for(working), history=history,
                                          prompt=prompt, images=images)
     nudges = 0
 
@@ -72,6 +72,8 @@ def run(provider: ChatProvider, working: Working, *, system: Sequence[str],
                 raise Stopped()
             if call.name == "search_assets":
                 on_step("search", f"Searching the library: {call.arguments.get('query', '')!r}")
+            elif call.name == "web_search":
+                on_step("search", f"Searching the web: {call.arguments.get('query', '')!r}")
             elif call.name in ("read_transcript", "find_clips"):
                 gam_id = call.arguments.get("gam_id", "")
                 seen = working.hits.get(gam_id)

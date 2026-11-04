@@ -60,15 +60,36 @@ def task_for(project_id: Optional[str]) -> str:
 
 
 def chat(connection: SuiteClient, project_id: Optional[str], *,
-         task: Optional[str] = None) -> SuiteChat:
+         task: Optional[str] = None, persona_id: Optional[str] = None) -> SuiteChat:
     return SuiteChat(
         connection,
         task=task or task_for(project_id),
         app=APP,
+        persona_id=persona_id,
         # What the spend was for, so the suite's Usage can answer "what did this video
         # cost" (an opaque string to the suite; it keeps no content).
         subject_ref=f"gvc:project:{project_id}" if project_id else None,
     )
+
+
+def personas(token: Optional[str]) -> list:
+    """The personas this person may ask the assistant as: the suite's, for GVC and for every
+    app. Empty for any reason at all (the suite down, none made, no session): a picker with
+    nothing in it is not shown, and the assistant works without one."""
+    try:
+        with closing(client(token)) as connection:
+            rows = connection.request("GET", "/api/v1/personas", params={"app": APP})
+    except (SuiteError, ProviderError):
+        return []
+    return rows if isinstance(rows, list) else []
+
+
+def web_search(connection: SuiteClient, query: str, project_id: Optional[str]) -> list:
+    """A web search through the suite, credited to the project the turn is about."""
+    from gecko_suite_client import web_search as search
+
+    return search(connection, query, app=APP,
+                  subject_ref=f"gvc:project:{project_id}" if project_id else None)
 
 
 def sentence(exc: SuiteError) -> str:

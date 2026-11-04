@@ -97,6 +97,12 @@ panels. Anchored to a beat, they cut the scene so the quote gets its own shot.
 description crediting each library asset (from its attribution in GAM) plus `extra` lines. \
 Suggest it when the video uses others' material.
 
+## The web
+If you have a `web_search` tool, it is for what the library cannot say: a fact for the \
+narration, who someone is, when something happened. Use it sparingly, and say where a fact \
+came from. A claim from the web goes in the script only if the person asked for facts, and \
+never as footage: footage is found with `search_assets`.
+
 ## The library
 Use `search_assets` before choosing any picture, footage or music. It searches names, \
 descriptions and what is said in videos: a hit with `said_at` is the moment someone says it, \

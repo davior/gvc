@@ -57,6 +57,10 @@ class FakeSuite:
         self.default: Optional[dict] = model()
         self.down = False
         self.chat_status: Optional[httpx.Response] = None
+        self.searches: List[dict] = []
+        self.search_down = False
+        self.persona_queries: List[dict] = []
+        self.personas: List[dict] = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         if self.down:
@@ -67,6 +71,18 @@ class FakeSuite:
             self.resolved.append(task)
             chosen = self.routing.get(task, self.default)
             return httpx.Response(200, json={"data": {"task": task, "app": "gvc", "model": chosen}})
+        if request.url.path == "/api/v1/search/web":
+            self.searches.append(json.loads(request.content))
+            if self.search_down:
+                return httpx.Response(502, json={"detail": {"code": "upstream_error",
+                                                            "message": "search is down"}})
+            return httpx.Response(200, json={"data": {"results": [
+                {"title": "Water wars, a history", "url": "https://example.test/ww",
+                 "snippet": "Disputes over rivers since antiquity."}]}})
+        if request.url.path == "/api/v1/personas":
+            self.persona_queries.append(dict(request.url.params))
+            return httpx.Response(200, json={"data": self.personas, "total": len(self.personas),
+                                             "limit": 0, "offset": 0})
         if request.url.path == "/api/v1/ai/chat":
             body = json.loads(request.content)
             self.chats.append(body)
@@ -231,3 +247,126 @@ def test_local_is_still_the_default_and_unknown_values_are_refused():
     with pytest.raises(ValidationError):
         Settings(jwt_secret_key="a-strong-enough-test-secret", ai_backend="cloud")
     assert Settings(jwt_secret_key="a-strong-enough-test-secret").ai_backend == "local"
+
+
+# ─── the web ─────────────────────────────────────────────────────────────────
+
+
+def test_the_assistant_can_search_the_web_and_gets_the_results_to_cite(
+        auth_client, fake_suite, library, engine_for_worker):
+    fake_suite.script += [
+        reply("", ("web_search", {"query": "history of water wars"})),
+        reply("Rivers have been fought over since antiquity (per the web)."),
+    ]
+    done = run(auth_client, prompt="Write a line about water wars")
+
+    assert done["status"] == "done", done
+    # Offered, and the model told when to use it.
+    first = fake_suite.chats[0]
+    assert "web_search" in [t["name"] for t in first["tools"]]
+    assert any("web_search" in block for block in first["system"])
+    # Asked of the suite as the signed-in user, credited to GVC.
+    (search,) = fake_suite.searches
+    assert search["query"] == "history of water wars" and search["app"] == "gvc"
+    # Numbered, so the model can cite it.
+    result = [r for m in fake_suite.chats[1]["messages"] if m["role"] == "tool"
+              for r in m["results"]][0]
+    assert result["is_error"] is False and "[1] Water wars, a history" in result["content"]
+    assert any(s["kind"] == "search" and "web" in s["text"] for s in done["steps"])
+    # Reading the web changes nothing in the video.
+    assert done["proposed_spec"] is None
+
+
+def test_a_search_on_a_project_is_credited_to_it(auth_client, fake_suite, library, engine_for_worker):
+    from tests.test_assistant_turns import VALID, project_with
+
+    project = project_with(auth_client, VALID)
+    fake_suite.script += [reply("", ("web_search", {"query": "x"})), reply("Nothing to change.")]
+    run(auth_client, project_id=project["id"], prompt="check a fact",
+        draft_spec=project["spec"], base_version=project["version"])
+    assert fake_suite.searches[0]["subject_ref"] == f"gvc:project:{project['id']}"
+
+
+def test_a_failed_search_is_for_the_model_to_read_not_a_failed_turn(
+        auth_client, fake_suite, library, engine_for_worker):
+    fake_suite.search_down = True
+    fake_suite.script += [reply("", ("web_search", {"query": "x"})), reply("I couldn't look that up.")]
+    done = run(auth_client, prompt="Look something up")
+    assert done["status"] == "done" and "couldn't look" in done["reply"]
+    result = [r for m in fake_suite.chats[1]["messages"] if m["role"] == "tool"
+              for r in m["results"]][0]
+    assert result["is_error"] is True and "search failed" in result["content"]
+
+
+def test_the_web_tool_is_not_offered_where_there_is_no_web():
+    from app.assistant import tools as T
+
+    assert "web_search" not in [s.name for s in T.specs_for(T.Working({}))]
+    searching = T.Working({}, web_search=lambda query: [])
+    assert "web_search" in [s.name for s in T.specs_for(searching)]
+
+
+def test_searches_are_capped_so_a_model_cannot_loop_on_them():
+    from app.assistant import tools as T
+
+    seen = []
+    working = T.Working({}, web_search=lambda query: seen.append(query) or [], max_web_searches=2)
+    T.web_search(working, "one")
+    T.web_search(working, "two")
+    with pytest.raises(T.ToolFailed, match="2 web searches"):
+        T.web_search(working, "three")
+    assert seen == ["one", "two"]
+    with pytest.raises(T.ToolFailed, match="query"):
+        T.web_search(T.Working({}, web_search=lambda q: []), "   ")
+
+
+# ─── personas ────────────────────────────────────────────────────────────────
+
+PERSONAS = [
+    {"id": "p-doc", "name": "Documentarian", "description": "Plain and sober.", "avatar": None,
+     "system_prompt": "SECRET PROMPT", "scope": "instance", "app": None, "model_overrides": {},
+     "sort_order": 0, "writable": False},
+    {"id": "p-gvc", "name": "Trailer voice", "description": "", "avatar": None,
+     "system_prompt": "x", "scope": "user", "app": "gvc", "model_overrides": {}, "sort_order": 1,
+     "writable": True},
+]
+
+
+def test_the_picker_lists_the_suites_personas_without_their_prompts(auth_client, fake_suite):
+    fake_suite.personas = PERSONAS
+    res = auth_client.get("/api/assistant/personas", headers=HEADERS)
+    assert res.status_code == 200
+    assert [p["name"] for p in res.json()["data"]] == ["Documentarian", "Trailer voice"]
+    assert "SECRET PROMPT" not in res.text and "system_prompt" not in res.text
+    assert fake_suite.persona_queries == [{"app": "gvc"}]
+
+
+def test_no_personas_when_there_are_none_or_the_suite_is_down_or_not_in_use(
+        auth_client, fake_suite, monkeypatch):
+    assert auth_client.get("/api/assistant/personas", headers=HEADERS).json()["data"] == []
+    fake_suite.personas = PERSONAS
+    fake_suite.down = True
+    assert auth_client.get("/api/assistant/personas", headers=HEADERS).json()["data"] == []
+    fake_suite.down = False
+    # No session to ask the suite as: a picker is not worth an error.
+    assert auth_client.get("/api/assistant/personas").json()["data"] == []
+    monkeypatch.setattr(settings, "ai_backend", "local")
+    assert auth_client.get("/api/assistant/personas", headers=HEADERS).json()["data"] == []
+
+
+def test_a_turn_asked_as_a_persona_is_sent_to_the_suite_as_that_persona(
+        auth_client, fake_suite, library, engine_for_worker):
+    fake_suite.script += [reply("As the documentarian."), reply("As nobody in particular.")]
+    first = run(auth_client, prompt="Open the film", persona_id="p-doc")
+    assert first["persona_id"] == "p-doc" and fake_suite.chats[0]["persona_id"] == "p-doc"
+    second = run(auth_client, prompt="Open another", session_id=first["session_id"])
+    # A persona belongs to the turn: the next one is asked as whatever the picker then says.
+    assert second["persona_id"] is None and "persona_id" not in fake_suite.chats[1]
+
+
+def test_a_persona_the_suite_refuses_ends_the_turn_with_its_sentence(
+        auth_client, fake_suite, library, engine_for_worker):
+    fake_suite.chat_status = httpx.Response(404, json={"detail": {
+        "code": "not_found", "message": "persona not found"}})
+    done = run(auth_client, prompt="Open the film", persona_id="gone")
+    assert done["status"] == "error" and "persona not found" in done["error"]

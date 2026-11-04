@@ -56,6 +56,9 @@ class AssistantTurn(SQLModel, table=True):
     base_version: Optional[int] = None
     # The scene open in the editor, if any: "this scene" in a request means it.
     focus: Optional[str] = None
+    # The suite persona this turn was asked as, if any. Kept on the turn so one a restart
+    # reruns is asked as the same persona; the suite applies its prompt and model.
+    persona_id: Optional[str] = None
     # JSON: [{"kind": "think"|"search"|"edit"|"issue"|"note", "text"}]
     steps: str = "[]"
     reply: str = ""

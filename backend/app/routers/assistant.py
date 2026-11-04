@@ -27,7 +27,7 @@ from app.providers import active_provider
 from app.schemas import DataResponse, ListResponse
 from app.schemas_assistant import (
     AttachmentRead, Message, NewProjectRead, NoteAttach, NoteChoice, SessionCreate,
-    SessionRead, SessionSummary, Step, TurnCreate, TurnRead, UrlAttach,
+    PersonaRead, SessionRead, SessionSummary, Step, TurnCreate, TurnRead, UrlAttach,
 )
 from app.services import projects as project_service
 from app.services import themes
@@ -47,9 +47,23 @@ def _turn_read(turn: AssistantTurn) -> TurnRead:
         stage=turn.stage, detail=turn.detail, error=turn.error_message, prompt=turn.prompt,
         steps=[Step(**s) for s in json.loads(turn.steps or "[]")], reply=turn.reply,
         proposed_spec=proposal, changes=json.loads(turn.changes or "[]"), outcome=turn.outcome,
-        base_version=turn.base_version, cost=turn.cost,
+        base_version=turn.base_version, persona_id=turn.persona_id, cost=turn.cost,
         created_at=turn.created_at, updated_at=turn.updated_at,
     )
+
+
+@router.get("/personas", response_model=ListResponse[PersonaRead])
+def list_personas(user: CurrentUser, token: CallerToken) -> ListResponse[PersonaRead]:
+    """The personas the person may ask as: the suite's, for Video Creator and for every app.
+
+    Only what a picker shows (never a system prompt). Empty when the suite has none, is not
+    there, or is not in use, and then the panel simply has no picker.
+    """
+    rows = suite.personas(token) if suite.enabled() else []
+    found = [PersonaRead(id=p["id"], name=p["name"], description=p.get("description") or "",
+                         avatar=p.get("avatar"))
+             for p in rows if isinstance(p, dict) and p.get("id") and p.get("name")]
+    return ListResponse(data=found, total=len(found), limit=len(found), offset=0)
 
 
 def _summary(row: AssistantSession) -> SessionSummary:
@@ -348,7 +362,7 @@ def start_turn(body: TurnCreate, user: CurrentUser, token: CallerToken,
                          base_spec=base,
                          base_version=body.base_version if body.base_version is not None
                          else (project.head_seq if project else None),
-                         focus=body.focus)
+                         focus=body.focus, persona_id=body.persona_id or None)
     return DataResponse(data=_turn_read(turn))
 
 

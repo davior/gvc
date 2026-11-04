@@ -31,6 +31,8 @@ export interface Turn {
   outcome: '' | 'pending' | 'applied' | 'discarded'
   /** The project version the turn was asked about. */
   base_version: number | null
+  /** The suite persona this turn was asked as, if any. */
+  persona_id: string | null
   cost: number | null
   created_at: string
   updated_at: string
@@ -93,6 +95,15 @@ export interface TurnRequest {
   draft_spec?: VideoSpec | null
   base_version?: number | null
   focus?: string | null
+  /** One of the suite's personas, or none. */
+  persona_id?: string | null
+}
+
+export interface Persona {
+  id: string
+  name: string
+  description: string
+  avatar: string | null
 }
 
 export const ACTIVE_TURN: TurnStatus[] = ['queued', 'processing']
@@ -179,6 +190,13 @@ export const assistantApi = {
 
   removeSession(id: string): Promise<void> {
     return client.delete(`/assistant/sessions/${id}`).then(() => undefined)
+  },
+
+  /** The personas the person may ask as (the suite's). Empty when there are none. */
+  personas(): Promise<Persona[]> {
+    return client
+      .get<ListResponse<Persona>>('/assistant/personas')
+      .then((r) => r.data.data)
   },
 
   start(body: TurnRequest): Promise<Turn> {
