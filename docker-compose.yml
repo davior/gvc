@@ -60,6 +60,8 @@ services:
       - NOTES_BASE_URL=${NOTES_BASE_URL:-https://notes.geckopico.com}
       # The CSP's img-src and media-src, for GAM thumbnails and previews; same rule.
       - GAM_BASE_URL=${GAM_BASE_URL:-https://assets.geckopico.com}
+      # connect-src for the theme picker's calls to Gecko Suite (M7); same value the backend gets.
+      - SUITE_BASE_URL=${SUITE_BASE_URL:-https://suite.geckopico.com}
     depends_on:
       - gvc-backend
     networks:

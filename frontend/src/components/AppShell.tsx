@@ -3,8 +3,12 @@ import { LogOut, Moon, Settings, Sun } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import AssistantMarker from '@/components/AssistantMarker'
 import AssistantPanel from '@/components/AssistantPanel'
+import { currentConfig } from '@/api/config'
+import favicon from '@/assets/favicon.svg'
+import { useAppThemeStore } from '@/stores/appTheme'
 import { useAuthStore } from '@/stores/auth'
 import { useThemeStore } from '@/stores/theme'
+import ThemePicker from '@/theme/ThemePicker'
 
 interface Props {
   children: ReactNode
@@ -16,15 +20,16 @@ export default function AppShell({ children }: Props) {
   const signOut = useAuthStore((s) => s.signOut)
   const theme = useThemeStore((s) => s.theme)
   const toggleTheme = useThemeStore((s) => s.toggle)
+  // A theme from the suite brings its own light or dark, so the toggle would fight it.
+  const wearing = useAppThemeStore((s) => s.selected !== null)
+  const suiteUrl = currentConfig()?.suite_base_url?.replace(/\/+$/, '') || null
 
   return (
     <div className="flex h-screen flex-col bg-gray-50 dark:bg-gray-900">
       <header className="shrink-0 border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-800">
         <div className="flex items-center gap-3">
           <Link to="/projects" className="flex items-center gap-3">
-            <span className="text-xl" aria-hidden="true">
-              🦎
-            </span>
+            <img src={favicon} alt="" aria-hidden="true" className="h-7 w-7" />
             <h1 className="text-base font-semibold text-gray-900 dark:text-gray-100">
               Gecko Video Creator
             </h1>
@@ -40,20 +45,23 @@ export default function AppShell({ children }: Props) {
             >
               <Settings className="h-4 w-4" />
             </Link>
-            <button
-              type="button"
-              onClick={toggleTheme}
-              className="btn btn-ghost p-2"
-              aria-label={
-                theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'
-              }
-            >
-              {theme === 'dark' ? (
-                <Sun className="h-4 w-4" />
-              ) : (
-                <Moon className="h-4 w-4" />
-              )}
-            </button>
+            {user && <ThemePicker editUrl={suiteUrl ? `${suiteUrl}/themes` : null} />}
+            {!wearing && (
+              <button
+                type="button"
+                onClick={toggleTheme}
+                className="btn btn-ghost p-2"
+                aria-label={
+                  theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'
+                }
+              >
+                {theme === 'dark' ? (
+                  <Sun className="h-4 w-4" />
+                ) : (
+                  <Moon className="h-4 w-4" />
+                )}
+              </button>
+            )}
             {user && (
               <>
                 <span className="text-sm text-gray-600 dark:text-gray-400">

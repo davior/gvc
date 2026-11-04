@@ -24,8 +24,10 @@ EXPOSE 80
 ENV NOTES_BASE_URL=https://notes.geckopico.com
 # img-src and media-src: thumbnails and previews load from GAM directly.
 ENV GAM_BASE_URL=https://assets.geckopico.com
+# Also in connect-src, for the theme picker's calls to Gecko Suite (M7).
+ENV SUITE_BASE_URL=https://suite.geckopico.com
 
 # Only these two are substituted; nginx's own $variables ($uri, $host, $remote_addr …)
 # must survive untouched, which is why envsubst is given an explicit list rather than
 # left to replace everything it recognises.
-CMD ["/bin/sh", "-c", "envsubst '${NOTES_BASE_URL} ${GAM_BASE_URL}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
+CMD ["/bin/sh", "-c", "envsubst '${NOTES_BASE_URL} ${GAM_BASE_URL} ${SUITE_BASE_URL}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]

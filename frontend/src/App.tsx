@@ -7,10 +7,26 @@ import ProjectView from '@/views/ProjectView'
 import SettingsView from '@/views/SettingsView'
 import { loadConfig } from '@/api/config'
 import { setUnauthorizedHandler } from '@/api/client'
+import { useAppThemeStore } from '@/stores/appTheme'
 import { useAuthStore } from '@/stores/auth'
+import ThemeBackdrop from '@/theme/ThemeBackdrop'
+import { applyThemeToDom, cachedTheme } from '@/theme/apply'
 
 export default function App() {
   const bootstrap = useAuthStore((s) => s.bootstrap)
+  const status = useAuthStore((s) => s.status)
+  const loadTheme = useAppThemeStore((s) => s.load)
+
+  // The last theme this browser wore here, before anything else draws: no flash of the
+  // plain look while the suite is asked (M7).
+  useEffect(() => {
+    applyThemeToDom(cachedTheme())
+  }, [])
+
+  // GVC's own theme choice, kept by Gecko Suite. Quietly nothing if the suite is away.
+  useEffect(() => {
+    if (status === 'authenticated') void loadTheme()
+  }, [status, loadTheme])
 
   // One identity check on load. Everything below the shell can assume it has run.
   useEffect(() => {
@@ -41,12 +57,15 @@ export default function App() {
   )
 
   return (
-    <Routes>
-      <Route path="/" element={<Navigate to="/projects" replace />} />
-      <Route path="/projects" element={page(<ProjectListView />)} />
-      <Route path="/p/:id" element={page(<ProjectView />)} />
-      <Route path="/settings" element={page(<SettingsView />)} />
-      <Route path="*" element={<Navigate to="/projects" replace />} />
-    </Routes>
+    <>
+      <ThemeBackdrop />
+      <Routes>
+        <Route path="/" element={<Navigate to="/projects" replace />} />
+        <Route path="/projects" element={page(<ProjectListView />)} />
+        <Route path="/p/:id" element={page(<ProjectView />)} />
+        <Route path="/settings" element={page(<SettingsView />)} />
+        <Route path="*" element={<Navigate to="/projects" replace />} />
+      </Routes>
+    </>
   )
 }
