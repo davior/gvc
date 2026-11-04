@@ -24,7 +24,8 @@ from app.jobs.runner import JobCancelled, JobQueue, readable_error, set_fields
 from app.models.project import Project, ProjectVersion
 from app.models.render import RenderJob
 from app.render.renderer import RenderRefused, render
-from app.render.tts import NotesSpeech, SpeechError
+from app import suite
+from app.render.tts import NotesSpeech, SpeechError, SuiteNarrator
 from app.spec.validation import parse_spec
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,12 @@ _tokens: Dict[str, Optional[str]] = {}
 
 def renders_dir() -> Path:
     return settings.resolved_data_dir / "renders"
+
+
+def narrator(token: Optional[str]):
+    """What reads the narration: the suite's `speech.tts` or Notes' speech, by the same
+    switch as the assistant's model."""
+    return SuiteNarrator(token) if suite.enabled() else NotesSpeech(token)
 
 
 def _run(job_id: str) -> None:
@@ -63,7 +70,10 @@ def _run(job_id: str) -> None:
     data_dir = settings.resolved_data_dir
     work_dir = data_dir / "work" / job_id
     out_dir = renders_dir() / job_id
-    gam, speech = GamClient(token), NotesSpeech(token)
+    # Which reads the narration is the same switch as the assistant's: the suite's
+    # `speech.tts`, or Notes' speech as before.
+    gam = GamClient(token)
+    speech = narrator(token)
     report = queue.reporter(job_id)
     # The stage is cleared when the job finishes, and an ffmpeg failure doesn't say
     # which of a render's dozen ffmpeg runs it was: a shot, the stitch, the overlays.

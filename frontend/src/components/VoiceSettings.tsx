@@ -15,8 +15,9 @@ const PAUSES = [
 
 /**
  * The narrator for the whole video. A scene's own speed (in its settings) wins over
- * this one. Left blank, the voice is whichever one the account is set to in Notes;
- * naming one pins it, and it has to be a name that account's speech engine knows.
+ * this one. Left blank, the voice is the default one: the model `speech.tts` is routed to
+ * in Gecko Suite (`AI_BACKEND=suite`), or the account's own in Notes. Naming one pins it, and
+ * it has to be a name that engine knows; one it does not know is read in the default voice.
  */
 export default function VoiceSettings({ spec, onChange }: Props) {
   const voice = spec.voice
@@ -31,7 +32,7 @@ export default function VoiceSettings({ spec, onChange }: Props) {
           <input
             className="input w-40 py-0.5"
             aria-label="Narrator voice"
-            placeholder="The account's voice"
+            placeholder="The default voice"
             value={voice?.voice ?? ''}
             onChange={(e) => onChange(setVoice(spec, { voice: e.target.value }))}
           />
