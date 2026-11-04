@@ -55,3 +55,14 @@ def test_the_dev_user_needs_development_mode_too(client, monkeypatch):
     assert client.get("/api/projects").status_code == 401
     monkeypatch.setattr(settings, "environment", "development")
     assert client.get("/api/projects").status_code == 200
+
+
+def test_a_two_factor_challenge_is_not_a_session(client):
+    """Notes hands back a five-minute challenge after the password step of a 2FA sign-in,
+    signed with the shared secret and carrying the person's `sub`. It must not open GVC:
+    that would let the password alone past the second factor."""
+    challenge = jwt.encode(
+        {"sub": "notes-user-1", "twofa_pending": True, "method": "totp", "exp": int(time.time()) + 300},
+        settings.jwt_secret_key, algorithm="HS256")
+    res = client.get("/api/projects", headers={"Authorization": f"Bearer {challenge}"})
+    assert res.status_code == 401 and res.json()["detail"]["code"] == "unauthorized"
