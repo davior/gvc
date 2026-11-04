@@ -24,8 +24,12 @@ the changes this repository's plan lists as S1–S3, which Notes' copy does not.
   note afterwards, and `source` is provenance only.
 - The runtime dependencies on the rest of the suite are login (GVC verifies the JWT Notes
   issues and has no accounts of its own) and, with `AI_BACKEND=suite`, the assistant's
-  model, which comes from [gecko-suite](https://github.com/davior/gecko-suite). With it
-  off, or the suite down, the assistant says so and everything else still works.
+  model and the narration's voice, which come from [gecko-suite](https://github.com/davior/gecko-suite).
+  With it off, or the suite down, the assistant says so and a render with narration stops
+  with a sentence; everything else, including a render without narration, still works.
+- **A narration is one voice.** `SuiteNarrator` sends back the model and voice the first chunk
+  resolved, and a model that fails stops the render: the suite never falls back to another
+  engine for a chunk, which is what made Notes' narrator change voice partway through.
 
 Changes GVC needs from GAM or from Notes are specified in the plan ("Changes needed
 in GAM / in Notes"). Don't apply them from here, since those are separate repositories.

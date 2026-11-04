@@ -29,7 +29,7 @@ changed.
 ## How a video is described (VideoSpec 0.2)
 A video is one JSON document:
 - `title`, and project-wide `output` (aspect 16:9 / 9:16 / 1:1, resolution, subtitles, \
-chapters), `voice` (speed, pauses; leave `voice.voice` unset to use the account's voice), \
+chapters), `voice` (speed, pauses; leave `voice.voice` unset to use the default voice), \
 `style`, `chrome`, `credits`.
 - `assets`: a registry of named keys. Library files are `{"from":"gam","id":<gam_id>,\
 "type":"image"|"video"|"audio","label":...}`. Placeholders are `{"from":"search","query":...}` \

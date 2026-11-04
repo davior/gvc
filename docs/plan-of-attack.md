@@ -469,6 +469,12 @@ the order it hits them:
 3. **Who owns TTS.** M2 calls Notes for speech, which keeps one set of voices and keys
    but means a Notes outage stops renders. The alternative is copying the TTS core and
    giving GVC its own keys.
+   **Settled by Gecko Suite (SV-3).** With `AI_BACKEND=suite`, narration is read by the
+   suite's `speech.tts` (`render/tts.py::SuiteNarrator`): one set of voices and keys, held
+   in the suite, and no dependency on Notes for speech. The default voice is the routed
+   model's, set once on the suite's Providers screen. A narration pins the model and voice
+   its first chunk resolved, and a failing model fails the render instead of changing the
+   narrator. Notes' speech stays the default behind `AI_BACKEND=local`.
 4. **Default model for drafting.** The draft is one long structured-output call, which
    suits the most capable model a provider offers. Edits are short and can go to a
    cheaper one. GAM's provider settings already allow a choice per task.
