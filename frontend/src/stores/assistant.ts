@@ -5,6 +5,7 @@ import {
   assistantApi,
   type Chat,
   type ChatSummary,
+  type Persona,
   type Turn,
   type TurnRequest,
 } from '@/api/assistant'
@@ -57,10 +58,15 @@ interface AssistantState {
   attention: Turn[]
   /** The scene last worked on in the editor: "this scene". */
   focus: string | null
+  /** The suite's personas the person may ask as, for the picker. */
+  personas: Persona[]
+  /** The one chosen for the next message; null is the assistant as it is. */
+  personaId: string | null
 
   setOpen: (open: boolean) => void
   setWidth: (width: number) => void
   setFocus: (segmentId: string | null) => void
+  setPersona: (id: string | null) => void
   enter: (scope: string | null) => Promise<void>
   openChat: (id: string) => Promise<void>
   newChat: () => void
@@ -132,6 +138,8 @@ export const useAssistantStore = create<AssistantState>((set, get) => {
     error: null,
     attention: [],
     focus: null,
+    personas: [],
+    personaId: null,
 
     setOpen(open) {
       keep(OPEN_KEY, open ? '1' : '0')
@@ -148,6 +156,10 @@ export const useAssistantStore = create<AssistantState>((set, get) => {
       set({ focus })
     },
 
+    setPersona(id) {
+      set({ personaId: id })
+    },
+
     async enter(scope) {
       const mine = ++token
       stopPolling()
@@ -156,6 +168,17 @@ export const useAssistantStore = create<AssistantState>((set, get) => {
         const sessions = await assistantApi.sessions(scope)
         if (mine !== token) return
         set({ sessions })
+        // A picker is a nicety: whatever goes wrong fetching one is no reason to fail the
+        // panel, which just has none. A persona deleted in the suite since it was chosen
+        // is dropped, so it is not sent again.
+        const personas = await assistantApi.personas().catch(() => [] as Persona[])
+        if (mine !== token) return
+        set({
+          personas,
+          personaId: personas.some((p) => p.id === get().personaId)
+            ? get().personaId
+            : null,
+        })
         // The latest conversation, so coming back to a video finds where it was left,
         // a turn still running or a proposal still waiting.
         if (sessions[0]) await reload(mine, sessions[0].id)
@@ -328,6 +351,8 @@ export const useAssistantStore = create<AssistantState>((set, get) => {
         error: null,
         attention: [],
         focus: null,
+        personas: [],
+        personaId: null,
       })
     },
   }

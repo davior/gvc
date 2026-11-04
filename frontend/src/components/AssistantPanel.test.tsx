@@ -42,6 +42,7 @@ function turn(overrides: Partial<Turn> = {}): Turn {
     changes: ['Changed The valley: transition_in'],
     outcome: 'pending',
     base_version: 3,
+    persona_id: null,
     cost: 0.0123,
     created_at: '',
     updated_at: '',
@@ -85,6 +86,7 @@ beforeEach(() => {
   useAssistantStore.setState({ open: true })
   useProjectStore.setState({ project, draft: spec, dirty: false })
   vi.spyOn(assistantApi, 'attention').mockResolvedValue([])
+  vi.spyOn(assistantApi, 'personas').mockResolvedValue([])
 })
 afterEach(() => vi.restoreAllMocks())
 
@@ -148,6 +150,7 @@ describe('AssistantPanel', () => {
       draft_spec: spec,
       base_version: 3,
       focus: 's_valley',
+      persona_id: null,
       session_id: null,
       project_id: 'p1',
     })
@@ -306,5 +309,56 @@ describe('AssistantPanel', () => {
     at('/projects')
     await userEvent.type(screen.getByLabelText('Ask the assistant'), 'a video{Enter}')
     expect(await screen.findByRole('link', { name: 'Open Settings' })).toBeInTheDocument()
+  })
+
+  it('offers a persona picker only when the suite has personas, and asks as the one chosen', async () => {
+    vi.spyOn(assistantApi, 'sessions').mockResolvedValue([])
+    vi.spyOn(assistantApi, 'personas').mockResolvedValue([
+      {
+        id: 'p-doc',
+        name: 'Documentarian',
+        description: 'Plain and sober.',
+        avatar: null,
+      },
+    ])
+    const running = turn({ status: 'processing', outcome: '', proposed_spec: null })
+    const start = vi.spyOn(assistantApi, 'start').mockResolvedValue(running)
+    vi.spyOn(assistantApi, 'session').mockResolvedValue(chat(running))
+    at('/p/p1')
+    const picker = await screen.findByRole('combobox', { name: 'Persona' })
+    await userEvent.selectOptions(picker, 'p-doc')
+    await userEvent.type(
+      screen.getByLabelText('Ask the assistant'),
+      'open the film{Enter}'
+    )
+    expect(start).toHaveBeenCalledWith(expect.objectContaining({ persona_id: 'p-doc' }))
+  })
+
+  it('has no picker when there are no personas', async () => {
+    vi.spyOn(assistantApi, 'sessions').mockResolvedValue([])
+    at('/p/p1')
+    await screen.findByLabelText('Ask the assistant')
+    expect(screen.queryByRole('combobox', { name: 'Persona' })).toBeNull()
+  })
+
+  it('drops a chosen persona the suite no longer offers', async () => {
+    vi.spyOn(assistantApi, 'sessions').mockResolvedValue([])
+    useAssistantStore.setState({ personaId: 'p-gone' })
+    vi.spyOn(assistantApi, 'personas').mockResolvedValue([
+      { id: 'p-doc', name: 'Documentarian', description: '', avatar: null },
+    ])
+    at('/p/p1')
+    await screen.findByRole('combobox', { name: 'Persona' })
+    // Sent again, it would end every turn with the suite's "persona not found".
+    expect(useAssistantStore.getState().personaId).toBeNull()
+  })
+
+  it('works without a picker when the personas cannot be fetched', async () => {
+    vi.spyOn(assistantApi, 'sessions').mockResolvedValue([])
+    vi.spyOn(assistantApi, 'personas').mockRejectedValue(new Error('down'))
+    at('/p/p1')
+    await screen.findByLabelText('Ask the assistant')
+    expect(screen.queryByRole('combobox', { name: 'Persona' })).toBeNull()
+    expect(useAssistantStore.getState().error).toBeNull()
   })
 })

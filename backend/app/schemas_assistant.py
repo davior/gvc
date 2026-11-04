@@ -18,6 +18,18 @@ class TurnCreate(BaseModel):
     base_version: Optional[int] = None
     # The segment open in the editor, if any.
     focus: Optional[str] = None
+    # One of the suite's personas (`GET /assistant/personas`), or none. The suite is the
+    # authority on whether it exists: an unknown one ends the turn with the suite's sentence.
+    persona_id: Optional[str] = Field(default=None, max_length=64)
+
+
+class PersonaRead(BaseModel):
+    """What a picker shows of one of the suite's personas: never its system prompt."""
+
+    id: str
+    name: str
+    description: str = ""
+    avatar: Optional[str] = None
 
 
 class Step(BaseModel):
@@ -41,6 +53,7 @@ class TurnRead(BaseModel):
     changes: List[str] = []
     outcome: str = ""
     base_version: Optional[int] = None
+    persona_id: Optional[str] = None
     cost: Optional[float] = None
     created_at: datetime
     updated_at: datetime

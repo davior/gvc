@@ -91,6 +91,7 @@ def _run(turn_id: str) -> None:
             return
         set_fields(session, turn, status="processing", stage="Thinking", progress=0)
         user_id, project_id = turn.user_id, turn.project_id
+        persona_id = turn.persona_id
         prompt, focus = turn.prompt, turn.focus
         base = json.loads(turn.base_spec or "{}")
         history = history_for(chat, turn_id) if chat else []
@@ -142,7 +143,7 @@ def _run(turn_id: str) -> None:
                 sees_images = bool(row and row.supports_images)
         if suite.enabled():
             connection = suite.client(token)
-            provider = suite.chat(connection, project_id)
+            provider = suite.chat(connection, project_id, persona_id=persona_id)
             if provider.resolve() is None:
                 raise ProviderError("No AI model is set up for the assistant. Choose one in "
                                     "Gecko Suite (Routing).")
@@ -160,6 +161,9 @@ def _run(turn_id: str) -> None:
                           max_picks=settings.assistant_max_clip_picks,
                           pick_concurrency=settings.assistant_clip_pick_concurrency,
                           note_media=media_ids(attachments), themes=themes)
+        if suite.enabled():
+            # The web, through the same connection, credited to this project.
+            working.web_search = lambda query: suite.web_search(connection, query, project_id)
 
         def generate(data, key, image_prompt, base_ids, outputs):
             with queue.session() as session:
@@ -291,11 +295,11 @@ queue = JobQueue(AssistantTurn, _run, name="assistant",
 
 def submit(session: Session, chat: AssistantSession, *, user_id: str, token: Optional[str],
            prompt: str, base_spec: dict, base_version: Optional[int],
-           focus: Optional[str]) -> AssistantTurn:
+           focus: Optional[str], persona_id: Optional[str] = None) -> AssistantTurn:
     turn = AssistantTurn(id=str(uuid.uuid4()), session_id=chat.id, user_id=user_id,
                          project_id=chat.project_id, prompt=prompt,
                          base_spec=json.dumps(base_spec, ensure_ascii=False),
-                         base_version=base_version, focus=focus)
+                         base_version=base_version, focus=focus, persona_id=persona_id)
     append_message(chat, "user", prompt, turn.id)
     if not chat.title:
         chat.title = prompt.strip().splitlines()[0][:80]

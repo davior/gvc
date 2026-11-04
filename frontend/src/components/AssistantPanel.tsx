@@ -271,6 +271,9 @@ export default function AssistantPanel() {
   const sending = useAssistantStore((s) => s.sending)
   const error = useAssistantStore((s) => s.error)
   const send = useAssistantStore((s) => s.send)
+  const personas = useAssistantStore((s) => s.personas)
+  const personaId = useAssistantStore((s) => s.personaId)
+  const setPersona = useAssistantStore((s) => s.setPersona)
   const stop = useAssistantStore((s) => s.stop)
   const newChat = useAssistantStore((s) => s.newChat)
   const attach = useAssistantStore((s) => s.attach)
@@ -311,6 +314,7 @@ export default function AssistantPanel() {
       draft_spec: here ? draft : null,
       base_version: here ? here.version : null,
       focus: here ? focus : null,
+      persona_id: personaId,
     })
     if (ok) setPrompt('')
   }
@@ -509,6 +513,22 @@ export default function AssistantPanel() {
           <p className="truncate text-[11px] text-gray-500">
             &ldquo;This scene&rdquo; means {focusLabel}
           </p>
+        )}
+        {personas.length > 0 && (
+          <select
+            aria-label="Persona"
+            className="input w-full text-xs"
+            value={personaId ?? ''}
+            title={personas.find((p) => p.id === personaId)?.description || undefined}
+            onChange={(e) => setPersona(e.target.value || null)}
+          >
+            <option value="">Assistant (no persona)</option>
+            {personas.map((persona) => (
+              <option key={persona.id} value={persona.id}>
+                {persona.name}
+              </option>
+            ))}
+          </select>
         )}
         <div className="flex items-end gap-2">
           <AttachControls />

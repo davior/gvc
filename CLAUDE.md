@@ -27,6 +27,12 @@ the changes this repository's plan lists as S1–S3, which Notes' copy does not.
   model and the narration's voice, which come from [gecko-suite](https://github.com/davior/gecko-suite).
   With it off, or the suite down, the assistant says so and a render with narration stops
   with a sentence; everything else, including a render without narration, still works.
+- **The web is a reading tool.** With `AI_BACKEND=suite` the assistant is offered `web_search`
+  (`tools.specs_for`: not offered where there is no suite, so a model is never told about a
+  tool it cannot use). The suite runs it, the results come back numbered for the model to cite,
+  a failed one is a result and not a failed turn, and a turn may make only a handful. It never
+  changes the video. A **persona** is the suite's, chosen per turn and kept on the turn row so a
+  rerun is asked as the same one; this app only names it, and the suite applies its prompt and model.
 - **A narration is one voice.** `SuiteNarrator` sends back the model and voice the first chunk
   resolved, and a model that fails stops the render: the suite never falls back to another
   engine for a chunk, which is what made Notes' narrator change voice partway through.

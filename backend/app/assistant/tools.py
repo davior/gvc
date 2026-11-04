@@ -193,6 +193,12 @@ class Working:
     # theme, so a model looping on them should be stopped well before the round limit.
     max_theme_changes: int = 4
     theme_changes: int = 0
+    # The web: `query -> results`, through Gecko Suite. Set by the worker only when the
+    # assistant runs there; None otherwise, and then the tool is not offered at all
+    # (`specs_for`), so a model is never told about a tool it cannot use.
+    web_search: Optional[Callable[[str], List[Dict[str, Any]]]] = None
+    web_searches: int = 0
+    max_web_searches: int = 8
 
     def __post_init__(self) -> None:
         self.data = copy.deepcopy(self.data)
@@ -1082,6 +1088,30 @@ def delete_theme(w: Working, theme: str) -> str:
     return result
 
 
+# What one search may hand back to the model: a page of results, not a crawl.
+MAX_WEB_CHARS = 6_000
+
+
+def web_search(w: Working, query: str) -> str:
+    query = (query or "").strip()
+    if not query:
+        raise ToolFailed("Give a query to search the web for.")
+    if w.web_search is None:
+        raise ToolFailed("Web search is not available right now.")
+    if w.web_searches >= w.max_web_searches:
+        raise ToolFailed(f"That is {w.max_web_searches} web searches this request. "
+                         "Work with what you have found.")
+    w.web_searches += 1
+    try:
+        results = w.web_search(query)
+    except Exception as exc:  # noqa: BLE001 - a failed search is information for the model
+        raise ToolFailed(f"The web search failed: {exc}") from exc
+    from gecko_suite_client import format_results
+
+    text = format_results(results)
+    return text[:MAX_WEB_CHARS] + ("\n[cut off]" if len(text) > MAX_WEB_CHARS else "")
+
+
 def run_estimate(w: Working) -> str:
     spec, issues = parse_spec(w.data)
     if spec is None:
@@ -1256,6 +1286,12 @@ TOOLS: List[Tuple[ToolSpec, Callable[..., str]]] = [
                   "outputs": {"type": "integer", "minimum": 1, "maximum": 4},
                   "label": _STR},
                "required": ["prompt"]}), generate_image),
+    (ToolSpec("web_search", "Search the web, for what the library cannot say: a fact for the "
+              "script, who someone is, when something happened. Returns titles, links and short "
+              "passages. Say where a fact came from; it is not a way to find footage (use "
+              "search_assets).",
+              {"type": "object", "properties": {"query": _STR}, "required": ["query"]}),
+     web_search),
     (ToolSpec("estimate", "How long the video runs, its narration length, and what would "
               "stop a full render.", {"type": "object", "properties": {}}), run_estimate),
 ]
@@ -1265,7 +1301,12 @@ _HANDLERS = {spec.name: handler for spec, handler in TOOLS}
 
 # Read-only tools, which neither change the video nor count as an edit in the steps.
 READS = {"get_spec", "search_assets", "read_transcript", "find_clips", "get_asset",
-         "estimate"}
+         "estimate", "web_search"}
+
+
+def specs_for(w: Working) -> List[ToolSpec]:
+    """The tools a turn is offered: all of them, except the web where there is none."""
+    return [s for s in SPECS if s.name != "web_search" or w.web_search is not None]
 
 
 def execute(w: Working, call: ToolCall) -> ToolResult:
