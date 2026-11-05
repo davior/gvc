@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Check,
   ChevronDown,
@@ -22,6 +22,7 @@ import { ACTIVE_TURN, type Turn, type TurnStep } from '@/api/assistant'
 import { formatCost } from '@/api/usage'
 import { suiteSpeechApi, type DictationReadiness } from '@/api/suiteSpeech'
 import { AttachControls, AttachmentList } from '@/components/AssistantAttachments'
+import Markdown from '@/components/Markdown'
 import { useDictation } from '@/hooks/useDictation'
 import { MAX_WIDTH, MIN_WIDTH, useAssistantStore } from '@/stores/assistant'
 import { useGenerationStore } from '@/stores/generations'
@@ -36,47 +37,6 @@ import { useProjectStore } from '@/stores/projects'
  * request keeps running on the server with this page closed, and is found here again
  * on the way back, still running or still waiting.
  */
-
-/** Paragraphs, lists, **bold**, _italic_ and `code`: what a reply uses, no more. */
-function inline(text: string): ReactNode[] {
-  return text.split(/(\*\*[^*]+\*\*|`[^`]+`|_[^_]+_)/).map((part, i) => {
-    if (part.startsWith('**') && part.endsWith('**') && part.length > 4)
-      return <strong key={i}>{part.slice(2, -2)}</strong>
-    if (part.startsWith('`') && part.endsWith('`') && part.length > 2)
-      return (
-        <code key={i} className="rounded bg-gray-100 px-1 text-[0.85em] dark:bg-gray-700">
-          {part.slice(1, -1)}
-        </code>
-      )
-    if (part.startsWith('_') && part.endsWith('_') && part.length > 2)
-      return <em key={i}>{part.slice(1, -1)}</em>
-    return <Fragment key={i}>{part}</Fragment>
-  })
-}
-
-function Prose({ text }: { text: string }) {
-  const blocks = text.split(/\n{2,}/)
-  return (
-    <div className="space-y-2">
-      {blocks.map((block, i) => {
-        const lines = block.split('\n')
-        if (lines.every((l) => /^\s*[-*] /.test(l)))
-          return (
-            <ul key={i} className="list-disc space-y-0.5 pl-4">
-              {lines.map((l, j) => (
-                <li key={j}>{inline(l.replace(/^\s*[-*] /, ''))}</li>
-              ))}
-            </ul>
-          )
-        return (
-          <p key={i} className="whitespace-pre-wrap">
-            {inline(block)}
-          </p>
-        )
-      })}
-    </div>
-  )
-}
 
 const STEP_ICON: Record<TurnStep['kind'], ReactNode> = {
   search: <Search className="h-3 w-3" />,
@@ -498,7 +458,7 @@ export default function AssistantPanel() {
             }
             return (
               <div key={i} className="space-y-1.5">
-                <Prose text={m.text} />
+                <Markdown text={m.text} />
                 {turn && <Steps turn={turn} live={false} />}
                 {turn && (
                   <Proposal
