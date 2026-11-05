@@ -113,6 +113,19 @@ describe('AssistantPanel', () => {
     expect(await screen.findByText(/Applied/)).toBeInTheDocument()
   })
 
+  it('draws a reply written in Markdown instead of showing its marks', async () => {
+    const t = turn({ reply: 'Two **scenes** change:\n\n- The valley\n- The river' })
+    vi.spyOn(assistantApi, 'sessions').mockResolvedValue([chat(t)])
+    vi.spyOn(assistantApi, 'session').mockResolvedValue(chat(t))
+    at('/p/p1')
+
+    expect((await screen.findByText('scenes')).tagName).toBe('STRONG')
+    // A list item of its own, not a dash at the start of a line. (The proposal below
+    // has list items too, so this names the reply's.)
+    expect(screen.getByText('The river').tagName).toBe('LI')
+    expect(screen.queryByText(/\*\*/)).toBeNull()
+  })
+
   it('warns when the project was saved after the request was made', async () => {
     useProjectStore.setState({ project: { ...project, version: 5 } })
     vi.spyOn(assistantApi, 'sessions').mockResolvedValue([chat(turn())])
