@@ -34,6 +34,15 @@ const failed = (status?: number) =>
   })
 
 describe('whether dictation can be offered, and why not', () => {
+  it('asks with the shared sign-in cookie, since GVC keeps no token', async () => {
+    vi.resetModules()
+    const create = vi.spyOn(axios, 'create')
+    await import('@/api/suiteSpeech')
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ withCredentials: true })
+    )
+  })
+
   it('is ready when the suite has a Deepgram key', async () => {
     expect(
       await readiness(() => Promise.resolve({ data: { data: { ready: true } } }))

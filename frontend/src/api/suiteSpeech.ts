@@ -38,12 +38,19 @@ function suiteBase(): string {
   return (currentConfig()?.suite_base_url ?? '').replace(/\/+$/, '')
 }
 
-export function streamUrl(base: string, token: string): string {
+export function streamUrl(base: string, token: string | null): string {
   const ws = base.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:')
-  return `${ws}/api/v1/ai/speech/stt/stream?app=gvc&token=${encodeURIComponent(token)}`
+  // The browser sends the shared cookie with the handshake, which the suite accepts; a
+  // token goes in the address only when there is one.
+  const params = new URLSearchParams({ app: 'gvc' })
+  if (token) params.set('token', token)
+  return `${ws}/api/v1/ai/speech/stt/stream?${params.toString()}`
 }
 
-const http = axios.create()
+// With credentials: GVC keeps no token of its own (readToken() is normally empty), so the
+// shared sign-in cookie is what tells the suite who is asking. Without it every check was a
+// 401 and dictation said the session was refused.
+const http = axios.create({ withCredentials: true })
 
 /**
  * Whether dictation can be offered, and if not, why. `local` means GVC's AI does not run
@@ -101,7 +108,7 @@ export function connectLiveDictation(
   onEvent: (event: LiveDictationEvent) => void,
   onClose: (code: number, reason: string) => void
 ): LiveDictationHandle {
-  const ws = new WebSocket(streamUrl(suiteBase(), readToken() ?? ''))
+  const ws = new WebSocket(streamUrl(suiteBase(), readToken()))
   // The recorder starts at once, but the handshake takes a moment. The first chunk carries
   // the audio container's header; dropped, Deepgram cannot decode the rest (Notes learnt
   // this in production), so chunks wait here until the socket is open.
