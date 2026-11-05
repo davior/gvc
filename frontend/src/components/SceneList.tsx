@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ArrowDown, ArrowUp, Paperclip, Plus, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, ExternalLink, Plus, Trash2 } from 'lucide-react'
 import type { GamAsset } from '@/api/gam'
 import type { Segment, VideoSpec } from '@/api/projects'
 import ClipPlayer from '@/components/ClipPlayer'
@@ -134,7 +134,7 @@ export default function SceneList({
                   aria-label="Open in GAM"
                   title="Open this scene's asset in GAM"
                 >
-                  <Paperclip className="h-4 w-4" />
+                  <ExternalLink className="h-4 w-4" />
                 </a>
               )}
             </div>
