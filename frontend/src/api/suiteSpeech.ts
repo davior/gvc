@@ -45,17 +45,55 @@ export function streamUrl(base: string, token: string): string {
 
 const http = axios.create()
 
+/**
+ * Whether dictation can be offered, and if not, why. `local` means GVC's AI does not run
+ * through the suite at all, so there is nothing to offer and nothing to explain; any other
+ * "no" carries a sentence, because a microphone that silently is not there gives the person
+ * nothing to go on (that cost a round trip once).
+ */
+export type DictationReadiness =
+  { state: 'ready' } | { state: 'local' } | { state: 'unavailable'; reason: string }
+
 export const suiteSpeechApi = {
-  /** Whether the suite has a Deepgram key for this person: the microphone shows only then. */
-  async ready(): Promise<boolean> {
-    const config = await loadConfig()
-    if (config.ai_backend !== 'suite' || !config.suite_base_url) return false
+  async ready(): Promise<DictationReadiness> {
+    let config
+    try {
+      config = await loadConfig()
+    } catch {
+      return { state: 'unavailable', reason: 'Could not read this app’s settings.' }
+    }
+    if (config.ai_backend !== 'suite' || !config.suite_base_url) return { state: 'local' }
     const token = readToken()
-    const res = await http.get<{ data: { ready: boolean } }>(
-      `${suiteBase()}/api/v1/ai/speech/stt/ready`,
-      { headers: token ? { Authorization: `Bearer ${token}` } : {} }
-    )
-    return res.data.data.ready === true
+    try {
+      const res = await http.get<{ data: { ready: boolean } }>(
+        `${suiteBase()}/api/v1/ai/speech/stt/ready`,
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+      )
+      return res.data.data.ready === true
+        ? { state: 'ready' }
+        : {
+            state: 'unavailable',
+            reason:
+              'No Deepgram key is set up in Gecko Suite. Add one under Providers there.',
+          }
+    } catch (error) {
+      const status = axios.isAxiosError(error) ? error.response?.status : undefined
+      if (status === 401 || status === 403) {
+        return {
+          state: 'unavailable',
+          reason: 'Gecko Suite did not accept this session. Sign out and in again.',
+        }
+      }
+      if (status) {
+        return { state: 'unavailable', reason: `Gecko Suite answered HTTP ${status}.` }
+      }
+      // No status at all: the browser blocked or could not make the request. Almost always
+      // the suite's CORS_ORIGIN not listing this site, which is what the sentence names.
+      return {
+        state: 'unavailable',
+        reason: `Could not reach Gecko Suite from this page. Its CORS_ORIGIN must list ${window.location.origin}.`,
+      }
+    }
   },
 }
 

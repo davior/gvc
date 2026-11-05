@@ -20,7 +20,7 @@ import {
 import { Link, useMatch, useNavigate } from 'react-router-dom'
 import { ACTIVE_TURN, type Turn, type TurnStep } from '@/api/assistant'
 import { formatCost } from '@/api/usage'
-import { suiteSpeechApi } from '@/api/suiteSpeech'
+import { suiteSpeechApi, type DictationReadiness } from '@/api/suiteSpeech'
 import { AttachControls, AttachmentList } from '@/components/AssistantAttachments'
 import { useDictation } from '@/hooks/useDictation'
 import { MAX_WIDTH, MIN_WIDTH, useAssistantStore } from '@/stores/assistant'
@@ -286,7 +286,10 @@ export default function AssistantPanel() {
   const [prompt, setPrompt] = useState('')
   // Dictation (SV-7): each finished phrase is appended to what is typed; nothing is sent
   // until the person presses Send. Offered only when the suite has a Deepgram key.
-  const [canDictate, setCanDictate] = useState(false)
+  const [dictationReady, setDictationReady] = useState<DictationReadiness>({
+    state: 'local',
+  })
+  const [showWhyNot, setShowWhyNot] = useState(false)
   const dictation = useDictation((text) =>
     setPrompt((prev) => (prev.trim() ? `${prev.trimEnd()} ${text}` : text))
   )
@@ -294,8 +297,8 @@ export default function AssistantPanel() {
     let live = true
     suiteSpeechApi
       .ready()
-      .then((ready) => live && setCanDictate(ready))
-      .catch(() => live && setCanDictate(false))
+      .then((ready) => live && setDictationReady(ready))
+      .catch(() => undefined)
     return () => {
       live = false
     }
@@ -566,7 +569,21 @@ export default function AssistantPanel() {
               }
             }}
           />
-          {canDictate && (
+          {dictationReady.state === 'unavailable' && (
+            // Not `disabled`: a disabled button takes no click, and the click is how the
+            // person finds out why (a title alone does not show on touch screens).
+            <button
+              type="button"
+              className="btn btn-secondary p-2 opacity-50"
+              aria-label="Dictate (unavailable)"
+              aria-disabled="true"
+              title={dictationReady.reason}
+              onClick={() => setShowWhyNot((v) => !v)}
+            >
+              <Mic className="h-4 w-4" />
+            </button>
+          )}
+          {dictationReady.state === 'ready' && (
             <button
               type="button"
               className={`btn p-2 ${
@@ -600,6 +617,11 @@ export default function AssistantPanel() {
         {dictation.interim && (
           <p className="truncate text-xs italic text-gray-500" aria-live="polite">
             {dictation.interim}…
+          </p>
+        )}
+        {showWhyNot && dictationReady.state === 'unavailable' && (
+          <p role="alert" className="text-xs text-amber-700 dark:text-amber-400">
+            Dictation is off: {dictationReady.reason}
           </p>
         )}
         {dictation.status === 'error' && dictation.error && (

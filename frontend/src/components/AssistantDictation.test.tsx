@@ -14,7 +14,8 @@ import { useProjectStore } from '@/stores/projects'
  */
 
 const stream = vi.hoisted(() => ({
-  ready: true,
+  ready: { state: 'ready' } as
+    { state: 'ready' } | { state: 'local' } | { state: 'unavailable'; reason: string },
   onEvent: null as null | ((e: LiveDictationEvent) => void),
   onClose: null as null | ((code: number, reason: string) => void),
   stopped: 0,
@@ -69,7 +70,7 @@ function open() {
 
 beforeEach(() => {
   Object.assign(stream, {
-    ready: true,
+    ready: { state: 'ready' },
     onEvent: null,
     onClose: null,
     stopped: 0,
@@ -139,12 +140,27 @@ describe('dictating into the assistant', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('No Deepgram key')
   })
 
-  it('offers no microphone when the suite cannot transcribe', async () => {
-    stream.ready = false
+  it('shows a greyed microphone that says why when the suite cannot transcribe', async () => {
+    // A microphone that is simply not there gives nothing to go on.
+    stream.ready = {
+      state: 'unavailable',
+      reason: 'No Deepgram key is set up in Gecko Suite.',
+    }
+    open()
+    const mic = await screen.findByRole('button', { name: 'Dictate (unavailable)' })
+    expect(mic).toHaveAttribute('title', 'No Deepgram key is set up in Gecko Suite.')
+    await userEvent.click(mic)
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Dictation is off: No Deepgram key'
+    )
+  })
+
+  it('offers no microphone when AI does not run through the suite', async () => {
+    stream.ready = { state: 'local' }
     open()
     await screen.findByLabelText('Ask the assistant')
     await waitFor(() =>
-      expect(screen.queryByRole('button', { name: 'Dictate' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Dictate/ })).not.toBeInTheDocument()
     )
   })
 })
