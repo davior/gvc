@@ -599,7 +599,17 @@ class BriefSource(_Model):
     model: Optional[str] = None
 
 
-SpecSource = Annotated[Union[NoteSource, BriefSource], Field(discriminator="kind")]
+class PlaylistSource(_Model):
+    """Built from a GAM playlist (gam#70). Provenance only, like a note: the playlist can
+    change or be deleted afterwards and the project is unaffected."""
+
+    kind: Literal["playlist"]
+    playlist_id: str
+    name: str = ""
+    imported_at: Optional[str] = None   # ISO 8601
+
+
+SpecSource = Annotated[Union[NoteSource, BriefSource, PlaylistSource], Field(discriminator="kind")]
 
 
 class VideoSpec(_Model):

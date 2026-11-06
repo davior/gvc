@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Film, FileText, Plus, Sparkles, Trash2 } from 'lucide-react'
+import { Film, FileText, ListVideo, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import type { Origin } from '@/api/projects'
+import PlaylistStart from '@/components/PlaylistStart'
 import { useProjectStore } from '@/stores/projects'
 
 const ORIGIN_LABEL: Record<Origin, string> = {
@@ -9,11 +10,13 @@ const ORIGIN_LABEL: Record<Origin, string> = {
   pasted: 'From a pasted spec',
   note: 'Pushed from Notes',
   brief: 'Drafted from a prompt',
+  playlist: 'Built from a GAM playlist',
 }
 
 function OriginIcon({ origin }: { origin: Origin }) {
   if (origin === 'note') return <FileText className="h-4 w-4" />
   if (origin === 'brief') return <Sparkles className="h-4 w-4" />
+  if (origin === 'playlist') return <ListVideo className="h-4 w-4" />
   return <Film className="h-4 w-4" />
 }
 
@@ -66,6 +69,8 @@ export default function ProjectListView() {
           New blank video
         </button>
       </form>
+
+      <PlaylistStart />
 
       {error && (
         <p role="alert" className="text-sm text-red-600 dark:text-red-400">

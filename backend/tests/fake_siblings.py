@@ -61,6 +61,9 @@ class FakeSiblings:
     fal_key: bool = True
     # Notes' notes by id ({"id", "title", "content"}), for attaching one to the assistant.
     notes: Dict[str, dict] = field(default_factory=dict)
+    # GAM playlists by id (gam#70), as GET /api/playlists/{id} gives them. None: a GAM
+    # from before playlists, which has no such route.
+    playlists: Optional[Dict[str, dict]] = field(default_factory=dict)
     # Anywhere else on the web, by full URL: (status, headers, body).
     pages: Dict[str, tuple] = field(default_factory=dict)
 
@@ -120,6 +123,17 @@ class FakeSiblings:
                 "data": self.hits, "total": len(self.hits),
                 "query": request.url.params.get("q"), "semantic": False, "semantic_error": None,
             })
+        if path.startswith("/api/playlists"):
+            if self.playlists is None:
+                return httpx.Response(404, json={"detail": "Not Found"})
+            if path == "/api/playlists":
+                rows = [{k: v for k, v in p.items() if k != "items"} for p in self.playlists.values()]
+                return httpx.Response(200, json={"data": rows, "total": len(rows),
+                                                 "limit": 500, "offset": 0})
+            found = self.playlists.get(path.rsplit("/", 1)[-1])
+            if found is None:
+                return httpx.Response(404, json={"detail": {"code": "not_found", "message": "No such playlist."}})
+            return httpx.Response(200, json={"data": found})
         if path.endswith("/peaks") and request.method == "GET":
             waveform = self.peaks.get(path.split("/")[3])
             if waveform is None:
@@ -254,3 +268,34 @@ def transcript(asset_id: str, *segments: tuple) -> dict:
 
 def dumps(value) -> str:
     return json.dumps(value)
+
+
+def playlist_item(asset_id: str, asset_type: str = "video", *, start=None, end=None,
+                  label=None, image_seconds=None, duration=1800.0) -> dict:
+    """An item as GAM's playlist read gives it: `in_point`/`out_point` stored, `start`/`end`
+    resolved against the asset."""
+    ranged = start is not None
+    if asset_type == "image":
+        resolved = (0.0, image_seconds or 5.0)
+    else:
+        resolved = (start if ranged else 0.0, end if ranged else duration)
+    return {
+        "id": f"i-{asset_id}-{start}", "position": 0, "asset_id": asset_id,
+        "asset_name": f"Asset {asset_id}", "asset_type": asset_type,
+        "in_point": start, "out_point": end, "start": resolved[0], "end": resolved[1],
+        "image_seconds": image_seconds, "label": label, "note": None,
+        "asset_duration_seconds": None if asset_type == "image" else duration,
+        "mime_type": None, "width": None, "height": None,
+        "file_url": f"/media/{asset_id}.bin?exp=1&sig=x",
+        "thumb_url": f"/media/{asset_id}.jpg?exp=1&sig=x", "missing": False,
+    }
+
+
+def gam_playlist(playlist_id: str, name: str, items: List[dict], description=None) -> dict:
+    return {
+        "id": playlist_id, "name": name, "description": description,
+        "item_count": len(items), "total_seconds": 0.0,
+        "thumb_url": f"/media/{playlist_id}.jpg?exp=1&sig=x",
+        "created_at": "2026-11-06T00:00:00", "updated_at": "2026-11-06T00:00:00",
+        "items": [{**item, "position": n} for n, item in enumerate(items)],
+    }

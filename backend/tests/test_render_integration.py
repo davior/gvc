@@ -313,3 +313,29 @@ def test_every_shot_comes_out_described_the_same_whatever_its_footage(tmp_path):
                              capture_output=True, text=True, check=True).stdout.strip().splitlines()[0]
         described.add(out.rstrip(","))
     assert described == {"yuv420p,tv,bt709,bt709,bt709"}
+
+
+def test_a_video_built_from_a_gam_playlist_renders_each_item_for_its_length(tmp_path, library):
+    """gam#70: a playlist's moments, picture and sound, laid out and rendered for real. No
+    narration at all, so nothing is spoken."""
+    from app.schemas_gam import GamPlaylistDetail
+    from app.spec.from_playlist import playlist_spec
+    from app.spec.model import dump_spec
+    from tests.fake_siblings import gam_playlist, playlist_item
+
+    playlist = gam_playlist("p1", "The river", [
+        playlist_item("r", start=2.0, end=5.0, label="Low water", duration=20.0),
+        playlist_item("p", "image", image_seconds=2.0, label="The valley"),
+        playlist_item("a", "audio", start=0.0, end=3.0, label="Radio", duration=30.0),
+    ])
+    spec = dump_spec(playlist_spec(GamPlaylistDetail.model_validate(playlist)))
+    result, _ = _render(tmp_path, spec)
+
+    info = _probe(result.video)
+    assert sorted(s["codec_type"] for s in info["streams"] if s["codec_type"] != "data") == [
+        "audio", "video"]
+    # Title card 3.5 + clip 3 + image 2 + sound 3, less the fades the renderer overlaps.
+    assert 9.5 < result.duration < 12.0
+    assert [c["tags"]["title"] for c in info["chapters"]] == ["Low water", "The valley", "Radio"]
+    assert library.spoken == []
+    assert result.warnings == []

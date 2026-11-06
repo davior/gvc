@@ -200,6 +200,8 @@ export default function ProjectView() {
           {source?.kind === 'note' &&
             ' · pushed from Gecko Notes; edited only here from now on'}
           {source?.kind === 'brief' && ' · drafted from a prompt'}
+          {source?.kind === 'playlist' &&
+            ` · built from the GAM playlist "${String(source.name ?? '')}"`}
         </p>
 
         <div

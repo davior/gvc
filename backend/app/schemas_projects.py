@@ -44,6 +44,14 @@ class ProjectImport(BaseModel):
     spec: Dict[str, Any]
 
 
+class ProjectFromPlaylist(BaseModel):
+    """Start a video from one of the caller's GAM playlists (gam#70)."""
+
+    playlist_id: str = Field(min_length=1, max_length=64)
+    # Empty: the playlist's name.
+    title: str = Field(default="", max_length=300)
+
+
 class SpecSave(BaseModel):
     spec: Dict[str, Any]
     message: str = Field(default="", max_length=500)

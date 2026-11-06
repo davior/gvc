@@ -330,6 +330,11 @@ Both are provenance only (D3): GVC never re-reads the note or re-runs the brief 
 own. A brief keeps its prompt so you can see later what was asked for, and re-draft on
 request. A project made by hand has no `source`.
 
+A third kind came with GAM's playlists (GAM-12): `{ kind: "playlist"; playlist_id; name;
+imported_at? }`, provenance like a note's. The playlist is read once and copied, so
+editing or deleting it in GAM afterwards changes nothing in the project. Optional, so
+the spec stays "0.2".
+
 ### S3. `search` placeholders that resolve to a moment
 
 `{ from: "search", query }` resolves to an asset. To pull "where people talk about
@@ -422,6 +427,7 @@ Specified here, applied in GAM's repository, not from this one.
 | GAM-9 | `GET /api/assets/{id}/peaks`: an audio asset's waveform, computed with ffmpeg on first view and cached beside the file. **Done: [davior/gam#54](https://github.com/davior/gam/pull/54).** GVC reads it through `/api/gam/assets/{id}/peaks`; against a GAM without it, the audio players scrub on a flat line | Scrubbable waveform players for soundtrack tracks and the Sound picker, without the browser downloading whole files to draw one |
 | GAM-10 | Standard-resolution versions of a video (4K down to 360p) as files of the one asset, `GET /api/assets/{id}/versions`. **Done: [davior/gam#56](https://github.com/davior/gam/pull/56).** A render reads the smallest file that is still as sharp as the frame shows it (`render/media.py::pick_source`): a 1080p render of a 4K original reads its 1080p, a preview its 480p, and a shot cropped to fill the frame counts the edge the crop is limited by. Against a GAM without it, or a video with no versions, the original is used as before | Rendering a 4K original fetches and decodes four times the pixels the frame needs |
 | GAM-11 | FLUX Pro rows in the catalogue (FLUX1.1 [pro] ultra, FLUX.2 [pro], FLUX1.1 [pro]), sorted ahead of schnell, and a per-user default model per kind in GAM's Settings, applied by listing it first in `GET /api/generate/models` with `is_default`. Against a GAM without it, GVC takes GAM's sort order as before, and `style.models` (S6) still works for whatever endpoints that GAM has | Unattended generation came from the draft model, and there was no way to choose any other |
+| GAM-12 | Playlists: named, ordered moments of assets, each an asset that owns its file plus an optional range, `GET /api/playlists[/{id}]`. **[davior/gam#70](https://github.com/davior/gam/pull/70).** GVC lists them through `/api/gam/playlists` and builds a project from one (`POST /api/projects/from-playlist`, `spec/from_playlist.py`): a title card, then a clip per video moment (trimmed, its own sound), a held scene per picture, and a scene per sound with the sound as an audio track anchored to it. Against a GAM without playlists the list says so (`gam_without_playlists`) | Making a video from what GAM's assistant found ("everyone talking about the financial crisis") without placing each moment by hand |
 
 GAM-1 and GAM-2 come first. They're small, and M1 below depends on them.
 
