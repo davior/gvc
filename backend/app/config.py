@@ -47,8 +47,15 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     # The cookie gecko-notes sets on the parent domain. Read only; GVC never sets it.
     auth_cookie_name: str = "gecko_session"
-    # Where an unauthenticated visitor is sent to sign in.
-    notes_base_url: str = "https://notes.geckopico.com"
+    # The Gecko Notes app: attaching a note to the assistant, copying a note's files into
+    # GAM, narration read through Notes' speech, links to a note, and filing a note the
+    # assistant proposed. Not where people sign in: that is the suite (`sign_in_url`).
+    notes_url: str = "https://notes.geckopico.com"
+    # Retired. It was where people signed in and also where Notes was, and it came to point
+    # at Gecko Suite for the first while still being read as the second, which sent every
+    # call to Notes to the suite. Read only so the app can say, once at startup, that it
+    # is set and ignored.
+    notes_base_url: str = ""
 
     # ─── storage ─────────────────────────────────────────────────────────────
     # GVC owns no media — footage, music and renders live in GAM — so a database is
@@ -81,6 +88,10 @@ class Settings(BaseSettings):
     # Reached with the caller's own Notes session, which the worker already holds for the
     # turn. No app credential: nothing here uses the suite after that token is gone.
     suite_base_url: str = "https://suite.geckopico.com"
+    # The suite as people's browsers reach it, when SUITE_BASE_URL is an address only the
+    # server can (a compose service name). Where people are sent to sign in. Unset: the
+    # same as SUITE_BASE_URL. As in Notes.
+    suite_public_url: str = ""
 
     # ─── http ────────────────────────────────────────────────────────────────
     cors_origin: str = ""
@@ -201,6 +212,12 @@ class Settings(BaseSettings):
         authentication off entirely.
         """
         return bool(self.dev_auth_user) and self.is_development
+
+    @property
+    def sign_in_url(self) -> str:
+        """Where an unauthenticated visitor is sent to sign in: Gecko Suite, at the address
+        people's browsers reach it by. The same rule as Notes (`identity.py`)."""
+        return (self.suite_public_url.strip() or self.suite_base_url).rstrip("/")
 
 
 @lru_cache

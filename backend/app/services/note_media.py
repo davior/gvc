@@ -66,7 +66,7 @@ def _fetch_to(path: str, sink) -> str:
     content type."""
     limit = settings.note_media_max_mb * 1024 * 1024
     received = 0
-    with outbound.client(settings.notes_base_url, timeout=120) as notes:
+    with outbound.client(settings.notes_url, timeout=120) as notes:
         try:
             with notes.stream("GET", path) as response:
                 if response.status_code == 404:

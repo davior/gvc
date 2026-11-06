@@ -19,9 +19,9 @@ COPY nginx.conf /etc/nginx/templates/default.conf.template
 
 EXPOSE 80
 
-# The CSP's connect-src, so a deployment pointing at a different Notes instance does
-# not need its own image. Substituted at container start, not build time.
-ENV NOTES_BASE_URL=https://notes.geckopico.com
+# The suite where people sign in, as browsers reach it, for the CSP's connect-src. Empty:
+# SUITE_BASE_URL. Substituted at container start, not build time.
+ENV SUITE_PUBLIC_URL=
 # img-src and media-src: thumbnails and previews load from GAM directly.
 ENV GAM_BASE_URL=https://assets.geckopico.com
 # Also in connect-src, for the theme picker's calls to Gecko Suite (M7).
@@ -32,4 +32,4 @@ ENV SUITE_BASE_URL=https://suite.geckopico.com
 # left to replace everything it recognises.
 # SUITE_WS_URL is SUITE_BASE_URL as a websocket address (https -> wss), for live dictation's
 # stream (SV-7). Derived here so there is still only one setting to get right.
-CMD ["/bin/sh", "-c", "export SUITE_WS_URL=$(echo \"$SUITE_BASE_URL\" | sed 's#^http#ws#') && envsubst '${NOTES_BASE_URL} ${GAM_BASE_URL} ${SUITE_BASE_URL} ${SUITE_WS_URL}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
+CMD ["/bin/sh", "-c", "export SIGN_IN_URL=\"${SUITE_PUBLIC_URL:-$SUITE_BASE_URL}\" && export SUITE_WS_URL=$(echo \"$SUITE_BASE_URL\" | sed 's#^http#ws#') && envsubst '${SIGN_IN_URL} ${GAM_BASE_URL} ${SUITE_BASE_URL} ${SUITE_WS_URL}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]

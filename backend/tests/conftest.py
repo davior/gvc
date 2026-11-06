@@ -101,7 +101,7 @@ def siblings_fixture(monkeypatch):
     fake = FakeSiblings()
     monkeypatch.setattr(outbound, "TRANSPORT", httpx.MockTransport(fake.handler))
     monkeypatch.setattr(settings, "gam_base_url", GAM)
-    monkeypatch.setattr(settings, "notes_base_url", NOTES)
+    monkeypatch.setattr(settings, "notes_url", NOTES)
     return fake
 
 

@@ -58,7 +58,7 @@ class NotesClient:
             raise NotesError("notes_unavailable",
                              "Gecko Notes can't be reached without a signed-in session",
                              status_code=409)
-        self._http = outbound.client(settings.notes_base_url, timeout=TIMEOUT,
+        self._http = outbound.client(settings.notes_url, timeout=TIMEOUT,
                                      headers={"Authorization": f"Bearer {token}"})
 
     def __enter__(self) -> "NotesClient":
@@ -71,7 +71,7 @@ class NotesClient:
         try:
             response = self._http.get(path, **kwargs)
         except httpx.HTTPError as exc:
-            logger.warning("Notes unreachable at %s: %s", settings.notes_base_url, exc)
+            logger.warning("Notes unreachable at %s: %s", settings.notes_url, exc)
             raise NotesError("notes_unavailable", "Could not reach Gecko Notes") from exc
         if response.status_code == 401:
             raise NotesError("notes_rejected_session",
@@ -96,7 +96,7 @@ class NotesClient:
         try:
             response = self._http.post("/api/notes/from-markdown", json=body)
         except httpx.HTTPError as exc:
-            logger.warning("Notes unreachable at %s: %s", settings.notes_base_url, exc)
+            logger.warning("Notes unreachable at %s: %s", settings.notes_url, exc)
             raise NotesError("notes_unavailable", "Could not reach Gecko Notes") from exc
         if response.status_code == 401:
             raise NotesError("notes_rejected_session",

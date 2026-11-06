@@ -384,7 +384,7 @@ def _notes_media_path(url: str) -> Optional[str]:
     make this server fetch whatever address the note's author typed.
     """
     parts = urlsplit(url or "")
-    if parts.netloc and parts.netloc != urlsplit(settings.notes_base_url).netloc:
+    if parts.netloc and parts.netloc != urlsplit(settings.notes_url).netloc:
         return None
     if not parts.path.startswith("/media/") or ".." in parts.path:
         return None

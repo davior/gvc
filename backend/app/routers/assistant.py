@@ -474,7 +474,7 @@ def create_note(turn_id: str, note_ref: str, user: CurrentUser, token: CallerTok
     except NotesError as exc:
         raise _refused(exc.code, exc.message, exc.status_code) from exc
     note["state"] = "created"
-    note["note_url"] = f"{settings.notes_base_url.rstrip('/')}/notes/{made.id}"
+    note["note_url"] = f"{settings.notes_url.rstrip('/')}/notes/{made.id}"
     return DataResponse(data=_turn_read(_save_notes(session, turn, notes)))
 
 

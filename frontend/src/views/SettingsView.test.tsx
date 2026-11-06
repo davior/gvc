@@ -8,7 +8,7 @@ import SettingsView from '@/views/SettingsView'
 
 function serve(aiBackend: 'local' | 'suite') {
   vi.spyOn(configModule, 'loadConfig').mockResolvedValue({
-    notes_base_url: 'https://notes.example.test',
+    sign_in_url: 'https://suite.example.test',
     ai_backend: aiBackend,
     suite_base_url: 'https://suite.example.test/',
   })
