@@ -76,6 +76,8 @@ interface AssistantState {
   stop: (turnId: string) => Promise<void>
   markApplied: (turnId: string) => Promise<void>
   discard: (turnId: string) => Promise<void>
+  /** Create or throw away one note the assistant proposed for Gecko Notes. */
+  decideNote: (turnId: string, noteRef: string, create: boolean) => Promise<void>
   newProject: (turnId: string) => Promise<string | null>
   refreshAttention: () => Promise<void>
   removeChat: (id: string) => Promise<void>
@@ -260,6 +262,19 @@ export const useAssistantStore = create<AssistantState>((set, get) => {
         const chat = get().chat
         if (mine === token && chat) await reload(mine, chat.id)
         void get().refreshAttention()
+      } catch (error) {
+        if (mine === token) set({ error: apiErrorMessage(error) })
+      }
+    },
+
+    async decideNote(turnId, noteRef, create) {
+      const mine = token
+      try {
+        await (create
+          ? assistantApi.createNote(turnId, noteRef)
+          : assistantApi.discardNote(turnId, noteRef))
+        const chat = get().chat
+        if (mine === token && chat) await reload(mine, chat.id)
       } catch (error) {
         if (mine === token) set({ error: apiErrorMessage(error) })
       }

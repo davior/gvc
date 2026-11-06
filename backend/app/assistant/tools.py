@@ -23,6 +23,7 @@ from __future__ import annotations
 import copy
 import json
 import re
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -199,6 +200,11 @@ class Working:
     web_search: Optional[Callable[[str], List[Dict[str, Any]]]] = None
     web_searches: int = 0
     max_web_searches: int = 8
+    # Notes proposed for Gecko Notes this turn. Offered only where the turn holds the
+    # person's token (`can_note`), which is what creating one on Apply will forward.
+    can_note: bool = False
+    notes: List[Dict[str, Any]] = field(default_factory=list)
+    max_notes: int = 3
 
     def __post_init__(self) -> None:
         self.data = copy.deepcopy(self.data)
@@ -1092,6 +1098,39 @@ def delete_theme(w: Working, theme: str) -> str:
 MAX_WEB_CHARS = 6_000
 
 
+NOTE_MAX = 50_000
+
+
+def propose_note(w: Working, title: str, markdown: str, folder: Optional[str] = None) -> str:
+    """A note for Gecko Notes, made only when the person presses its button.
+
+    Not a change to the video, so it is kept apart from `w.changes` and the proposed spec:
+    a turn may propose a note, an edit, or both, and each is decided on its own. The same
+    title again rewrites that note, so a model correcting itself does not leave two.
+    """
+    title, markdown = (title or "").strip(), markdown or ""
+    if not title or not markdown.strip():
+        raise ToolFailed("Give the note a title and its text, in Markdown.")
+    if len(title) > 200:
+        raise ToolFailed("The title is at most 200 characters.")
+    if len(markdown) > NOTE_MAX:
+        raise ToolFailed(f"The note is too long ({len(markdown)} of {NOTE_MAX} characters). "
+                         "Make it shorter, or split it into notes.")
+    held = next((n for n in w.notes if n["title"].lower() == title.lower()), None)
+    if held is None and len(w.notes) >= w.max_notes:
+        raise ToolFailed(f"That's the {w.max_notes} notes one request may propose.")
+    folder = (folder or "").strip()[:120] or None
+    entry = {"note_ref": held["note_ref"] if held else uuid.uuid4().hex,
+             "title": title, "markdown": markdown, "folder": folder, "state": "pending",
+             "note_url": None}
+    if held:
+        w.notes[w.notes.index(held)] = entry
+    else:
+        w.notes.append(entry)
+    return (f"Proposed the note {title!r} for Gecko Notes ({len(markdown)} characters). "
+            "The user creates it with the button on your reply; say so, never that it exists.")
+
+
 def web_search(w: Working, query: str) -> str:
     query = (query or "").strip()
     if not query:
@@ -1286,6 +1325,18 @@ TOOLS: List[Tuple[ToolSpec, Callable[..., str]]] = [
                   "outputs": {"type": "integer", "minimum": 1, "maximum": 4},
                   "label": _STR},
                "required": ["prompt"]}), generate_image),
+    (ToolSpec("propose_note",
+              "Propose a new note in Gecko Notes, the user's notes app: the script, a shot "
+              "list, research, a summary of footage. Write it in Markdown. Link a GAM asset "
+              "as [Name](/a/<gam_id>), which becomes a link to it in the library. Nothing "
+              "is written until the user presses the note's button; it then lands in their "
+              "\"From Video Creator\" folder, or the folder they named. It does not change "
+              "the video. Only when the user asks for a note.",
+              {"type": "object", "properties": {
+                  "title": _STR, "markdown": _STR,
+                  "folder": {"type": "string",
+                             "description": "Only when the user names a folder."}},
+               "required": ["title", "markdown"]}), propose_note),
     (ToolSpec("web_search", "Search the web, for what the library cannot say: a fact for the "
               "script, who someone is, when something happened. Returns titles, links and short "
               "passages. Say where a fact came from; it is not a way to find footage (use "
@@ -1305,8 +1356,11 @@ READS = {"get_spec", "search_assets", "read_transcript", "find_clips", "get_asse
 
 
 def specs_for(w: Working) -> List[ToolSpec]:
-    """The tools a turn is offered: all of them, except the web where there is none."""
-    return [s for s in SPECS if s.name != "web_search" or w.web_search is not None]
+    """The tools a turn is offered: all of them, except the web where there is none, and
+    notes where there is no token to make one with."""
+    return [s for s in SPECS
+            if (s.name != "web_search" or w.web_search is not None)
+            and (s.name != "propose_note" or w.can_note)]
 
 
 def execute(w: Working, call: ToolCall) -> ToolResult:

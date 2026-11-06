@@ -14,6 +14,20 @@ export interface TurnStep {
   text: string
 }
 
+/**
+ * A note the assistant proposed for Gecko Notes. Not part of the video: made by its own
+ * button, as whoever presses it, into "From Video Creator" or the folder they named.
+ */
+export interface NoteProposal {
+  note_ref: string
+  title: string
+  markdown: string
+  folder: string | null
+  state: 'pending' | 'created' | 'discarded'
+  /** Once created: the note's page in Gecko Notes. */
+  note_url: string | null
+}
+
 export interface Turn {
   id: string
   session_id: string
@@ -29,6 +43,8 @@ export interface Turn {
   proposed_spec: VideoSpec | null
   changes: string[]
   outcome: '' | 'pending' | 'applied' | 'discarded'
+  /** Notes for Gecko Notes, each decided apart from the video. Absent on older turns. */
+  notes?: NoteProposal[]
   /** The project version the turn was asked about. */
   base_version: number | null
   /** The suite persona this turn was asked as, if any. */
@@ -220,6 +236,19 @@ export const assistantApi = {
   discarded(id: string): Promise<Turn> {
     return client
       .post<DataResponse<Turn>>(`/assistant/turns/${id}/discarded`)
+      .then((r) => r.data.data)
+  },
+
+  /** Make a proposed note in Gecko Notes, as the caller. */
+  createNote(id: string, noteRef: string): Promise<Turn> {
+    return client
+      .post<DataResponse<Turn>>(`/assistant/turns/${id}/notes/${noteRef}/create`)
+      .then((r) => r.data.data)
+  },
+
+  discardNote(id: string, noteRef: string): Promise<Turn> {
+    return client
+      .post<DataResponse<Turn>>(`/assistant/turns/${id}/notes/${noteRef}/discard`)
       .then((r) => r.data.data)
   },
 

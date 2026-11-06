@@ -18,7 +18,7 @@ import {
   Wrench,
 } from 'lucide-react'
 import { Link, useMatch, useNavigate } from 'react-router-dom'
-import { ACTIVE_TURN, type Turn, type TurnStep } from '@/api/assistant'
+import { ACTIVE_TURN, type NoteProposal, type Turn, type TurnStep } from '@/api/assistant'
 import { formatCost } from '@/api/usage'
 import { suiteSpeechApi, type DictationReadiness } from '@/api/suiteSpeech'
 import { AttachControls, AttachmentList } from '@/components/AssistantAttachments'
@@ -86,6 +86,84 @@ interface ProposalProps {
 }
 
 /** What a turn would change, and Apply / Discard. */
+/**
+ * A note for Gecko Notes. Apart from the video's proposal: it never touches the editor,
+ * and is made, as the person pressing the button, only when they do.
+ */
+function NoteCard({ turnId, note }: { turnId: string; note: NoteProposal }) {
+  const decideNote = useAssistantStore((s) => s.decideNote)
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  async function decide(create: boolean) {
+    setBusy(true)
+    await decideNote(turnId, note.note_ref, create)
+    setBusy(false)
+  }
+  return (
+    <div
+      aria-label={`Note: ${note.title}`}
+      className="space-y-2 rounded border border-gray-200 p-2 text-xs dark:border-gray-700"
+    >
+      <p className="font-medium text-gray-900 dark:text-gray-100">
+        Note for Gecko Notes: {note.title}
+      </p>
+      <p className="text-gray-600 dark:text-gray-400">
+        In the folder “{note.folder || 'From Video Creator'}”.{' '}
+        <button
+          type="button"
+          className="text-blue-700 hover:underline dark:text-blue-300"
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+        >
+          {open ? 'Hide the text' : 'Read it'}
+        </button>
+      </p>
+      {open && (
+        <div
+          aria-label={`Text of ${note.title}`}
+          className="max-h-72 overflow-auto rounded bg-gray-50 p-2 dark:bg-gray-900"
+        >
+          <Markdown text={note.markdown} />
+        </div>
+      )}
+      {note.state === 'pending' && (
+        <div className="flex gap-2">
+          <button
+            type="button"
+            className="btn btn-primary px-2 py-1 text-xs"
+            disabled={busy}
+            onClick={() => void decide(true)}
+          >
+            Create in Gecko Notes
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary px-2 py-1 text-xs"
+            disabled={busy}
+            onClick={() => void decide(false)}
+          >
+            Discard
+          </button>
+        </div>
+      )}
+      {note.state === 'created' && note.note_url && (
+        <p className="text-gray-600 dark:text-gray-400">
+          Created.{' '}
+          <a
+            href={note.note_url}
+            target="_blank"
+            rel="noreferrer"
+            className="text-blue-700 hover:underline dark:text-blue-300"
+          >
+            Open in Gecko Notes
+          </a>
+        </p>
+      )}
+      {note.state === 'discarded' && <p className="text-gray-500">Discarded.</p>}
+    </div>
+  )
+}
+
 function Proposal({ turn, projectVersion }: ProposalProps) {
   const markApplied = useAssistantStore((s) => s.markApplied)
   const discard = useAssistantStore((s) => s.discard)
@@ -466,6 +544,9 @@ export default function AssistantPanel() {
                     projectVersion={scope ? (here?.version ?? null) : null}
                   />
                 )}
+                {turn?.notes?.map((note) => (
+                  <NoteCard key={note.note_ref} turnId={turn.id} note={note} />
+                ))}
                 {turn?.cost != null && turn.cost > 0 && (
                   <p className="text-[11px] text-gray-400">
                     about {formatCost(turn.cost)} (estimate)

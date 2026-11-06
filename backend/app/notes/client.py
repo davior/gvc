@@ -2,9 +2,13 @@
 
 The same arrangement as `app.gam.client`: the caller's own Notes-issued token is
 forwarded, so Notes' ownership checks decide what can be read, and GVC can never see a
-note its user couldn't. Only reads. GVC never writes to Notes; once a note is attached,
-its text is a copy on the conversation, and editing the note afterwards changes nothing
-here (D3's rule for pushed notes, applied to attached ones).
+note its user couldn't. Once a note is attached, its text is a copy on the conversation,
+and editing the note afterwards changes nothing here (D3's rule for pushed notes,
+applied to attached ones).
+
+The one write is `create_from_markdown`: a note the assistant proposed, made only when
+the user presses its button, through Notes' `POST /api/notes/from-markdown`, which turns
+the Markdown into blocks and files it under "From Video Creator".
 """
 
 from __future__ import annotations
@@ -82,6 +86,35 @@ class NotesClient:
             return response.json()
         except ValueError as exc:
             raise NotesError("notes_unavailable", "Gecko Notes sent an unreadable answer") from exc
+
+    def create_from_markdown(self, *, title: str, markdown: str,
+                             folder_name: Optional[str] = None) -> Note:
+        """Create a note from Markdown, as the user. Notes picks the blocks, the category
+        and the folder; this sends text."""
+        body = {"title": title, "markdown": markdown, "folder_name": folder_name,
+                "source_app": "gvc"}
+        try:
+            response = self._http.post("/api/notes/from-markdown", json=body)
+        except httpx.HTTPError as exc:
+            logger.warning("Notes unreachable at %s: %s", settings.notes_base_url, exc)
+            raise NotesError("notes_unavailable", "Could not reach Gecko Notes") from exc
+        if response.status_code == 401:
+            raise NotesError("notes_rejected_session",
+                             "Gecko Notes did not accept your session. Sign in again.")
+        if response.status_code in (404, 405):
+            # A Notes from before the endpoint (gecko-notes#224).
+            raise NotesError("notes_outdated",
+                             "Gecko Notes needs updating before it can take notes from "
+                             "Video Creator", status_code=409)
+        if response.status_code != 201:
+            raise NotesError("notes_unavailable",
+                             f"Gecko Notes answered {response.status_code}")
+        try:
+            data = response.json().get("data") or {}
+        except ValueError as exc:
+            raise NotesError("notes_unavailable", "Gecko Notes sent an unreadable answer") from exc
+        return Note(id=data.get("id") or "", title=data.get("title") or title,
+                    content=data.get("content") or "")
 
     def search(self, query: str, limit: int = 20) -> List[NoteSummary]:
         """The user's notes, most recently changed first; with a query, those whose

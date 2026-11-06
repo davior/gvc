@@ -68,6 +68,12 @@ class AssistantTurn(SQLModel, table=True):
     changes: str = "[]"
     # pending | applied | discarded, once there is a proposal; "" otherwise.
     outcome: str = ""
+    # JSON: notes proposed for Gecko Notes, each decided on its own and apart from the
+    # spec: [{"note_ref", "title", "markdown", "folder", "state": "pending"|"created"|
+    # "discarded", "note_url"}]. None when the turn proposed none. A note is not part of
+    # the video, so it is made by its own button (routers/assistant.py), never by loading
+    # the spec into the editor.
+    proposed_notes: Optional[str] = None
     cost: Optional[float] = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)

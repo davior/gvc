@@ -37,6 +37,17 @@ class Step(BaseModel):
     text: str
 
 
+class NoteProposalRead(BaseModel):
+    """A note the assistant proposed for Gecko Notes, decided apart from the video."""
+
+    note_ref: str
+    title: str
+    markdown: str
+    folder: Optional[str] = None
+    state: str = "pending"          # pending | created | discarded
+    note_url: Optional[str] = None  # once created: the note's page in Gecko Notes
+
+
 class TurnRead(BaseModel):
     id: str
     session_id: str
@@ -52,6 +63,7 @@ class TurnRead(BaseModel):
     proposed_spec: Optional[Dict[str, Any]] = None
     changes: List[str] = []
     outcome: str = ""
+    notes: List[NoteProposalRead] = []
     base_version: Optional[int] = None
     persona_id: Optional[str] = None
     cost: Optional[float] = None

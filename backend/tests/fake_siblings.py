@@ -59,6 +59,10 @@ class FakeSiblings:
     gen_jobs: Dict[str, dict] = field(default_factory=dict)
     generations: List[dict] = field(default_factory=list)
     fal_key: bool = True
+    # Notes created through `POST /api/notes/from-markdown`, as sent, with the token.
+    created_notes: List[dict] = field(default_factory=list)
+    # Set to make that endpoint answer with this status (404: a Notes from before it).
+    create_note_status: int = 201
     # Notes' notes by id ({"id", "title", "content"}), for attaching one to the assistant.
     notes: Dict[str, dict] = field(default_factory=dict)
     # GAM playlists by id (gam#70), as GET /api/playlists/{id} gives them. None: a GAM
@@ -98,6 +102,14 @@ class FakeSiblings:
         if not request.headers.get("authorization"):
             return httpx.Response(401, json={"error": {"code": "unauthorized", "message": "no"}})
         path = request.url.path
+        if path == "/api/notes/from-markdown" and request.method == "POST":
+            body = json.loads(request.content)
+            self.created_notes.append({**body, "authorization": request.headers.get("authorization")})
+            if self.create_note_status != 201:
+                return httpx.Response(self.create_note_status, json={"detail": "Not Found"})
+            note_id = f"note-{len(self.created_notes)}"
+            return httpx.Response(201, json={"data": {"id": note_id, "title": body["title"],
+                                                      "content": "[]"}})
         if path == "/api/notes":
             q = (request.url.params.get("search") or "").lower()
             found = [n for n in self.notes.values()
