@@ -22,6 +22,11 @@ the changes this repository's plan lists as S1–S3, which Notes' copy does not.
   the AI being there.
 - A note pushed in from Notes becomes an ordinary GVC project. Nothing re-reads the
   note afterwards, and `source` is provenance only.
+- **GVC writes to Notes in one place:** a note the assistant proposed (`propose_note`),
+  made only when the user presses its button (`POST /api/assistant/turns/{id}/notes/
+  {ref}/create`), as that user, through Notes' `POST /api/notes/from-markdown`. It is not
+  part of the video and never goes through the spec proposal. The tool is offered only
+  when the turn has a token, since a note can't be made without one.
 - The runtime dependencies on the rest of the suite are login (GVC verifies the JWT Notes
   issues and has no accounts of its own) and, with `AI_BACKEND=suite`, the assistant's
   model and the narration's voice, which come from [gecko-suite](https://github.com/davior/gecko-suite).

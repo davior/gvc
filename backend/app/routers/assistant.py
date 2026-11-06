@@ -26,7 +26,7 @@ from app.notes.client import NotesClient, NotesError
 from app.providers import active_provider
 from app.schemas import DataResponse, ListResponse
 from app.schemas_assistant import (
-    AttachmentRead, Message, NewProjectRead, NoteAttach, NoteChoice, SessionCreate,
+    AttachmentRead, Message, NewProjectRead, NoteAttach, NoteChoice, NoteProposalRead, SessionCreate,
     PersonaRead, SessionRead, SessionSummary, Step, TurnCreate, TurnRead, UrlAttach,
 )
 from app.services import projects as project_service
@@ -47,6 +47,7 @@ def _turn_read(turn: AssistantTurn) -> TurnRead:
         stage=turn.stage, detail=turn.detail, error=turn.error_message, prompt=turn.prompt,
         steps=[Step(**s) for s in json.loads(turn.steps or "[]")], reply=turn.reply,
         proposed_spec=proposal, changes=json.loads(turn.changes or "[]"), outcome=turn.outcome,
+        notes=[NoteProposalRead(**n) for n in json.loads(turn.proposed_notes or "[]")],
         base_version=turn.base_version, persona_id=turn.persona_id, cost=turn.cost,
         created_at=turn.created_at, updated_at=turn.updated_at,
     )
@@ -428,6 +429,65 @@ def mark_applied(turn_id: str, user: CurrentUser,
 def mark_discarded(turn_id: str, user: CurrentUser,
                    session: Session = Depends(get_session)) -> DataResponse[TurnRead]:
     return DataResponse(data=_turn_read(_decide(session, user, turn_id, "discarded")))
+
+
+def _proposed_note(turn: AssistantTurn, note_ref: str) -> tuple:
+    notes = json.loads(turn.proposed_notes or "[]")
+    for note in notes:
+        if note.get("note_ref") == note_ref:
+            return notes, note
+    raise _refused("not_found", "That turn proposed no such note", status.HTTP_404_NOT_FOUND)
+
+
+def _save_notes(session: Session, turn: AssistantTurn, notes: list) -> AssistantTurn:
+    turn.proposed_notes, turn.updated_at = json.dumps(notes, ensure_ascii=False), utcnow()
+    session.add(turn)
+    session.commit()
+    session.refresh(turn)
+    return turn
+
+
+@router.post("/turns/{turn_id}/notes/{note_ref}/create", response_model=DataResponse[TurnRead])
+def create_note(turn_id: str, note_ref: str, user: CurrentUser, token: CallerToken,
+                session: Session = Depends(get_session)) -> DataResponse[TurnRead]:
+    """Make a proposed note in Gecko Notes, as the user, with the token of this request.
+
+    The turn's own token is long gone by now (it lives only while the turn runs), and
+    this one is the person who pressed the button, which is who the note should belong
+    to. Marked created only after Notes said so, so a failure can be pressed again; a
+    second press after success is refused, so one note is never made twice.
+    """
+    turn = _owned_turn(session, user, turn_id)
+    notes, note = _proposed_note(turn, note_ref)
+    if note.get("state") != "pending":
+        raise _refused("nothing_pending", f"That note was already {note.get('state')}",
+                       status.HTTP_409_CONFLICT)
+    # The assistant links a GAM asset as GAM's own page, `/a/<id>`; in Notes that has to
+    # say which server.
+    markdown = (note.get("markdown") or "").replace(
+        "](/a/", f"]({settings.gam_base_url.rstrip('/')}/a/")
+    try:
+        with NotesClient(token) as notes_client:
+            made = notes_client.create_from_markdown(
+                title=note.get("title") or "", markdown=markdown,
+                folder_name=note.get("folder"))
+    except NotesError as exc:
+        raise _refused(exc.code, exc.message, exc.status_code) from exc
+    note["state"] = "created"
+    note["note_url"] = f"{settings.notes_base_url.rstrip('/')}/notes/{made.id}"
+    return DataResponse(data=_turn_read(_save_notes(session, turn, notes)))
+
+
+@router.post("/turns/{turn_id}/notes/{note_ref}/discard", response_model=DataResponse[TurnRead])
+def discard_note(turn_id: str, note_ref: str, user: CurrentUser,
+                 session: Session = Depends(get_session)) -> DataResponse[TurnRead]:
+    turn = _owned_turn(session, user, turn_id)
+    notes, note = _proposed_note(turn, note_ref)
+    if note.get("state") != "pending":
+        raise _refused("nothing_pending", f"That note was already {note.get('state')}",
+                       status.HTTP_409_CONFLICT)
+    note["state"] = "discarded"
+    return DataResponse(data=_turn_read(_save_notes(session, turn, notes)))
 
 
 @router.post("/turns/{turn_id}/new-project", response_model=DataResponse[NewProjectRead],

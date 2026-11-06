@@ -113,6 +113,50 @@ describe('AssistantPanel', () => {
     expect(await screen.findByText(/Applied/)).toBeInTheDocument()
   })
 
+  it('offers a proposed note on its own, creates it on its button, and links to it', async () => {
+    const note = {
+      note_ref: 'n1',
+      title: 'River research',
+      markdown: '# River\n\nThe **water** is gone.',
+      folder: null,
+      state: 'pending' as const,
+      note_url: null,
+    }
+    const asked = turn({
+      proposed_spec: null,
+      changes: [],
+      outcome: '',
+      reply: 'A note for Gecko Notes, ready to create.',
+      notes: [note],
+    })
+    const made = turn({
+      ...asked,
+      notes: [{ ...note, state: 'created', note_url: 'https://notes.test/notes/x' }],
+    })
+    vi.spyOn(assistantApi, 'sessions').mockResolvedValue([chat(asked)])
+    vi.spyOn(assistantApi, 'session')
+      .mockResolvedValueOnce(chat(asked))
+      .mockResolvedValue(chat(made))
+    const create = vi.spyOn(assistantApi, 'createNote').mockResolvedValue(made)
+    at('/p/p1')
+
+    const card = await screen.findByLabelText('Note: River research')
+    expect(card).toHaveTextContent('folder “From Video Creator”')
+    // A note is not an edit to the video, so there is nothing to apply in the editor.
+    expect(screen.queryByRole('button', { name: 'Apply' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Read it' }))
+    expect(screen.getByLabelText('Text of River research')).toHaveTextContent(
+      'The water is gone.'
+    )
+
+    await userEvent.click(screen.getByRole('button', { name: 'Create in Gecko Notes' }))
+    expect(create).toHaveBeenCalledWith('t1', 'n1')
+    expect(
+      await screen.findByRole('link', { name: 'Open in Gecko Notes' })
+    ).toHaveAttribute('href', 'https://notes.test/notes/x')
+    expect(useProjectStore.getState().dirty).toBe(false)
+  })
+
   it('draws a reply written in Markdown instead of showing its marks', async () => {
     const t = turn({ reply: 'Two **scenes** change:\n\n- The valley\n- The river' })
     vi.spyOn(assistantApi, 'sessions').mockResolvedValue([chat(t)])

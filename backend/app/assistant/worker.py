@@ -160,7 +160,11 @@ def _run(turn_id: str) -> None:
         working = Working(base, gam=gam, max_generations=settings.assistant_max_generations,
                           max_picks=settings.assistant_max_clip_picks,
                           pick_concurrency=settings.assistant_clip_pick_concurrency,
-                          note_media=media_ids(attachments), themes=themes)
+                          note_media=media_ids(attachments), themes=themes,
+                          # A note is created later with the token of whoever presses its
+                          # button; offering it only where there is one now keeps a dev
+                          # session from being promised a note it can't make.
+                          can_note=token is not None)
         if suite.enabled():
             # The web, through the same connection, credited to this project.
             working.web_search = lambda query: suite.web_search(connection, query, project_id)
@@ -252,7 +256,7 @@ def _run(turn_id: str) -> None:
             connection.close()
         _tokens.pop(turn_id, None)
 
-    reply = outcome.reply or ("Done." if working.changes else "")
+    reply = outcome.reply or ("Done." if working.changes or working.notes else "")
     proposed = None
     if working.changes:
         canonical = _canonical(working.data)
@@ -272,7 +276,8 @@ def _run(turn_id: str) -> None:
             steps=steps, reply=reply,
             proposed_spec=json.dumps(proposed, ensure_ascii=False) if proposed else None,
             changes=json.dumps(working.changes if proposed else [], ensure_ascii=False),
-            outcome="pending" if proposed else "")
+            outcome="pending" if proposed else "",
+            proposed_notes=json.dumps(working.notes, ensure_ascii=False) if working.notes else None)
 
 
 def _finish(turn_id: str, *, message: str, steps: List[dict], **fields) -> None:
