@@ -73,7 +73,7 @@ export function NumberField({
         max={max}
         step={step}
         aria-label={label}
-        className="input w-20 py-0.5"
+        className="input w-20 px-2 py-0.5"
         value={text}
         onFocus={() => setEditing(true)}
         onBlur={() => {

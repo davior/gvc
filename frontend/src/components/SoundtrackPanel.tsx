@@ -134,7 +134,7 @@ export default function SoundtrackPanel({ spec, gamAssets, onChange }: Props) {
                   max="15"
                   step="0.5"
                   aria-label="Fade in seconds"
-                  className="input w-14 py-0.5"
+                  className="input w-20 px-2 py-0.5"
                   value={track.fade_in ?? 0}
                   onChange={(e) => set(index, { fade_in: Number(e.target.value) })}
                 />
@@ -147,7 +147,7 @@ export default function SoundtrackPanel({ spec, gamAssets, onChange }: Props) {
                   max="15"
                   step="0.5"
                   aria-label="Fade out seconds"
-                  className="input w-14 py-0.5"
+                  className="input w-20 px-2 py-0.5"
                   value={track.fade_out ?? 0}
                   onChange={(e) => set(index, { fade_out: Number(e.target.value) })}
                 />

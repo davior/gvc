@@ -44,7 +44,7 @@ export default function AnchorSelect({
           step="0.5"
           aria-label={`${label} offset in seconds`}
           title="Seconds before (negative) or after"
-          className="input w-16 py-0.5"
+          className="input w-20 px-2 py-0.5"
           value={value.offset ?? 0}
           onChange={(e) =>
             onPick({ ...value, offset: Number(e.target.value) || undefined })
