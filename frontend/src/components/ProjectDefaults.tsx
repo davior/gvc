@@ -61,7 +61,7 @@ export default function ProjectDefaults({ spec, onChange }: Props) {
             max="0.5"
             step="0.01"
             aria-label="Default Ken Burns amount"
-            className="input w-16 py-0.5"
+            className="input w-20 px-2 py-0.5"
             placeholder={String(DEFAULT_MOTION_AMOUNT)}
             value={motion?.amount ?? ''}
             onChange={(e) =>

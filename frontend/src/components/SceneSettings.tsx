@@ -86,7 +86,7 @@ export default function SceneSettings({
                 max="3"
                 step="0.1"
                 aria-label="Transition length in seconds"
-                className="input w-16 py-0.5"
+                className="input w-20 px-2 py-0.5"
                 placeholder={String(spec.style?.transition?.duration ?? 0.6)}
                 value={transition.duration ?? ''}
                 onChange={(e) =>

@@ -142,7 +142,7 @@ export default function FrameEditor({
                   min="0"
                   max="1"
                   aria-label={`${NAMES[which]} ${field}`}
-                  className="input w-16 px-1 py-0.5"
+                  className="input w-20 px-2 py-0.5"
                   value={frames[which][field]}
                   onChange={(e) =>
                     set(which, { ...frames[which], [field]: Number(e.target.value) })

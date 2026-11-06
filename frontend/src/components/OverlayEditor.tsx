@@ -162,13 +162,17 @@ export default function OverlayEditor({
               <>
                 <label className="flex items-center gap-1">
                   Size
+                  {/* w-20 px-2 on every compact number box in the editor: `.input`'s 12px
+                      side padding plus the browser's spinner left a 56px box room for
+                      about one digit, so "25" and "0.3" showed cut off. 80px with 8px
+                      padding fits "-12.5", the longest value any of them takes. */}
                   <input
                     type="number"
                     min="1"
                     max="25"
                     step="0.5"
                     aria-label="Text size, % of the height"
-                    className="input w-14 py-0.5"
+                    className="input w-20 px-2 py-0.5"
                     placeholder="6"
                     value={overlay.size_pct ?? ''}
                     onChange={(e) =>
@@ -197,7 +201,7 @@ export default function OverlayEditor({
                     max="100"
                     step="1"
                     aria-label="Picture width, % of the frame"
-                    className="input w-14 py-0.5"
+                    className="input w-20 px-2 py-0.5"
                     placeholder="30"
                     value={overlay.scale_pct ?? ''}
                     onChange={(e) =>
@@ -313,7 +317,7 @@ export default function OverlayEditor({
                 max="5"
                 step="0.1"
                 aria-label="Fade in and out, seconds"
-                className="input w-14 py-0.5"
+                className="input w-20 px-2 py-0.5"
                 placeholder="0.3"
                 value={overlay.fade ?? ''}
                 onChange={(e) =>

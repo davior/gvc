@@ -235,7 +235,7 @@ export default function ClipPlayer({
               min="0.1"
               step="0.1"
               aria-label="Scene length in seconds"
-              className="input w-20 py-0.5"
+              className="input w-20 px-2 py-0.5"
               value={fixed}
               onChange={(e) => {
                 const n = Number(e.target.value)
