@@ -26,7 +26,11 @@ export default function AppShell({ children }: Props) {
 
   return (
     <div className="flex h-screen flex-col bg-gray-50 dark:bg-gray-900">
-      <header className="shrink-0 border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-800">
+      {/* relative z-30: a glass theme blurs the header (assets/glass.css), and a blurred
+          element is its own stacking layer, so the theme popup's z-50 only orders it
+          inside the header. Without a z-index of its own the whole header paints in
+          document order, under the glass cards and pills of the page below it. 30 clears the project view's sticky bar (20) and stays under the dialogs (40). */}
+      <header className="relative z-30 shrink-0 border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-800">
         <div className="flex items-center gap-3">
           <Link to="/projects" className="flex items-center gap-3">
             <img src={favicon} alt="" aria-hidden="true" className="h-7 w-7" />
