@@ -2,7 +2,7 @@
 
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlmodel import Session, func, select
 
 from app.auth import CurrentUser
@@ -12,12 +12,13 @@ from app.schemas import DataResponse, ListResponse
 from app.gam.client import GamClient
 from app.routers.gam import get_gam
 from app.schemas_projects import (
-    CopyFailureRead, NoteMediaCopy, ProjectCreate, ProjectImport, ProjectRead,
+    CopyFailureRead, NoteMediaCopy, ProjectCreate, ProjectFromPlaylist, ProjectImport, ProjectRead,
     ProjectSummary, ScriptExport, SpecSave, VersionDetail, VersionRead,
 )
 from app.services import note_media
 from app.services import projects as service
 from app.services import script
+from app.spec.from_playlist import playlist_spec
 from app.spec.starter import starter_spec
 
 router = APIRouter()
@@ -89,6 +90,30 @@ def import_project(
     """
     spec = service.stamp_note_source(service.require_spec(body.spec))
     project = service.create(session, user, spec, origin="note", message="Pushed from Gecko Notes")
+    return DataResponse(data=_read(project))
+
+
+@router.post("/from-playlist", response_model=DataResponse[ProjectRead],
+             status_code=status.HTTP_201_CREATED)
+def create_from_playlist(
+    body: ProjectFromPlaylist, user: CurrentUser, session: Session = Depends(get_session),
+    gam: GamClient = Depends(get_gam),
+) -> DataResponse[ProjectRead]:
+    """A video laid out from a GAM playlist: a title card, then one segment per item.
+
+    Read once, as the caller, and copied: the project is GVC's from here on, like a pushed
+    note, and editing or deleting the playlist afterwards changes nothing here.
+    """
+    playlist = gam.playlist(body.playlist_id)
+    if playlist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail={"code": "not_found", "message": "No such playlist in GAM."})
+    if not any(item.asset_type in ("video", "image", "audio") for item in playlist.items):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={
+            "code": "empty_playlist", "message": f"{playlist.name} has nothing in it to play."})
+    spec = playlist_spec(playlist, body.title)
+    project = service.create(session, user, spec, origin="playlist",
+                             message=f"Built from the GAM playlist {playlist.name!r}")
     return DataResponse(data=_read(project))
 
 

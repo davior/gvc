@@ -46,6 +46,8 @@ interface ProjectState {
 
   loadList: () => Promise<void>
   createBlank: (title: string) => Promise<Project | null>
+  /** A project laid out from one of the person's GAM playlists. */
+  createFromPlaylist: (playlistId: string, title?: string) => Promise<Project | null>
   open: (id: string) => Promise<void>
   edit: (next: VideoSpec) => void
   discard: () => void
@@ -101,6 +103,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const token = listToken
     try {
       const project = await projectsApi.create(title)
+      if (token === listToken) set({ list: [project, ...get().list] })
+      return project
+    } catch (error) {
+      if (token === listToken) set({ listError: apiErrorMessage(error) })
+      return null
+    }
+  },
+
+  async createFromPlaylist(playlistId, title = '') {
+    const token = listToken
+    try {
+      const project = await projectsApi.createFromPlaylist(playlistId, title)
       if (token === listToken) set({ list: [project, ...get().list] })
       return project
     } catch (error) {

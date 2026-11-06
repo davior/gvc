@@ -6,8 +6,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.auth import CallerToken, CurrentUser
 from app.gam.client import GamClient
-from app.schemas import DataResponse
-from app.schemas_gam import AssetLookup, AssetLookupResult, GamSearch, GamWaveform
+from app.schemas import DataResponse, ListResponse
+from app.schemas_gam import (
+    AssetLookup, AssetLookupResult, GamPlaylist, GamPlaylistDetail, GamSearch, GamWaveform,
+)
 
 router = APIRouter()
 
@@ -66,3 +68,19 @@ def peaks(asset_id: str, gam: GamClient = Depends(get_gam)) -> DataResponse[GamW
             detail={"code": "waveform_unavailable", "message": "The asset library has no waveform for this"},
         )
     return DataResponse(data=waveform)
+
+
+@router.get("/playlists", response_model=ListResponse[GamPlaylist])
+def playlists(gam: GamClient = Depends(get_gam)) -> ListResponse[GamPlaylist]:
+    """The caller's GAM playlists, to start a video from one."""
+    rows = gam.playlists()
+    return ListResponse(data=rows, total=len(rows), limit=len(rows), offset=0)
+
+
+@router.get("/playlists/{playlist_id}", response_model=DataResponse[GamPlaylistDetail])
+def playlist(playlist_id: str, gam: GamClient = Depends(get_gam)) -> DataResponse[GamPlaylistDetail]:
+    found = gam.playlist(playlist_id)
+    if found is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail={"code": "not_found", "message": "No such playlist in GAM."})
+    return DataResponse(data=found)

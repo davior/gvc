@@ -284,7 +284,7 @@ export interface VideoSpec {
   spec_version?: string
   id?: string
   title: string
-  source?: { kind: 'note' | 'brief'; [key: string]: unknown }
+  source?: { kind: 'note' | 'brief' | 'playlist'; [key: string]: unknown }
   assets?: Record<string, AssetRef>
   segments: Segment[]
   audio_tracks?: AudioTrack[]
@@ -302,7 +302,7 @@ export interface VideoSpec {
   [key: string]: unknown
 }
 
-export type Origin = 'blank' | 'pasted' | 'note' | 'brief'
+export type Origin = 'blank' | 'pasted' | 'note' | 'brief' | 'playlist'
 
 export interface ProjectSummary {
   id: string
@@ -373,6 +373,16 @@ export const projectsApi = {
   createFromSpec(spec: unknown): Promise<Project> {
     return client
       .post<DataResponse<Project>>('/projects', { spec })
+      .then((r) => r.data.data)
+  },
+
+  /** A video laid out from a GAM playlist: a title card, then one scene per item. */
+  createFromPlaylist(playlistId: string, title = ''): Promise<Project> {
+    return client
+      .post<DataResponse<Project>>('/projects/from-playlist', {
+        playlist_id: playlistId,
+        title,
+      })
       .then((r) => r.data.data)
   },
 

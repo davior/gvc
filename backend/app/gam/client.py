@@ -19,7 +19,8 @@ import httpx
 from app import outbound
 from app.config import settings
 from app.schemas_gam import (
-    GamAssetRead, GamHit, GamMusic, GamSearch, GamTranscript, GamVersion, GamWaveform,
+    GamAssetRead, GamHit, GamMusic, GamPlaylist, GamPlaylistDetail, GamPlaylistItem, GamSearch,
+    GamTranscript, GamVersion, GamWaveform,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,14 @@ def to_asset(raw: Dict[str, Any]) -> GamAssetRead:
         missing=bool(raw.get("missing")),
         music=_music(raw),
         audio_kind=raw.get("audio_kind") if raw.get("audio_kind") in ("music", "speech", "sfx") else None,
+    )
+
+
+def _playlist(raw: Dict[str, Any]) -> GamPlaylist:
+    return GamPlaylist(
+        id=raw["id"], name=raw.get("name") or "", description=raw.get("description"),
+        item_count=raw.get("item_count") or 0, total_seconds=raw.get("total_seconds") or 0.0,
+        thumb_url=_absolute(raw.get("thumb_url")), updated_at=raw.get("updated_at"),
     )
 
 
@@ -172,6 +181,45 @@ class GamClient:
             code, message = self._detail(response)
             raise GamError(code, message)
         return to_asset(response.json()["data"])
+
+    def playlists(self) -> List[GamPlaylist]:
+        """The caller's playlists in GAM, newest edit first.
+
+        A GAM from before playlists (gam#70) has no such route and answers 404, which is
+        said as that rather than as a failure: the rest of the library still works.
+        """
+        response = self._request("GET", "/api/playlists", params={"limit": 500})
+        if response.status_code == 404:
+            raise GamError("gam_without_playlists",
+                           "This version of the asset library has no playlists. Update GAM.",
+                           status_code=409)
+        if response.status_code != 200:
+            code, message = self._detail(response)
+            raise GamError(code, message)
+        return [_playlist(raw) for raw in response.json().get("data", [])]
+
+    def playlist(self, playlist_id: str) -> Optional[GamPlaylistDetail]:
+        """One playlist and its items in order, or None when it is not the caller's."""
+        response = self._request("GET", f"/api/playlists/{playlist_id}")
+        if response.status_code == 404:
+            return None
+        if response.status_code != 200:
+            code, message = self._detail(response)
+            raise GamError(code, message)
+        raw = response.json()["data"]
+        items = [
+            GamPlaylistItem(
+                id=item["id"], asset_id=item["asset_id"], asset_name=item.get("asset_name") or "",
+                asset_type=item.get("asset_type") or "", in_point=item.get("in_point"),
+                out_point=item.get("out_point"), start=item.get("start") or 0.0,
+                end=item.get("end"), image_seconds=item.get("image_seconds"),
+                label=item.get("label"), note=item.get("note"),
+                asset_duration_seconds=item.get("asset_duration_seconds"),
+                thumb_url=_absolute(item.get("thumb_url")), missing=bool(item.get("missing")),
+            )
+            for item in raw.get("items", [])
+        ]
+        return GamPlaylistDetail(**_playlist(raw).model_dump(), items=items)
 
     def transcript(self, asset_id: str) -> Optional[GamTranscript]:
         """Everything said in an asset, with word timings. None for an unknown asset; an

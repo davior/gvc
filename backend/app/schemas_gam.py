@@ -134,3 +134,38 @@ class AssetLookup(BaseModel):
 class AssetLookupResult(BaseModel):
     # Null for an id GAM no longer has (deleted, or not this user's).
     assets: Dict[str, Optional[GamAssetRead]]
+
+
+class GamPlaylistItem(BaseModel):
+    """One entry of a GAM playlist (gam#70): an asset that owns its file, and the stretch
+    of it to play. `start`/`end` are resolved by GAM (the whole file when the item has no
+    range); `in_point`/`out_point` are what is stored, both null for a whole asset."""
+
+    id: str
+    asset_id: str
+    asset_name: str = ""
+    asset_type: str
+    in_point: Optional[float] = None
+    out_point: Optional[float] = None
+    start: float = 0.0
+    end: Optional[float] = None
+    image_seconds: Optional[float] = None
+    label: Optional[str] = None
+    note: Optional[str] = None
+    asset_duration_seconds: Optional[float] = None
+    thumb_url: Optional[str] = None
+    missing: bool = False
+
+
+class GamPlaylist(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = None
+    item_count: int = 0
+    total_seconds: float = 0.0
+    thumb_url: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class GamPlaylistDetail(GamPlaylist):
+    items: List[GamPlaylistItem] = Field(default_factory=list)

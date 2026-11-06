@@ -93,7 +93,30 @@ interface DataResponse<T> {
   data: T
 }
 
+/** A playlist in GAM (gam#70): named, ordered moments, which a video can start from. */
+export interface GamPlaylist {
+  id: string
+  name: string
+  description: string | null
+  item_count: number
+  total_seconds: number
+  thumb_url: string | null
+  updated_at: string | null
+}
+
+interface ListResponse<T> {
+  data: T[]
+  total: number
+}
+
 export const gamApi = {
+  /** Rejects with `gam_without_playlists` when GAM predates playlists. */
+  playlists(): Promise<GamPlaylist[]> {
+    return client
+      .get<ListResponse<GamPlaylist>>('/gam/playlists')
+      .then((r) => r.data.data)
+  },
+
   search(q: string, type?: MediaKind): Promise<GamSearch> {
     return client
       .get<GamSearch>('/gam/search', { params: { q, type, limit: 30 } })

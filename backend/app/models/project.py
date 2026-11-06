@@ -26,7 +26,8 @@ class Project(SQLModel, table=True):
     title: str = ""
     spec: str = "{}"                    # the current VideoSpec, JSON
     spec_version: str = ""
-    # How it was started: "blank", "pasted", "note" or "brief". Provenance, for the
+    # How it was started: "blank", "pasted", "note", "brief" or "playlist" (a GAM
+    # playlist). No migration: it is free text. Provenance, for the
     # list view; the spec's own `source` carries the detail.
     origin: str = "blank"
     # The newest version's `seq`, so the next one can be numbered without a MAX().
