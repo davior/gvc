@@ -45,6 +45,13 @@ def ffmpeg_available() -> bool:
 async def lifespan(_app: FastAPI):
     if not ffmpeg_available():
         logger.warning("ffmpeg/ffprobe not found on PATH: renders will fail.")
+    if settings.notes_base_url.strip():
+        logger.warning(
+            "NOTES_BASE_URL is set but no longer read: people sign in at Gecko Suite "
+            "(SUITE_PUBLIC_URL, else SUITE_BASE_URL: now %s), and the Gecko Notes app is "
+            "NOTES_URL (now %s). Remove it from .env.",
+            settings.sign_in_url, settings.notes_url,
+        )
     # One line here beats the same fact arriving as a traceback on whichever request
     # first touches a table that does not exist yet.
     from app.schema_check import log_if_behind
@@ -127,11 +134,12 @@ def client_config() -> DataResponse[ClientConfig]:
     """What the browser needs before anybody is signed in: where to sign in.
 
     Served at runtime rather than compiled into the bundle, so pointing a running
-    container at a different Notes is a restart, not a rebuild (GAM learnt this one).
+    container at a different sign-in page is a restart, not a rebuild (GAM learnt this
+    one).
     """
     return DataResponse(
         data=ClientConfig(
-            notes_base_url=settings.notes_base_url,
+            sign_in_url=settings.sign_in_url,
             ai_backend=settings.ai_backend,
             suite_base_url=settings.suite_base_url,
         )

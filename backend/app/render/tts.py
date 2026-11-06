@@ -36,7 +36,7 @@ class SpeechError(Exception):
 class NotesSpeech:
     def __init__(self, token: Optional[str]):
         headers = {"Authorization": f"Bearer {token}"} if token else {}
-        self._http = outbound.client(settings.notes_base_url, timeout=120, headers=headers)
+        self._http = outbound.client(settings.notes_url, timeout=120, headers=headers)
         self.provider: Optional[str] = None
         # The voice each requested one resolved to (None: the account's).
         self._voices: Dict[Optional[str], Optional[str]] = {}

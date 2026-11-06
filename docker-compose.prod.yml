@@ -12,7 +12,7 @@
 
 services:
   # GVC's server calls GAM and Notes at their public names (GAM_BASE_URL,
-  # NOTES_BASE_URL). On the suite's server all three run on one machine, and from
+  # NOTES_URL). On the suite's server all three run on one machine, and from
   # inside a container those names resolve to the machine's own public address,
   # which the host does not route back in (hairpin NAT): every search failed with
   # `gam_unavailable`. Pointing them at the Docker host reaches Caddy directly,

@@ -66,7 +66,7 @@ def test_a_proposed_note_is_created_in_notes_by_its_button_once(
     assert made.status_code == 200, made.text
     (after,) = made.json()["data"]["notes"]
     assert after["state"] == "created"
-    assert after["note_url"] == f"{settings.notes_base_url.rstrip('/')}/notes/note-1"
+    assert after["note_url"] == f"{settings.notes_url.rstrip('/')}/notes/note-1"
     (sent,) = siblings.created_notes
     assert sent["authorization"] == "Bearer user-token" and sent["source_app"] == "gvc"
     assert f"[Interview]({GAM}/a/r)" in sent["markdown"]

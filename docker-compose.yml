@@ -18,7 +18,12 @@ services:
       # secret means every token is rejected. No default — the app refuses to start.
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       - CORS_ORIGIN=${CORS_ORIGIN:-}
-      - NOTES_BASE_URL=${NOTES_BASE_URL:-https://notes.geckopico.com}
+      # The Gecko Notes app (attached notes, note files, narration, notes the assistant
+      # files). Not where people sign in: that is the suite, SUITE_PUBLIC_URL else
+      # SUITE_BASE_URL.
+      - NOTES_URL=${NOTES_URL:-https://notes.geckopico.com}
+      # Passed only so the app can warn that it is set and no longer read.
+      - NOTES_BASE_URL=${NOTES_BASE_URL:-}
       - GAM_BASE_URL=${GAM_BASE_URL:-https://assets.geckopico.com}
       - GAM_TIMEOUT_SECONDS=${GAM_TIMEOUT_SECONDS:-30}
       - NOTE_MEDIA_MAX_MB=${NOTE_MEDIA_MAX_MB:-4096}
@@ -26,6 +31,9 @@ services:
       # "suite" (Gecko Suite). Changing it is a restart, not a rebuild.
       - AI_BACKEND=${AI_BACKEND:-local}
       - SUITE_BASE_URL=${SUITE_BASE_URL:-https://suite.geckopico.com}
+      # The suite as browsers reach it, where people sign in; only needed when
+      # SUITE_BASE_URL is an internal address. As in Notes.
+      - SUITE_PUBLIC_URL=${SUITE_PUBLIC_URL:-}
       - RENDER_CONCURRENCY=${RENDER_CONCURRENCY:-1}
       - RENDER_MAX_SEGMENTS=${RENDER_MAX_SEGMENTS:-200}
       - RENDER_MAX_NARRATION_CHARS=${RENDER_MAX_NARRATION_CHARS:-60000}
@@ -56,12 +64,12 @@ services:
     ports:
       - "${APP_PORT:-18083}:80"
     environment:
-      # The CSP's connect-src; must agree with the backend's value.
-      - NOTES_BASE_URL=${NOTES_BASE_URL:-https://notes.geckopico.com}
       # The CSP's img-src and media-src, for GAM thumbnails and previews; same rule.
       - GAM_BASE_URL=${GAM_BASE_URL:-https://assets.geckopico.com}
-      # connect-src for the theme picker's calls to Gecko Suite (M7); same value the backend gets.
+      # connect-src for sign-in and the theme picker's calls to Gecko Suite; the same values
+      # the backend gets, or the browser's calls are blocked by a policy nobody edited.
       - SUITE_BASE_URL=${SUITE_BASE_URL:-https://suite.geckopico.com}
+      - SUITE_PUBLIC_URL=${SUITE_PUBLIC_URL:-}
     depends_on:
       - gvc-backend
     networks:
