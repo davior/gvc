@@ -539,3 +539,15 @@ def test_a_round_answers_its_calls_in_order_with_the_picks_made_together(gam, si
     assert "We built the dam" in results[2].content and results[3].is_error
     assert len(w.ask.asked) == 2
     assert "Picking clips from d" in steps
+
+
+@pytest.mark.parametrize("backend, where", [("local", "in Settings"), ("suite", "in Gecko Suite")])
+def test_a_reply_cut_off_says_where_its_limit_is_raised(monkeypatch, backend, where):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "ai_backend", backend)
+    provider = ScriptedProvider(script=[says("A very long answ", stop="max_tokens")])
+    outcome = loop.run(provider, Working(spec()), system=[], history=[], prompt="all of it",
+                       on_step=lambda k, t: None, on_reply=lambda r: None,
+                       cancelled=lambda: False, max_rounds=3)
+    assert where in outcome.cut_short

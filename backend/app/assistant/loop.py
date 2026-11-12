@@ -17,6 +17,7 @@ from typing import Callable, List, Optional, Sequence, Tuple
 
 from gecko_suite_client import Outcome, Stopped, run_agent
 
+from app import suite
 from app.assistant import tools as T
 from app.assistant.tools import Working, _issues_text
 from app.providers.base import ChatProvider, Image, Reply, ToolResult
@@ -27,14 +28,24 @@ logger = logging.getLogger(__name__)
 # Past that it would only be spending the user's money to repeat itself.
 MAX_REPAIR_NUDGES = 2
 
+# Where the limit is raised depends on who runs the model: GVC's own provider row, or
+# the suite. Pointing a suite user at GVC's Settings sent them to a field the turn never
+# read, so the sentence follows AI_BACKEND.
 OUTPUT_LIMIT = ("The reply hit the provider's output limit. Raise the maximum response "
                 "length in Settings, or ask for less at once.")
+SUITE_OUTPUT_LIMIT = ("The reply hit the model's output limit. Raise Max tokens on its "
+                      "provider in Gecko Suite (or CHAT_MAX_TOKENS there), or ask for less "
+                      "at once.")
+
+
+def output_limit_message() -> str:
+    return SUITE_OUTPUT_LIMIT if suite.enabled() else OUTPUT_LIMIT
 
 Step = Callable[[str, str], None]
 
 # Re-exported: the worker catches `loop.Stopped`, and it must be the class `run_agent`
 # raises, not a second one that only looks like it.
-__all__ = ["MAX_REPAIR_NUDGES", "Outcome", "Stopped", "run"]
+__all__ = ["MAX_REPAIR_NUDGES", "Outcome", "Stopped", "output_limit_message", "run"]
 
 
 def _first_line(text: str) -> str:
@@ -102,7 +113,7 @@ def run(provider: ChatProvider, working: Working, *, system: Sequence[str],
         run_round=run_round,
         nudge=nudge,
         max_nudges=MAX_REPAIR_NUDGES,
-        max_tokens_message=OUTPUT_LIMIT,
+        max_tokens_message=output_limit_message(),
         cancelled=cancelled,
         on_reply=on_reply,
         on_step=on_step,
