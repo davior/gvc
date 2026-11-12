@@ -19,4 +19,4 @@ python-docx==1.1.2
 # together, and a deployment must not pick up one without the other. Installed from an
 # archive URL rather than git+https because python:3.13-slim has no git. Bump it when
 # the suite's client does.
-gecko-suite-client @ https://github.com/davior/gecko-suite/archive/8dc260e4f9944fc56604f887c234c63384b48d67.tar.gz#subdirectory=client
+gecko-suite-client @ https://github.com/davior/gecko-suite/archive/a9b024f9e146a89e320581084d02c3a81215bcf1.tar.gz#subdirectory=client
