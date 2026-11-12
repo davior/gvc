@@ -55,7 +55,11 @@ def _first_line(text: str) -> str:
 def run(provider: ChatProvider, working: Working, *, system: Sequence[str],
         history: Sequence[Tuple[str, str]], prompt: str, on_step: Step,
         on_reply: Callable[[Reply], None], cancelled: Callable[[], bool],
-        max_rounds: int, images: Sequence[Image] = ()) -> Outcome:
+        max_rounds: int, images: Sequence[Image] = (),
+        on_delta: Optional[Callable[[str], None]] = None) -> Outcome:
+    """`on_delta` streams each reply, handing text over as it arrives. Only a suite
+    conversation takes it (GVC's own providers have `ask()` and nothing else), so the
+    worker passes it only with AI_BACKEND=suite."""
     conversation = provider.conversation(system=system, tools=T.specs_for(working), history=history,
                                          prompt=prompt, images=images)
     nudges = 0
@@ -117,5 +121,6 @@ def run(provider: ChatProvider, working: Working, *, system: Sequence[str],
         cancelled=cancelled,
         on_reply=on_reply,
         on_step=on_step,
+        on_delta=on_delta,
         max_rounds=max_rounds,
     )
