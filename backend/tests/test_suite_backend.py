@@ -89,7 +89,18 @@ class FakeSuite:
             if self.chat_status is not None:
                 return self.chat_status
             assert self.script, "the suite was asked more often than the script allows"
-            return httpx.Response(200, json={"data": self.script.pop(0)})
+            result = self.script.pop(0)
+            if body.get("stream"):
+                # The gateway's frames: text as deltas, a keepalive comment for the
+                # silent stretches (a tool call being written), then the whole result.
+                frames = [": keepalive\n\n"]
+                for piece in (result["text"][:5], result["text"][5:]):
+                    if piece:
+                        frames.append(f"event: delta\ndata: {json.dumps({'text': piece})}\n\n")
+                frames.append(f"event: final\ndata: {json.dumps(result)}\n\n")
+                return httpx.Response(200, content="".join(frames).encode(),
+                                      headers={"content-type": "text/event-stream"})
+            return httpx.Response(200, json={"data": result})
         raise AssertionError(f"unexpected request: {request.method} {request.url}")
 
 
@@ -139,6 +150,36 @@ def test_a_draft_turn_runs_on_the_suite_and_becomes_a_project(
     # The suite counted the spend; this app keeps only the turn's running total.
     assert session.query(UsageEvent).count() == 0
     assert done["cost"] == pytest.approx(0.05)
+
+
+def test_a_turn_streams_so_a_long_reply_is_not_timed_out_and_shows_its_progress(
+        auth_client, fake_suite, library, engine_for_worker, monkeypatch):
+    monkeypatch.setattr(worker, "STREAM_WRITE_SECONDS", 0)
+    details = []
+    real_write = worker.set_fields
+
+    def watching(session, row, **fields):
+        if "detail" in fields:
+            details.append(fields["detail"])
+        return real_write(session, row, **fields)
+
+    monkeypatch.setattr(worker, "set_fields", watching)
+    fake_suite.script += [
+        reply("Looking.", ("search_assets", {"query": "water", "type": "video"})),
+        reply("", ("replace_spec", {"spec": DRAFT})),
+        reply("", ("update_segment", {"segment_id": "s_valley",
+                                      "changes": {"transition_in": {"style": "dissolve"}}})),
+        reply("", ("set_visual", {"segment_id": "s_valley", "gam_id": "r"})),
+        reply("A two-scene draft."),
+    ]
+    done = run(auth_client, prompt="A short video about the water wars")
+
+    assert done["status"] == "done", done
+    assert done["reply"] == "A two-scene draft."
+    assert all(chat["stream"] is True for chat in fake_suite.chats)
+    # Counted across the turn: "Looking." then "A two-scene draft."
+    assert details[:2] == ["writing (5 characters)", "writing (8 characters)"]
+    assert "writing (26 characters)" in details
 
 
 def test_an_edit_names_the_edit_job_and_the_project_it_is_about(

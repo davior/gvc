@@ -14,8 +14,9 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 import uuid
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from sqlmodel import Session
 
@@ -43,6 +44,8 @@ logger = logging.getLogger(__name__)
 _tokens: Dict[str, Optional[str]] = {}
 
 MAX_STEPS_KEPT = 200
+# How often a streaming reply's progress is written to the turn row.
+STREAM_WRITE_SECONDS = 1.0
 
 
 def append_message(row: AssistantSession, role: str, text: str,
@@ -117,6 +120,25 @@ def _run(turn_id: str) -> None:
                   "issue": "fixing", "think": "thinking"}.get(kind, "")
         write(steps=json.dumps(steps[-MAX_STEPS_KEPT:], ensure_ascii=False),
               stage="Working", detail=detail)
+
+    def streamed() -> Callable[[str], None]:
+        """Through the suite every reply streams. Not for the text (the finished reply is
+        what is kept), but because a non-streamed request is dropped after the suite's
+        five-minute upstream timeout, which a long reply at a high Max tokens outlasts; a
+        stream only has to keep arriving. Its progress (characters written so far this
+        turn) is shown as the turn's detail, written at most every STREAM_WRITE_SECONDS so a fast model is not a write per
+        token."""
+        written = [0.0]
+        count = [0]
+
+        def on_delta(text: str) -> None:
+            count[0] += len(text)
+            now = time.monotonic()
+            if now - written[0] >= STREAM_WRITE_SECONDS:
+                written[0] = now
+                write(stage="Working", detail=f"writing ({count[0]:,} characters)")
+
+        return on_delta
 
     def on_reply(reply: Reply) -> None:
         if suite.enabled():
@@ -229,6 +251,7 @@ def _run(turn_id: str) -> None:
         outcome = loop.run(provider, working, system=system, history=history, prompt=prompt,
                            images=images,
                            on_step=on_step, on_reply=on_reply,
+                           on_delta=streamed() if suite.enabled() else None,
                            cancelled=lambda: queue.is_cancelled(turn_id),
                            max_rounds=settings.assistant_max_rounds)
     except loop.Stopped:
