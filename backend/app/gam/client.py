@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 
 # See `GamClient.peaks`.
 PEAKS_TIMEOUT_SECONDS = 120
+# GAM downloads the picture inside the request (40 MB at most, at its own 30 s per read).
+IMPORT_IMAGE_TIMEOUT_SECONDS = 90
 
 
 class GamError(Exception):
@@ -338,6 +340,25 @@ class GamClient:
             raise GamError(rejected.get("code") or "gam_error",
                            rejected.get("message") or "The asset library did not store the file")
         return to_asset(created[0])
+
+    def import_image(self, image_url: str, *, page_url: Optional[str] = None, title: str = "",
+                     description: str = "") -> GamAssetRead:
+        """File a picture from the web in the user's library (GAM's `import-image`).
+
+        GAM downloads it, not this app: the checks on what may be fetched, and the
+        duplicate checks, are the library's. An existing copy comes back as itself.
+        """
+        response = self._request("POST", "/api/assets/import-image", json={
+            "image_url": image_url, "page_url": page_url, "title": title or None,
+            "description": description or None,
+        }, timeout=IMPORT_IMAGE_TIMEOUT_SECONDS)
+        if response.status_code in (404, 405):
+            raise GamError("gam_without_image_import",
+                           "The asset library can't import pictures from the web yet. It needs updating.")
+        if response.status_code not in (200, 201):
+            code, message = self._detail(response)
+            raise GamError(code, message, status_code=400 if response.status_code == 400 else 502)
+        return to_asset(response.json()["data"])
 
     def update(self, asset_id: str, changes: Dict[str, Any]) -> Optional[GamAssetRead]:
         """Edit an asset's fields (its name, its description). None: it is gone."""

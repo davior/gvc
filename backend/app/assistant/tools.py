@@ -37,6 +37,7 @@ from app.services import note_media as note_files
 from app.schemas_themes import MAX_THEME_NAME, MAX_THEME_PROMPT
 from app.services.themes import theme_id_of
 from app.spec.validation import SpecIssue, parse_spec
+from app.spec.model import MAX_WEB_CANDIDATES
 
 # A found moment is padded so a cut doesn't clip a word: the editor's `momentTrim`.
 MOMENT_PAD = 0.5
@@ -205,6 +206,11 @@ class Working:
     web_search: Optional[Callable[[str], List[Dict[str, Any]]]] = None
     web_searches: int = 0
     max_web_searches: int = 8
+    # Pictures on the web, the same way: `query -> candidates`. A turn may look a few
+    # times; each look leaves one placeholder for the person to choose on.
+    image_search: Optional[Callable[[str], List[Dict[str, Any]]]] = None
+    image_searches: int = 0
+    max_image_searches: int = 6
     # Notes proposed for Gecko Notes this turn. Offered only where the turn holds the
     # person's token (`can_note`), which is what creating one on Apply will forward.
     can_note: bool = False
@@ -1222,6 +1228,109 @@ def web_search(w: Working, query: str) -> str:
     return text[:MAX_WEB_CHARS] + ("\n[cut off]" if len(text) > MAX_WEB_CHARS else "")
 
 
+_CANDIDATE_FIELDS = ("image_url", "page_url", "title", "thumbnail_url", "width", "height", "description")
+
+
+def _candidate(hit: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """A search hit as the spec keeps it: only the known fields, cut to the model's limits,
+    so one long title from a site can't make the placeholder invalid."""
+    url = hit.get("image_url")
+    if not isinstance(url, str) or not url.startswith(("http://", "https://")) or len(url) > 2048:
+        return None
+    row: Dict[str, Any] = {}
+    for name in _CANDIDATE_FIELDS:
+        value = hit.get(name)
+        if value in (None, ""):
+            continue
+        if name in ("width", "height"):
+            if isinstance(value, int) and value > 0:
+                row[name] = value
+        elif isinstance(value, str):
+            limit = {"title": 300, "description": 500}.get(name, 2048)
+            if name in ("page_url", "thumbnail_url") and (
+                    not value.startswith(("http://", "https://")) or len(value) > limit):
+                continue
+            row[name] = value[:limit]
+    return row
+
+
+def find_images(w: Working, query: str, segment_id: Optional[str] = None, use_as: str = "visual",
+                label: Optional[str] = None) -> str:
+    """Pictures from the web, left on a placeholder for the person to choose from.
+
+    Never placed in the video directly: the person sees the candidates (and their source
+    pages) in the editor and picks one, which files it in GAM and resolves the
+    placeholder. That is the user's call, and it keeps the rule that the web is for
+    reading: what the model chose is a shortlist, not a picture on screen.
+    """
+    query = (query or "").strip()
+    if not query:
+        raise ToolFailed("Say what the picture should show.")
+    if w.image_search is None:
+        raise ToolFailed("Searching the web for pictures is not available right now.")
+    if w.image_searches >= w.max_image_searches:
+        raise ToolFailed(f"That is {w.max_image_searches} picture searches this request. "
+                         "Use search_assets or leave a placeholder with add_placeholder.")
+    if use_as not in ("visual", "overlay", "background", "none"):
+        raise ToolFailed('use_as is "visual", "overlay", "background" or "none".')
+    if use_as in ("visual", "overlay") and not segment_id:
+        raise ToolFailed('Say which segment the picture is for, or use_as "background" or "none".')
+    if segment_id:
+        w.index_of(segment_id)  # a bad id is said before the search is spent
+
+    w.image_searches += 1
+    try:
+        hits = w.image_search(query)
+    except Exception as exc:  # noqa: BLE001 - a failed search is information for the model
+        raise ToolFailed(f"The picture search failed: {exc}") from exc
+    candidates: List[Dict[str, Any]] = []
+    seen: set = set()
+    for c in (_candidate(h) for h in hits if isinstance(h, dict)):
+        # The first listing of a picture wins: it is the engine's best-ranked, and the
+        # one most likely to carry its page and description.
+        if c and c["image_url"] not in seen:
+            seen.add(c["image_url"])
+            candidates.append(c)
+    candidates = candidates[:MAX_WEB_CANDIDATES]
+    if not candidates:
+        return "No pictures found for that. Try other words, or search_assets."
+
+    candidate = copy.deepcopy(w.data)
+    assets = candidate.setdefault("assets", {})
+    base = f"a_{_slug(label or query) or 'web'}"
+    key, n = base, 2
+    while key in assets:
+        key, n = f"{base}_{n}", n + 1
+    ref: Dict[str, Any] = {"from": "search", "query": query, "type": "image", "candidates": candidates}
+    if label:
+        ref["label"] = label
+    assets[key] = ref
+    where = "kept in the registry"
+    if use_as == "background":
+        style = candidate.setdefault("style", {})
+        style["background"] = {**(style.get("background") or {}), "type": "image", "asset": key}
+        where = "as the video's background"
+    elif segment_id:
+        segment = candidate["segments"][w.index_of(segment_id)]
+        if use_as == "visual":
+            segment["visual"] = {"asset": key}
+            where = f"as the picture of {w.name_of(segment)}"
+        elif use_as == "overlay":
+            segment.setdefault("overlays", []).append(
+                {"id": w.new_id("o_", w.all_overlay_ids()), "type": "image", "asset": key,
+                 "position": "top-right", "scale_pct": 30})
+            where = f"on screen over {w.name_of(segment)}"
+    result = w.commit(candidate, f"Found {len(candidates)} pictures to choose from {where}: {query[:80]!r}")
+    lines = []
+    for i, c in enumerate(candidates, 1):
+        size = f" {c['width']}x{c['height']}" if c.get("width") and c.get("height") else ""
+        text = c.get("description") or c.get("title") or "(no description)"
+        lines.append(f"[{i}]{size} {text[:200]}" + (f" ({c['page_url']})" if c.get("page_url") else ""))
+    return (f"{result} Placeholder {key} holds them; the user chooses one in the editor, and "
+            "until then the scene shows a slate. Tell them to choose; never say a picture is "
+            "in place. The rights to these are unknown.\n" + "\n".join(lines))
+
+
 def run_estimate(w: Working) -> str:
     spec, issues = parse_spec(w.data)
     if spec is None:
@@ -1429,6 +1538,18 @@ TOOLS: List[Tuple[ToolSpec, Callable[..., str]]] = [
               "search_assets).",
               {"type": "object", "properties": {"query": _STR}, "required": ["query"]}),
      web_search),
+    (ToolSpec("find_images",
+              "Search the web for pictures (a background, a segment's picture, an overlay) and "
+              "leave the best ones on a placeholder for the user to choose from. Nothing goes on "
+              "screen until they choose, and their choice is filed in the library. Search the "
+              "library (search_assets) first; use this for what it doesn't have. use_as: "
+              "visual (the segment's picture), overlay (over the segment), background (the "
+              "whole video's), none (kept in the registry). Describe what should be seen.",
+              {"type": "object", "properties": {
+                  "query": _STR, "segment_id": _STR,
+                  "use_as": {"type": "string", "enum": ["visual", "overlay", "background", "none"]},
+                  "label": _STR},
+               "required": ["query"]}), find_images),
     (ToolSpec("estimate", "How long the video runs, its narration length, and what would "
               "stop a full render.", {"type": "object", "properties": {}}), run_estimate),
 ]
@@ -1442,10 +1563,12 @@ READS = {"get_spec", "search_assets", "read_transcript", "read_document", "find_
 
 
 def specs_for(w: Working) -> List[ToolSpec]:
-    """The tools a turn is offered: all of them, except the web where there is none, and
+    """The tools a turn is offered: all of them, except the web (pages or pictures) where
+    there is none, and
     notes where there is no token to make one with."""
     return [s for s in SPECS
             if (s.name != "web_search" or w.web_search is not None)
+            and (s.name != "find_images" or w.image_search is not None)
             and (s.name != "propose_note" or w.can_note)]
 
 

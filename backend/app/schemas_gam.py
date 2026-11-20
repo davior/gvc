@@ -153,6 +153,15 @@ class GamSearch(BaseModel):
     semantic_error: Optional[str] = None
 
 
+class ImageImport(BaseModel):
+    """A picture found on the web, as the person chose it."""
+
+    image_url: str = Field(min_length=1, max_length=2048)
+    page_url: Optional[str] = Field(default=None, max_length=2048)
+    title: str = Field(default="", max_length=300)
+    description: str = Field(default="", max_length=500)
+
+
 class AssetLookup(BaseModel):
     ids: List[str] = Field(default_factory=list, max_length=200)
 

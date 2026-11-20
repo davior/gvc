@@ -143,6 +143,27 @@ class SearchResult(_Model):
     out: Optional[float] = Field(default=None, ge=0)
 
 
+MAX_WEB_CANDIDATES = 12
+
+
+class WebCandidate(_Model):
+    """A picture found on the web, offered for a placeholder, not yet in GAM.
+
+    Only offered: a video never shows one of these. Choosing it files it in GAM
+    (`POST /api/gam/import-image`) and resolves the placeholder to that asset, so a
+    render only ever reads from the library. Kept on the spec so the choice is there for
+    whoever opens the project next, the way the assistant left it.
+    """
+
+    image_url: str = Field(max_length=2048)
+    page_url: Optional[str] = Field(default=None, max_length=2048)
+    title: str = Field(default="", max_length=300)
+    thumbnail_url: Optional[str] = Field(default=None, max_length=2048)
+    width: Optional[int] = Field(default=None, ge=1)
+    height: Optional[int] = Field(default=None, ge=1)
+    description: str = Field(default="", max_length=500)
+
+
 class SearchAsset(_Model):
     """Footage still to be found in GAM: "where people talk about X"."""
 
@@ -154,6 +175,9 @@ class SearchAsset(_Model):
     status: Literal["unresolved", "resolved"] = "unresolved"
     result: Optional[SearchResult] = None
     label: Optional[str] = None
+    # Pictures from the web to choose from (the assistant's `find_images`). Pictures
+    # only: the editor's Web tab files a choice in GAM as an image.
+    candidates: List[WebCandidate] = Field(default_factory=list, max_length=MAX_WEB_CANDIDATES)
 
 
 AssetRef = Annotated[

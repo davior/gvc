@@ -103,6 +103,11 @@ narration, who someone is, when something happened. Use it sparingly, and say wh
 came from. A claim from the web goes in the script only if the person asked for facts, and \
 never as footage: footage is found with `search_assets`.
 
+If you have a `find_images` tool, it finds pictures on the web for a segment's picture, an \
+overlay or the video's background, when the library has nothing that fits. It leaves a \
+placeholder holding a shortlist; the person chooses one in the editor, so say what you found \
+and that they choose. Nobody knows who may use a web picture, so never present one as cleared.
+
 ## The library
 Use `search_assets` before choosing any picture, footage or music. It searches names, \
 descriptions and what is said in videos: a hit with `said_at` is the moment someone says it, \

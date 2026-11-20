@@ -410,6 +410,29 @@ from too, under `text_to_image`.
 - **In the spec, like the theme (D5).** Choosing one is an edit like any other, and the
   dialog's "Use this model for everything generated for this video" writes it there.
 
+### S7. Pictures from the web, offered on a placeholder
+
+A `search` placeholder may carry `candidates`: up to 12 pictures found on the web
+(`image_url`, and `page_url`, `title`, `thumbnail_url`, `width`, `height`, `description`
+where the search said). They come from Gecko Suite's image search
+([davior/gecko-suite#25](https://github.com/davior/gecko-suite/pull/25)), which asks the
+same backend as `web_search` (Tavily, Brave or SearXNG; not DuckDuckGo).
+
+- **The person chooses; the model shortlists.** The assistant's `find_images` leaves the
+  placeholder on a scene's picture, an image overlay or the video's background, with what
+  it found, and says so. It never puts a web picture on screen. That was the user's call,
+  and it keeps "the web is a reading tool" true of everything but a shortlist.
+- **Chosen means filed in GAM.** Footage Search's *Web pictures* tab (offered for every
+  picture purpose, never for a sound) searches the same way, and choosing one calls GAM's
+  `import-image` (GAM-14) and hands the editor a library hit, so every existing way of
+  placing a library picture places it. The placeholder resolves to that GAM asset and its
+  shortlist is dropped. A render never reads from the web.
+- **Rights are unknown, and said so.** No search backend knows who may use a picture, so
+  the Web tab says to check the source page, GAM records the page and leaves licence and
+  creator empty, and the assistant is told never to present one as cleared.
+- Without the suite, the tool is not offered and the tab says why; the library works as
+  before.
+
 ## Changes needed in GAM
 
 Specified here, applied in GAM's repository, not from this one.
@@ -429,6 +452,7 @@ Specified here, applied in GAM's repository, not from this one.
 | GAM-11 | FLUX Pro rows in the catalogue (FLUX1.1 [pro] ultra, FLUX.2 [pro], FLUX1.1 [pro]), sorted ahead of schnell, and a per-user default model per kind in GAM's Settings, applied by listing it first in `GET /api/generate/models` with `is_default`. Against a GAM without it, GVC takes GAM's sort order as before, and `style.models` (S6) still works for whatever endpoints that GAM has | Unattended generation came from the draft model, and there was no way to choose any other |
 | GAM-12 | Playlists: named, ordered moments of assets, each an asset that owns its file plus an optional range, `GET /api/playlists[/{id}]`. **[davior/gam#70](https://github.com/davior/gam/pull/70).** GVC lists them through `/api/gam/playlists` and builds a project from one (`POST /api/projects/from-playlist`, `spec/from_playlist.py`): a title card, then a clip per video moment (trimmed, its own sound), a held scene per picture, and a scene per sound with the sound as an audio track anchored to it. Against a GAM without playlists the list says so (`gam_without_playlists`) | Making a video from what GAM's assistant found ("everyone talking about the financial crisis") without placing each moment by hand |
 | GAM-13 | Document text read on upload and searchable: pages in their own keyword index and embedded, a hit naming its page (`page_number`, `page_label`). **[davior/gam#78](https://github.com/davior/gam/pull/78).** GVC's assistant finds a document with `search_assets` (`type` document) and reads it with `read_document`, over GAM's `GET /api/assets/{id}/text`. Against a GAM without it, a document is found only by its name or summary, and `read_document` still reads one whose text was extracted by hand | Asking the assistant to work from a report, brief or script kept in the library |
+| GAM-14 | `POST /api/assets/import-image`: download one picture by its address (SSRF-checked, capped, the server's type, no SVG), catalogue it, record its page as `source_url` with `retrieved_at`, and return it; a repeat by address or checksum returns the existing asset. **[davior/gam#79](https://github.com/davior/gam/pull/79).** GVC calls it through `/api/gam/import-image` when a person chooses a web picture. Against a GAM without it, choosing one says GAM needs updating | Pictures from the web for backgrounds and overlays, filed in the library so a video only ever refers to GAM |
 
 GAM-1 and GAM-2 come first. They're small, and M1 below depends on them.
 

@@ -206,6 +206,33 @@ describe('search placeholders', () => {
     expect(unresolvedSearches(next)).toEqual([])
     expect(gamIdsIn(next)).toEqual(['g1', 'm1'])
   })
+
+  it('drops a web shortlist once a picture is chosen', () => {
+    const spec = withPlaceholder()
+    spec.assets = {
+      ...spec.assets,
+      a_web: {
+        from: 'search',
+        query: 'a dry riverbed',
+        type: 'image',
+        candidates: [{ image_url: 'https://img.test/river.jpg' }],
+      },
+    }
+    const picture = {
+      ...hit(),
+      start_time: null,
+      end_time: null,
+      asset: { ...hit().asset, id: 'gam-web-1', asset_type: 'image' },
+    }
+    const next = resolveSearch(spec, 'a_web', picture)
+    expect(next.assets?.a_web).toEqual({
+      from: 'search',
+      query: 'a dry riverbed',
+      type: 'image',
+      status: 'resolved',
+      result: { from: 'gam', id: 'gam-web-1' },
+    })
+  })
 })
 
 describe('clock', () => {

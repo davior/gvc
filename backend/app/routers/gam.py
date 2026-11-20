@@ -8,7 +8,8 @@ from app.auth import CallerToken, CurrentUser
 from app.gam.client import GamClient
 from app.schemas import DataResponse, ListResponse
 from app.schemas_gam import (
-    AssetLookup, AssetLookupResult, GamPlaylist, GamPlaylistDetail, GamSearch, GamWaveform,
+    AssetLookup, AssetLookupResult, GamAssetRead, GamPlaylist, GamPlaylistDetail, GamSearch, GamWaveform,
+    ImageImport,
 )
 
 router = APIRouter()
@@ -52,6 +53,18 @@ def lookup(body: AssetLookup, gam: GamClient = Depends(get_gam)) -> DataResponse
     """
     assets = {asset_id: gam.get_asset(asset_id) for asset_id in dict.fromkeys(body.ids)}
     return DataResponse(data=AssetLookupResult(assets=assets))
+
+
+@router.post("/import-image", response_model=DataResponse[GamAssetRead])
+def import_image(body: ImageImport, gam: GamClient = Depends(get_gam)) -> DataResponse[GamAssetRead]:
+    """File a picture found on the web in the caller's library, and return the asset.
+
+    GAM fetches it (and refuses what it should not fetch), so this app never downloads
+    from an address the person or a model chose.
+    """
+    asset = gam.import_image(body.image_url, page_url=body.page_url, title=body.title,
+                             description=body.description)
+    return DataResponse(data=asset)
 
 
 @router.get("/assets/{asset_id}/peaks", response_model=DataResponse[GamWaveform])

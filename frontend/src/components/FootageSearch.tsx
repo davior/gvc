@@ -1,6 +1,7 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
-import { Film, Image as ImageIcon, Search, X } from 'lucide-react'
+import { Film, Globe, Image as ImageIcon, Library, Search, X } from 'lucide-react'
 import { apiErrorMessage } from '@/api/client'
+import { webApi, type WebImage } from '@/api/web'
 import {
   gamApi,
   audioSummary,
@@ -10,6 +11,7 @@ import {
 } from '@/api/gam'
 import { clock, momentTrim, type MomentSize, type PlaceMode } from '@/spec/footage'
 import WaveformPlayer from '@/components/WaveformPlayer'
+import WebPictures from '@/components/WebPictures'
 
 /**
  * - `scene`: footage for one scene, as b-roll under its narration or as a clip with
@@ -30,6 +32,22 @@ interface Props {
   moment?: MomentSize
   onPick: (hit: GamHit, mode: PlaceMode) => void
   onClose: () => void
+  /** Pictures from the web already found for this (a placeholder's shortlist): the
+   *  dialog opens on them. */
+  candidates?: WebImage[]
+  /** The project the search is for, so the suite can say what it cost. */
+  projectId?: string
+}
+
+type Source = 'library' | 'web'
+
+/** What choosing a web picture is called, in the words the library's results use. */
+const WEB_USE_LABEL: Record<Purpose, string> = {
+  scene: 'Use this picture',
+  resolve: 'Use this',
+  track: '',
+  overlay: 'Put on screen',
+  picture: 'Use this picture',
 }
 
 const TYPES: { id: MediaKind | undefined; label: string }[] = [
@@ -61,7 +79,17 @@ export default function FootageSearch({
   moment,
   onPick,
   onClose,
+  candidates,
+  projectId,
 }: Props) {
+  // The web has pictures only, so a sound has nothing to find there.
+  const webOffered = purpose !== 'track'
+  const [source, setSource] = useState<Source>(
+    webOffered && candidates?.length ? 'web' : 'library'
+  )
+  const [web, setWeb] = useState<WebImage[] | null>(
+    candidates?.length ? candidates : null
+  )
   const [query, setQuery] = useState(initialQuery)
   const [type, setType] = useState<MediaKind | undefined>(initialType)
   const [result, setResult] = useState<GamSearch | null>(null)
@@ -69,20 +97,29 @@ export default function FootageSearch({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  async function run(event?: FormEvent) {
+  async function run(event?: FormEvent, from: Source = source) {
     event?.preventDefault()
     if (!query.trim()) return
     setBusy(true)
     setError(null)
     setSelected(null)
     try {
-      setResult(await gamApi.search(query, type))
+      if (from === 'web') setWeb(await webApi.images(query, projectId))
+      else setResult(await gamApi.search(query, type))
     } catch (err) {
-      setResult(null)
+      if (from === 'web') setWeb(null)
+      else setResult(null)
       setError(apiErrorMessage(err))
     } finally {
       setBusy(false)
     }
+  }
+
+  function switchTo(next: Source) {
+    setSource(next)
+    setError(null)
+    // Searching the other place for the same words is what switching is for.
+    if (next === 'web' ? web === null : result === null) void run(undefined, next)
   }
 
   const trim = selected ? momentTrim(selected, moment) : undefined
@@ -124,8 +161,16 @@ export default function FootageSearch({
         <form onSubmit={(e) => void run(e)} className="flex gap-2">
           <input
             className="input flex-1"
-            aria-label="Search the asset library"
-            placeholder="What is said, or what it shows: e.g. people talking about water"
+            aria-label={
+              source === 'web'
+                ? 'Search the web for pictures'
+                : 'Search the asset library'
+            }
+            placeholder={
+              source === 'web'
+                ? 'What the picture shows: e.g. a dry riverbed at noon'
+                : 'What is said, or what it shows: e.g. people talking about water'
+            }
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             autoFocus
@@ -136,26 +181,51 @@ export default function FootageSearch({
           </button>
         </form>
 
-        <div className="flex gap-1" role="group" aria-label="Kind of media">
-          {TYPES.map((t) => (
+        {webOffered && (
+          <div className="flex gap-1" role="group" aria-label="Where to look">
             <button
-              key={t.label}
               type="button"
-              aria-pressed={type === t.id}
-              className={`btn text-xs ${type === t.id ? 'btn-secondary' : 'btn-ghost'}`}
-              onClick={() => setType(t.id)}
+              aria-pressed={source === 'library'}
+              className={`btn text-xs ${source === 'library' ? 'btn-secondary' : 'btn-ghost'}`}
+              onClick={() => switchTo('library')}
             >
-              {t.label}
+              <Library className="mr-1 inline h-3 w-3" />
+              Library
             </button>
-          ))}
-        </div>
+            <button
+              type="button"
+              aria-pressed={source === 'web'}
+              className={`btn text-xs ${source === 'web' ? 'btn-secondary' : 'btn-ghost'}`}
+              onClick={() => switchTo('web')}
+            >
+              <Globe className="mr-1 inline h-3 w-3" />
+              Web pictures
+            </button>
+          </div>
+        )}
+
+        {source === 'library' && (
+          <div className="flex gap-1" role="group" aria-label="Kind of media">
+            {TYPES.map((t) => (
+              <button
+                key={t.label}
+                type="button"
+                aria-pressed={type === t.id}
+                className={`btn text-xs ${type === t.id ? 'btn-secondary' : 'btn-ghost'}`}
+                onClick={() => setType(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        )}
 
         {error && (
           <p role="alert" className="text-sm text-red-600 dark:text-red-400">
             {error}
           </p>
         )}
-        {result && !result.semantic && (
+        {source === 'library' && result && !result.semantic && (
           <p className="text-xs text-gray-500">
             {result.semantic_error
               ? `Matched on words only: GAM's meaning-based search failed (${result.semantic_error}).`
@@ -163,180 +233,190 @@ export default function FootageSearch({
           </p>
         )}
 
-        <div className="grid min-h-0 flex-1 gap-3 overflow-hidden md:grid-cols-2">
-          <ul className="space-y-1 overflow-auto" aria-label="Results">
-            {result?.data.length === 0 && (
-              <li className="text-sm text-gray-500">Nothing in the library matches.</li>
-            )}
-            {result?.data.map((h, i) => (
-              <li key={`${h.asset.id}-${i}`}>
-                <button
-                  type="button"
-                  aria-pressed={selected === h}
-                  onClick={() => setSelected(h)}
-                  className={`flex w-full gap-2 rounded p-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700 ${
-                    selected === h ? 'bg-primary-50 dark:bg-gray-700' : ''
-                  }`}
-                >
-                  {h.asset.thumb_url ? (
-                    <img
-                      src={h.asset.thumb_url}
-                      alt=""
-                      className="h-12 w-20 shrink-0 rounded object-cover"
-                    />
-                  ) : (
-                    <span className="flex h-12 w-20 shrink-0 items-center justify-center rounded bg-gray-100 dark:bg-gray-800">
-                      {h.asset.asset_type === 'image' ? (
-                        <ImageIcon className="h-4 w-4 text-gray-400" />
-                      ) : (
-                        <Film className="h-4 w-4 text-gray-400" />
+        {source === 'web' ? (
+          web && (
+            <WebPictures
+              images={web}
+              useLabel={WEB_USE_LABEL[purpose]}
+              onPick={(hit) => onPick(hit, 'broll')}
+            />
+          )
+        ) : (
+          <div className="grid min-h-0 flex-1 gap-3 overflow-hidden md:grid-cols-2">
+            <ul className="space-y-1 overflow-auto" aria-label="Results">
+              {result?.data.length === 0 && (
+                <li className="text-sm text-gray-500">Nothing in the library matches.</li>
+              )}
+              {result?.data.map((h, i) => (
+                <li key={`${h.asset.id}-${i}`}>
+                  <button
+                    type="button"
+                    aria-pressed={selected === h}
+                    onClick={() => setSelected(h)}
+                    className={`flex w-full gap-2 rounded p-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700 ${
+                      selected === h ? 'bg-primary-50 dark:bg-gray-700' : ''
+                    }`}
+                  >
+                    {h.asset.thumb_url ? (
+                      <img
+                        src={h.asset.thumb_url}
+                        alt=""
+                        className="h-12 w-20 shrink-0 rounded object-cover"
+                      />
+                    ) : (
+                      <span className="flex h-12 w-20 shrink-0 items-center justify-center rounded bg-gray-100 dark:bg-gray-800">
+                        {h.asset.asset_type === 'image' ? (
+                          <ImageIcon className="h-4 w-4 text-gray-400" />
+                        ) : (
+                          <Film className="h-4 w-4 text-gray-400" />
+                        )}
+                      </span>
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+                        {h.asset.name}
+                      </span>
+                      {h.start_time !== null && (
+                        <span className="text-xs text-gray-500">
+                          at {clock(h.start_time)}
+                          {h.end_time !== null && `–${clock(h.end_time)}`}
+                        </span>
                       )}
+                      {audioSummary(h.asset) && (
+                        <span className="block truncate text-xs text-gray-500">
+                          {audioSummary(h.asset)}
+                        </span>
+                      )}
+                      {h.snippet && <Snippet text={h.snippet} />}
                     </span>
-                  )}
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-gray-900 dark:text-gray-100">
-                      {h.asset.name}
-                    </span>
-                    {h.start_time !== null && (
-                      <span className="text-xs text-gray-500">
-                        at {clock(h.start_time)}
-                        {h.end_time !== null && `–${clock(h.end_time)}`}
-                      </span>
-                    )}
-                    {audioSummary(h.asset) && (
-                      <span className="block truncate text-xs text-gray-500">
-                        {audioSummary(h.asset)}
-                      </span>
-                    )}
-                    {h.snippet && <Snippet text={h.snippet} />}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
+                  </button>
+                </li>
+              ))}
+            </ul>
 
-          {selected && (
-            <div className="space-y-2" aria-label="Selected">
-              {isVideo && selected.asset.file_url ? (
-                <video
-                  key={`${selected.asset.id}-${trim?.in}`}
-                  controls
-                  preload="metadata"
-                  className="w-full rounded bg-black"
-                  src={
-                    trim
-                      ? `${selected.asset.file_url}#t=${trim.in},${trim.out}`
-                      : selected.asset.file_url
-                  }
-                />
-              ) : selected.asset.asset_type === 'audio' && selected.asset.file_url ? (
-                <WaveformPlayer
-                  key={`${selected.asset.id}-${audioMoment?.in}`}
-                  assetId={selected.asset.id}
-                  src={selected.asset.file_url}
-                  name={selected.asset.name}
-                  moment={audioMoment}
-                />
-              ) : selected.asset.file_url ? (
-                <img
-                  src={selected.asset.file_url}
-                  alt={selected.asset.name}
-                  className="w-full rounded"
-                />
-              ) : null}
-              <p className="text-sm text-gray-700 dark:text-gray-300">
-                {purpose === 'track'
-                  ? [
-                      selected.asset.duration_seconds
-                        ? `${clock(selected.asset.duration_seconds)} long`
-                        : 'A sound',
-                      audioMoment &&
-                        `${trim ? 'matched at' : 'clip of'} ${clock(audioMoment.in)}–${clock(audioMoment.out)}`,
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')
-                  : trim
-                    ? `Uses ${clock(trim.in)}–${clock(trim.out)} (${Math.round(trim.out - trim.in)} s)`
-                    : isVideo
-                      ? 'Uses the whole video'
-                      : 'A still picture'}
-              </p>
-              {audioSummary(selected.asset) && (
-                <p className="text-xs text-gray-600 dark:text-gray-400">
-                  {audioSummary(selected.asset)}
+            {selected && (
+              <div className="space-y-2" aria-label="Selected">
+                {isVideo && selected.asset.file_url ? (
+                  <video
+                    key={`${selected.asset.id}-${trim?.in}`}
+                    controls
+                    preload="metadata"
+                    className="w-full rounded bg-black"
+                    src={
+                      trim
+                        ? `${selected.asset.file_url}#t=${trim.in},${trim.out}`
+                        : selected.asset.file_url
+                    }
+                  />
+                ) : selected.asset.asset_type === 'audio' && selected.asset.file_url ? (
+                  <WaveformPlayer
+                    key={`${selected.asset.id}-${audioMoment?.in}`}
+                    assetId={selected.asset.id}
+                    src={selected.asset.file_url}
+                    name={selected.asset.name}
+                    moment={audioMoment}
+                  />
+                ) : selected.asset.file_url ? (
+                  <img
+                    src={selected.asset.file_url}
+                    alt={selected.asset.name}
+                    className="w-full rounded"
+                  />
+                ) : null}
+                <p className="text-sm text-gray-700 dark:text-gray-300">
+                  {purpose === 'track'
+                    ? [
+                        selected.asset.duration_seconds
+                          ? `${clock(selected.asset.duration_seconds)} long`
+                          : 'A sound',
+                        audioMoment &&
+                          `${trim ? 'matched at' : 'clip of'} ${clock(audioMoment.in)}–${clock(audioMoment.out)}`,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')
+                    : trim
+                      ? `Uses ${clock(trim.in)}–${clock(trim.out)} (${Math.round(trim.out - trim.in)} s)`
+                      : isVideo
+                        ? 'Uses the whole video'
+                        : 'A still picture'}
                 </p>
-              )}
-              {selected.asset.credit && (
-                <p className="text-xs text-gray-500">{selected.asset.credit}</p>
-              )}
-              <div className="flex flex-wrap gap-2">
-                {purpose === 'track' ? (
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    onClick={() => onPick(selected, 'broll')}
-                  >
-                    Use this track
-                  </button>
-                ) : purpose === 'overlay' || purpose === 'picture' ? (
-                  selected.asset.asset_type === 'image' ? (
+                {audioSummary(selected.asset) && (
+                  <p className="text-xs text-gray-600 dark:text-gray-400">
+                    {audioSummary(selected.asset)}
+                  </p>
+                )}
+                {selected.asset.credit && (
+                  <p className="text-xs text-gray-500">{selected.asset.credit}</p>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  {purpose === 'track' ? (
                     <button
                       type="button"
                       className="btn btn-primary"
                       onClick={() => onPick(selected, 'broll')}
                     >
-                      {purpose === 'picture' ? 'Use this picture' : 'Put on screen'}
+                      Use this track
                     </button>
+                  ) : purpose === 'overlay' || purpose === 'picture' ? (
+                    selected.asset.asset_type === 'image' ? (
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={() => onPick(selected, 'broll')}
+                      >
+                        {purpose === 'picture' ? 'Use this picture' : 'Put on screen'}
+                      </button>
+                    ) : (
+                      <p className="text-xs text-gray-500">
+                        Only a picture can be used here.
+                      </p>
+                    )
+                  ) : purpose === 'resolve' ? (
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => onPick(selected, 'broll')}
+                    >
+                      Use this
+                    </button>
+                  ) : isVideo ? (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={() => onPick(selected, 'broll')}
+                      >
+                        Use as b-roll
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => onPick(selected, 'clip')}
+                      >
+                        Play with its sound
+                      </button>
+                    </>
                   ) : (
-                    <p className="text-xs text-gray-500">
-                      Only a picture can be used here.
-                    </p>
-                  )
-                ) : purpose === 'resolve' ? (
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    onClick={() => onPick(selected, 'broll')}
-                  >
-                    Use this
-                  </button>
-                ) : isVideo ? (
-                  <>
                     <button
                       type="button"
                       className="btn btn-primary"
                       onClick={() => onPick(selected, 'broll')}
                     >
-                      Use as b-roll
+                      Use this picture
                     </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={() => onPick(selected, 'clip')}
-                    >
-                      Play with its sound
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    onClick={() => onPick(selected, 'broll')}
-                  >
-                    Use this picture
-                  </button>
+                  )}
+                </div>
+                {purpose === 'scene' && isVideo && (
+                  <p className="text-xs text-gray-500">
+                    B-roll plays silently under this scene&apos;s narration. With its
+                    sound, the scene becomes a clip and its narration is set aside
+                    (Discard brings it back).
+                  </p>
                 )}
               </div>
-              {purpose === 'scene' && isVideo && (
-                <p className="text-xs text-gray-500">
-                  B-roll plays silently under this scene&apos;s narration. With its sound,
-                  the scene becomes a clip and its narration is set aside (Discard brings
-                  it back).
-                </p>
-              )}
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

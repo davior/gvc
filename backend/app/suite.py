@@ -92,6 +92,23 @@ def web_search(connection: SuiteClient, query: str, project_id: Optional[str]) -
                   subject_ref=f"gvc:project:{project_id}" if project_id else None)
 
 
+def image_search(connection: SuiteClient, query: str, project_id: Optional[str], *,
+                 count: Optional[int] = None) -> list:
+    """Pictures from the suite's web search backend, credited to the project.
+
+    Asked of the route directly rather than through `gecko_suite_client.image_search`,
+    which a pinned client older than the route does not have; the body is the same.
+    Each hit has `image_url`, and `page_url`, `title`, `thumbnail_url`, `width`,
+    `height` and `description` where the backend said.
+    """
+    body: dict = {"query": query, "app": APP}
+    if count:
+        body["count"] = count
+    if project_id:
+        body["subject_ref"] = f"gvc:project:{project_id}"
+    return connection.request("POST", "/api/v1/search/images", json=body)["results"]
+
+
 def sentence(exc: SuiteError) -> str:
     """What to say to the person when the suite said no. The suite's own messages are
     written for this ("Choose one in Gecko Suite's AI settings"), except for the one

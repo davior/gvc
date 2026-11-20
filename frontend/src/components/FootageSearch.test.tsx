@@ -10,6 +10,7 @@ import {
   type GamSearch,
 } from '@/api/gam'
 import FootageSearch from '@/components/FootageSearch'
+import { webApi, type WebImage } from '@/api/web'
 
 function asset(overrides: Partial<GamAsset> = {}): GamAsset {
   return {
@@ -269,5 +270,118 @@ describe('FootageSearch: a sound’s moment', () => {
 
     expect(await screen.findByText('2:00 long')).toBeInTheDocument()
     expect(screen.queryByTestId('outside-moment')).not.toBeInTheDocument()
+  })
+
+  describe('pictures from the web', () => {
+    const river: WebImage = {
+      image_url: 'https://img.test/river.jpg',
+      page_url: 'https://example.test/river',
+      title: 'Dry riverbed',
+      thumbnail_url: 'https://img.test/river_t.jpg',
+      width: 1920,
+      height: 1080,
+      description: 'A cracked riverbed at noon',
+    }
+    const filed = asset({ id: 'gam-web-1', name: 'Dry riverbed', asset_type: 'image' })
+
+    it('searches the web, files the chosen picture in GAM and hands it back as a hit', async () => {
+      const images = vi.spyOn(webApi, 'images').mockResolvedValue([river])
+      const importImage = vi.spyOn(gamApi, 'importImage').mockResolvedValue(filed)
+      const library = vi.spyOn(gamApi, 'search')
+      const onPick = vi.fn()
+      render(
+        <FootageSearch
+          title="Background"
+          purpose="picture"
+          initialType="image"
+          projectId="p1"
+          onPick={onPick}
+          onClose={vi.fn()}
+        />
+      )
+
+      await userEvent.type(screen.getByLabelText('Search the asset library'), 'riverbed')
+      await userEvent.click(screen.getByRole('button', { name: /Web pictures/ }))
+      expect(images).toHaveBeenCalledWith('riverbed', 'p1')
+      expect(library).not.toHaveBeenCalled()
+
+      await userEvent.click(await screen.findByRole('button', { name: 'Dry riverbed' }))
+      expect(screen.getByText(/Who may use this picture is unknown/)).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: /Source page/ })).toHaveAttribute(
+        'href',
+        'https://example.test/river'
+      )
+      await userEvent.click(screen.getByRole('button', { name: 'Use this picture' }))
+
+      expect(importImage).toHaveBeenCalledWith(river)
+      expect(onPick).toHaveBeenCalledWith(
+        { asset: filed, score: 0, snippet: '', start_time: null, end_time: null },
+        'broll'
+      )
+    })
+
+    it('opens on a placeholder’s shortlist without searching again', async () => {
+      const images = vi.spyOn(webApi, 'images')
+      render(
+        <FootageSearch
+          title="Find"
+          purpose="resolve"
+          initialQuery="a dry riverbed"
+          initialType="image"
+          candidates={[river]}
+          onPick={vi.fn()}
+          onClose={vi.fn()}
+        />
+      )
+      expect(screen.getByRole('button', { name: /Web pictures/ })).toHaveAttribute(
+        'aria-pressed',
+        'true'
+      )
+      expect(screen.getByRole('button', { name: 'Dry riverbed' })).toBeInTheDocument()
+      expect(images).not.toHaveBeenCalled()
+    })
+
+    it('says what went wrong when GAM will not take the picture', async () => {
+      vi.spyOn(webApi, 'images').mockResolvedValue([river])
+      vi.spyOn(gamApi, 'importImage').mockRejectedValue(
+        Object.assign(new Error('x'), {
+          isAxiosError: true,
+          response: {
+            status: 400,
+            data: {
+              detail: {
+                code: 'image_unavailable',
+                message: 'That link is not a picture GAM can store',
+              },
+            },
+          },
+        })
+      )
+      const onPick = vi.fn()
+      render(
+        <FootageSearch
+          title="Overlay"
+          purpose="overlay"
+          candidates={[river]}
+          onPick={onPick}
+          onClose={vi.fn()}
+        />
+      )
+      await userEvent.click(screen.getByRole('button', { name: 'Dry riverbed' }))
+      await userEvent.click(screen.getByRole('button', { name: 'Put on screen' }))
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        'That link is not a picture GAM can store'
+      )
+      expect(onPick).not.toHaveBeenCalled()
+    })
+
+    it('is not offered for a sound', () => {
+      render(
+        <FootageSearch title="Music" purpose="track" onPick={vi.fn()} onClose={vi.fn()} />
+      )
+      expect(
+        screen.queryByRole('button', { name: /Web pictures/ })
+      ).not.toBeInTheDocument()
+    })
   })
 })

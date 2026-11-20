@@ -72,6 +72,10 @@ class FakeSiblings:
     # GAM playlists by id (gam#70), as GET /api/playlists/{id} gives them. None: a GAM
     # from before playlists, which has no such route.
     playlists: Optional[Dict[str, dict]] = field(default_factory=dict)
+    # Pictures filed through GAM's `import-image`, as sent. A status in
+    # `import_image_status` is answered instead (404: a GAM from before the route).
+    imported_images: List[dict] = field(default_factory=list)
+    import_image_status: Optional[int] = None
     # Anywhere else on the web, by full URL: (status, headers, body).
     pages: Dict[str, tuple] = field(default_factory=dict)
 
@@ -179,6 +183,21 @@ class FakeSiblings:
             if asset is None:
                 return httpx.Response(404, json={"detail": {"code": "not_found", "message": "gone"}})
             return httpx.Response(200, json={"data": asset})
+        if path == "/api/assets/import-image" and request.method == "POST":
+            sent = json.loads(request.read())
+            if self.import_image_status == 400:
+                return httpx.Response(400, json={"detail": {
+                    "code": "image_unavailable", "message": "That link is not a picture GAM can store"}})
+            if self.import_image_status:
+                return httpx.Response(self.import_image_status, json={"detail": "Not Found"})
+            for known in self.imported_images:
+                if known["image_url"] == sent["image_url"]:
+                    return httpx.Response(200, json={"data": self.assets[known["asset_id"]]})
+            new_id = f"gam-web-{len(self.imported_images) + 1}"
+            self.assets[new_id] = gam_asset(new_id, sent.get("title") or "picture", "image")
+            self.imported_images.append({**sent, "asset_id": new_id,
+                                         "authorization": request.headers.get("authorization")})
+            return httpx.Response(201, json={"data": self.assets[new_id]})
         if path == "/api/assets" and request.method == "POST":
             body = request.read()
             filename = body.split(b'filename="', 1)[1].split(b'"', 1)[0].decode()

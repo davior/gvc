@@ -1,4 +1,5 @@
 import client from '@/api/client'
+import type { WebImage } from '@/api/web'
 
 /**
  * Projects and the VideoSpec documents they hold.
@@ -101,6 +102,8 @@ export type AssetRef =
       status?: 'unresolved' | 'resolved'
       result?: { from: 'gam'; id: string; in?: number; out?: number }
       label?: string
+      /** Pictures from the web to choose from, left by the assistant. */
+      candidates?: WebImage[]
     }
 
 export type Position =

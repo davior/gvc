@@ -190,6 +190,7 @@ def _run(turn_id: str) -> None:
         if suite.enabled():
             # The web, through the same connection, credited to this project.
             working.web_search = lambda query: suite.web_search(connection, query, project_id)
+            working.image_search = lambda query: suite.image_search(connection, query, project_id)
 
         def generate(data, key, image_prompt, base_ids, outputs):
             with queue.session() as session:
