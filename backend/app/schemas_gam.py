@@ -85,6 +85,12 @@ class GamHit(BaseModel):
     # How many other moments in the same asset also matched. GAM returns one row per
     # asset, its best moment, so this is the only sign that the rest is worth reading.
     other_matches: int = 0
+    # Where in a document the words were found, as a reader names it ("Page 74",
+    # "Slide 7", "Part 2"), and its real page number where the format has pages. Both
+    # null for a hit outside a document's text, and from a GAM older than document
+    # search, which says only that the document matched.
+    page_number: Optional[int] = None
+    page_label: Optional[str] = None
 
 
 class GamWord(BaseModel):
@@ -108,6 +114,26 @@ class GamTranscript(BaseModel):
     asset_id: str
     language: Optional[str] = None
     segments: List[GamSegment] = Field(default_factory=list)
+
+
+class GamDocumentPage(BaseModel):
+    """One readable part of a document as GAM extracted it: a PDF page, a slide, a
+    spreadsheet's sheet, or a stretch of a Word or text file, in reading order."""
+
+    idx: int = 0
+    # The page a reader would turn to. Null for a Word or text file, which has none.
+    page_number: Optional[int] = None
+    label: Optional[str] = None
+    text: str = ""
+
+    @property
+    def number(self) -> int:
+        """What this part is called by: its page number, else its place in the document.
+
+        The same number its label carries ("Page 74" is 74, "Part 2" is 2), so a page a
+        search hit names can be asked for by that number.
+        """
+        return self.page_number if self.page_number is not None else self.idx + 1
 
 
 class GamWaveform(BaseModel):

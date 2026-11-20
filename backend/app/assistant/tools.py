@@ -31,7 +31,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from app.assistant import clips
 from app.gam.client import GamClient, GamError
 from app.providers.base import ProviderError, ToolCall, ToolResult, ToolSpec
-from app.schemas_gam import GamTranscript
+from app.schemas_gam import GamAssetRead, GamDocumentPage, GamTranscript
 from app.render.estimate import estimate
 from app.services import note_media as note_files
 from app.schemas_themes import MAX_THEME_NAME, MAX_THEME_PROMPT
@@ -46,6 +46,9 @@ MAX_SEARCH_HITS = 12
 # conversation and is sent again each round, so an hour of speech in one call would cost
 # far more than reading the stretch around what was found.
 MAX_TRANSCRIPT_CHARS = 30_000
+# A document is read in pages of the same size, for the same reason: a 200-page report
+# in one result would be sent again every round of the turn.
+MAX_DOCUMENT_CHARS = 30_000
 # Where a sentence ends: closing punctuation, then any closing quotes or brackets.
 SENTENCE_END = re.compile(r"[.?!\u2026][\"'\u201d\u2019)\]]*$")
 # Unpunctuated speech would make one endless "sentence"; past this a line is closed at
@@ -165,6 +168,8 @@ class Working:
     # Transcripts fetched this turn by gam_id, so reading one and then cutting from it
     # asks GAM once.
     transcripts: Dict[str, GamTranscript] = field(default_factory=dict)
+    # Documents read this turn by gam_id, with the asset, so reading on asks GAM once.
+    documents: Dict[str, Tuple[GamAssetRead, List[GamDocumentPage]]] = field(default_factory=dict)
     # One model call with no tools: (system, prompt) -> the reply's text, its spend
     # recorded against the turn. Set by the worker; None where there is no provider,
     # and then find_clips says to read the transcript instead.
@@ -244,6 +249,25 @@ class Working:
                 raise ToolFailed(f"No asset {gam_id!r} in the library.")
             self.transcripts[gam_id] = found
         return self.transcripts[gam_id]
+
+    def document(self, gam_id: str) -> Tuple[GamAssetRead, List[GamDocumentPage]]:
+        if gam_id not in self.documents:
+            if self.gam is None:
+                raise ToolFailed("The asset library isn't reachable in this turn.")
+            try:
+                # The asset first: it is what tells "not in the library" from a GAM
+                # that has no text route, which both answer the text call with a 404.
+                asset = self.gam.get_asset(gam_id)
+                if asset is None:
+                    raise ToolFailed(f"No asset {gam_id!r} in the library.")
+                pages = self.gam.document_text(gam_id)
+            except GamError as exc:
+                raise ToolFailed(f"The asset library failed: {exc.message}")
+            if pages is None:
+                raise ToolFailed("This version of the asset library can't hand over a "
+                                 "document's text. GAM needs updating.")
+            self.documents[gam_id] = (asset, pages)
+        return self.documents[gam_id]
 
     def tracks(self) -> List[Dict[str, Any]]:
         return self.data.setdefault("audio_tracks", [])
@@ -365,6 +389,11 @@ def search_assets(w: Working, query: str, type: Optional[str] = None,
         if hit.other_matches:
             # GAM shows each asset's best moment only; this says the rest is worth reading.
             row["more_moments"] = hit.other_matches
+        if hit.page_label:
+            # Where in a document it is written: read_document's start for that part.
+            row["page"] = hit.page_label
+            if hit.page_number is not None:
+                row["page_number"] = hit.page_number
         if hit.snippet:
             row["snippet"] = hit.snippet.replace("«", "").replace("»", "")[:240]
         if asset.credit:
@@ -399,6 +428,8 @@ def get_asset(w: Working, gam_id: str) -> str:
         details["kind"] = asset.audio_kind
     if asset.music:
         details["music"] = _music_row(asset.music)
+    if asset.asset_type == "document":
+        details["text"] = "read_document reads it"
     return _compact(details)
 
 
@@ -428,6 +459,46 @@ def read_transcript(w: Working, gam_id: str, start: Optional[float] = None,
     tail = (f"\n... continues: read_transcript with start {rest:.1f} for the rest."
             if rest is not None else "")
     return head + "\n" + "\n".join(out) + tail
+
+
+def read_document(w: Working, gam_id: str, start: Optional[int] = None,
+                  end: Optional[int] = None) -> str:
+    asset, pages = w.document(gam_id)
+    if not pages:
+        if asset.asset_type in ("video", "audio"):
+            return "This is a recording, not a document: read_transcript reads what is said in it."
+        if asset.asset_type != "document":
+            return f"This is {'an' if asset.asset_type[:1] in 'aeiou' else 'a'} " \
+                   f"{asset.asset_type or 'asset'}, which has no text to read."
+        return ("The library has no text for this document yet. It reads a document's text "
+                "when the file arrives, so it may still be reading it; a scanned document, or "
+                "an old .doc, .xls or .ppt file, has none it can read. Say so rather than "
+                "guess what it says.")
+    chosen = [p for p in pages
+              if (start is None or p.number >= start) and (end is None or p.number <= end)]
+    if not chosen:
+        known = f"{pages[0].number}-{pages[-1].number}"
+        return f"No part of this document is numbered in that range. Its parts run {known}."
+    out: List[str] = []
+    size, rest = 0, None
+    for p in chosen:
+        text = p.text.strip()
+        head = f"--- [{p.number}] {p.label or f'Part {p.number}'} ---"
+        if out and size + len(head) + len(text) > MAX_DOCUMENT_CHARS:
+            rest = p.number
+            break
+        if len(text) > MAX_DOCUMENT_CHARS:
+            # One part longer than a whole read (a big spreadsheet's sheet): its opening,
+            # said to be cut, rather than a read that can never make progress.
+            text = text[:MAX_DOCUMENT_CHARS] + "\n[the rest of this part is cut off]"
+        out.append(head + "\n" + text)
+        size += len(head) + len(text) + 2
+    lead = (f"{asset.name}: {len(pages)} part{'' if len(pages) == 1 else 's'}. Each starts "
+            "with [n] and its label; start/end take n. Quote it as written, and say which "
+            "part a quote came from.")
+    tail = (f"\n... continues: read_document with start {rest} for the rest."
+            if rest is not None else "")
+    return lead + "\n" + "\n\n".join(out) + tail
 
 
 @dataclass
@@ -1178,9 +1249,13 @@ TOOLS: List[Tuple[ToolSpec, Callable[..., str]]] = [
               "kind (music, speech or sfx) and music: its genres, moods, instruments, bpm, "
               "key, energy and vocals, which are also searchable, so search music by the "
               "sound you want. more_moments: how many other moments in that asset also "
-              "matched; read_transcript shows them.",
+              "matched; read_transcript shows them. Documents (PDF, Word, slides, "
+              "spreadsheets, text) are searched by what is written in them: use type "
+              "document, and a hit inside one carries page, the part it is on; "
+              "read_document reads it.",
               {"type": "object", "properties": {
-                  "query": _STR, "type": {"type": "string", "enum": ["video", "image", "audio"]},
+                  "query": _STR,
+                  "type": {"type": "string", "enum": ["video", "image", "audio", "document"]},
                   "limit": {"type": "integer", "minimum": 1, "maximum": MAX_SEARCH_HITS}},
                "required": ["query"]}), search_assets),
     (ToolSpec("read_transcript",
@@ -1190,6 +1265,17 @@ TOOLS: List[Tuple[ToolSpec, Callable[..., str]]] = [
               "transcript comes in pages and says where to carry on.",
               {"type": "object", "properties": {"gam_id": _STR, "start": _NUM, "end": _NUM},
                "required": ["gam_id"]}), read_transcript),
+    (ToolSpec("read_document",
+              "The text of a document in the library (a PDF, Word file, slides, spreadsheet "
+              "or text file), part by part, each headed [n] and its label (Page 3, Slide 7, "
+              "Part 2). Use it whenever the person refers to a document, before saying what "
+              "it says. start/end read parts n to m: a search hit's page_number, or the n "
+              "of a part, is where to start. A long document comes in pages and says where "
+              "to carry on. It informs the script; a document is never footage.",
+              {"type": "object", "properties": {
+                  "gam_id": _STR, "start": {"type": "integer", "minimum": 1},
+                  "end": {"type": "integer", "minimum": 1}},
+               "required": ["gam_id"]}), read_document),
     (ToolSpec("find_clips",
               "Read a whole library video's transcript, in a separate pass, and return the "
               "passages that best put across one idea, best scored, each with the trim to "
@@ -1351,8 +1437,8 @@ SPECS = [spec for spec, _ in TOOLS]
 _HANDLERS = {spec.name: handler for spec, handler in TOOLS}
 
 # Read-only tools, which neither change the video nor count as an edit in the steps.
-READS = {"get_spec", "search_assets", "read_transcript", "find_clips", "get_asset",
-         "estimate", "web_search"}
+READS = {"get_spec", "search_assets", "read_transcript", "read_document", "find_clips",
+         "get_asset", "estimate", "web_search"}
 
 
 def specs_for(w: Working) -> List[ToolSpec]:

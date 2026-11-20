@@ -11,7 +11,7 @@ from app.assistant.tools import Working
 from app.gam.client import GamClient
 from app.providers.base import ProviderError, ToolCall
 from tests.fake_provider import ScriptedProvider, call, says
-from tests.fake_siblings import gam_asset, hit, transcript
+from tests.fake_siblings import document_pages, gam_asset, hit, transcript
 
 
 def spec():
@@ -551,3 +551,156 @@ def test_a_reply_cut_off_says_where_its_limit_is_raised(monkeypatch, backend, wh
                        on_step=lambda k, t: None, on_reply=lambda r: None,
                        cancelled=lambda: False, max_rounds=3)
     assert where in outcome.cut_short
+
+
+# ─── documents ───────────────────────────────────────────────────────────────
+
+
+def water_report(siblings):
+    report = gam_asset("d", "Water board report", "document")
+    siblings.assets["d"] = report
+    siblings.documents["d"] = document_pages(
+        (1, "Page 1", "Summary. The reservoir fell to a third of capacity."),
+        # A blank page is not extracted, so the numbering skips it, as GAM's does.
+        (3, "Page 3", "Recommendation: ration irrigation from June."),
+        (4, "Page 4", "Appendix: rainfall by month."),
+    )
+    return report
+
+
+def test_a_document_is_found_by_what_is_written_on_its_page(gam, siblings):
+    report = water_report(siblings)
+    siblings.hits = [hit(report, snippet="ration «irrigation»", page_number=3,
+                         page_label="Page 3")]
+    w = Working(spec(), gam=gam)
+
+    found = json.loads(run(w, "search_assets", query="irrigation", type="document").content)
+
+    row = found["hits"][0]
+    assert row["gam_id"] == "d" and row["type"] == "document"
+    assert row["page"] == "Page 3" and row["page_number"] == 3
+    assert siblings.gam_requests()[-1].url.params["asset_type"] == "document"
+
+
+def test_a_document_reads_part_by_part_under_its_own_numbers(gam, siblings):
+    water_report(siblings)
+    w = Working(spec(), gam=gam)
+
+    read = run(w, "read_document", gam_id="d")
+
+    assert not read.is_error
+    assert "Water board report: 3 parts" in read.content
+    assert "--- [1] Page 1 ---\nSummary. The reservoir fell to a third of capacity." in read.content
+    assert "--- [3] Page 3 ---\nRecommendation" in read.content
+    assert "continues" not in read.content
+
+
+def test_a_document_can_be_read_from_the_page_a_hit_named(gam, siblings):
+    water_report(siblings)
+    w = Working(spec(), gam=gam)
+
+    page = run(w, "read_document", gam_id="d", start=3, end=3).content
+
+    assert "Recommendation" in page
+    assert "Summary" not in page and "Appendix" not in page
+    assert "parts run 1-4" in run(w, "read_document", gam_id="d", start=9).content
+
+
+def test_a_long_document_comes_in_pages_and_says_where_to_carry_on(gam, siblings, monkeypatch):
+    water_report(siblings)
+    monkeypatch.setattr(T, "MAX_DOCUMENT_CHARS", 90)
+    w = Working(spec(), gam=gam)
+
+    first = run(w, "read_document", gam_id="d").content
+    assert "Summary" in first and "Recommendation" not in first
+    assert "read_document with start 3" in first
+    assert "Recommendation" in run(w, "read_document", gam_id="d", start=3).content
+    # Asked once, however often it is read.
+    assert sum(r.url.path.endswith("/text") for r in siblings.gam_requests()) == 1
+
+
+def test_one_part_longer_than_a_read_is_cut_rather_than_never_read(gam, siblings, monkeypatch):
+    sheet = gam_asset("x", "Budget", "document")
+    siblings.assets["x"] = sheet
+    siblings.documents["x"] = document_pages((1, "Sheet 'Costs'", "row\t1\n" * 100))
+    monkeypatch.setattr(T, "MAX_DOCUMENT_CHARS", 50)
+    w = Working(spec(), gam=gam)
+
+    read = run(w, "read_document", gam_id="x").content
+
+    assert "[the rest of this part is cut off]" in read
+    assert "continues" not in read
+
+
+def test_a_word_file_is_numbered_by_its_parts(gam, siblings):
+    notes = gam_asset("w", "Brief", "document")
+    siblings.assets["w"] = notes
+    siblings.documents["w"] = document_pages((None, "Part 1", "Tone: calm."),
+                                             (None, "Part 2", "Length: two minutes."))
+    w = Working(spec(), gam=gam)
+
+    assert "Length" in run(w, "read_document", gam_id="w", start=2).content
+    assert "Tone" not in run(w, "read_document", gam_id="w", start=2).content
+
+
+def test_a_document_with_no_text_yet_says_so_rather_than_inventing_it(gam, siblings):
+    siblings.assets["s"] = gam_asset("s", "Scanned letter", "document")
+    w = Working(spec(), gam=gam)
+
+    read = run(w, "read_document", gam_id="s")
+
+    assert not read.is_error
+    assert "no text for this document yet" in read.content
+
+
+def test_reading_a_video_as_a_document_points_at_its_transcript(gam, siblings):
+    w = Working(spec(), gam=gam)
+    assert "read_transcript" in run(w, "read_document", gam_id="r").content
+
+
+def test_an_unknown_document_and_an_old_library_are_told_apart(gam, siblings):
+    water_report(siblings)
+    w = Working(spec(), gam=gam)
+    missing = run(w, "read_document", gam_id="nope")
+    assert missing.is_error and "No asset 'nope'" in missing.content
+
+    siblings.text_route = False
+    old = run(w, "read_document", gam_id="d")
+    assert old.is_error and "needs updating" in old.content
+
+
+def test_read_document_is_a_read_and_offered_with_the_library_tools():
+    assert "read_document" in T.READS
+    names = [s.name for s in T.specs_for(Working(spec()))]
+    assert "read_document" in names
+    search = next(s for s in T.SPECS if s.name == "search_assets")
+    assert "document" in search.parameters["properties"]["type"]["enum"]
+
+
+def test_get_asset_says_a_document_can_be_read(gam, siblings):
+    water_report(siblings)
+    w = Working(spec(), gam=gam)
+    assert json.loads(run(w, "get_asset", gam_id="d").content)["text"] == "read_document reads it"
+
+
+def test_a_turn_finds_a_document_and_reads_the_page_its_hit_named(gam, siblings):
+    report = water_report(siblings)
+    siblings.hits = [hit(report, snippet="ration «irrigation»", page_number=3,
+                         page_label="Page 3")]
+    w = Working(spec(), gam=gam)
+    provider = ScriptedProvider(script=[
+        says("", call("search_assets", query="water board report", type="document")),
+        says("", call("read_document", gam_id="d", start=3)),
+        says("The report recommends rationing irrigation from June (page 3)."),
+    ])
+    steps = []
+    loop.run(provider, w, system=[], history=[], prompt="What does the water board report "
+             "recommend?", on_step=lambda k, t: steps.append(t), on_reply=lambda r: None,
+             cancelled=lambda: False, max_rounds=4)
+
+    searched, read = provider.results()
+    assert '"page":"Page 3"' in searched.content
+    assert "Recommendation: ration irrigation from June." in read.content
+    assert "Reading Water board report" in steps
+    # Reading changes nothing in the video.
+    assert w.changes == []

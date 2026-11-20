@@ -89,11 +89,11 @@ def run(provider: ChatProvider, working: Working, *, system: Sequence[str],
                 on_step("search", f"Searching the library: {call.arguments.get('query', '')!r}")
             elif call.name == "web_search":
                 on_step("search", f"Searching the web: {call.arguments.get('query', '')!r}")
-            elif call.name in ("read_transcript", "find_clips"):
+            elif call.name in ("read_transcript", "read_document", "find_clips"):
                 gam_id = call.arguments.get("gam_id", "")
                 seen = working.hits.get(gam_id)
-                doing = "Reading the transcript of" if call.name == "read_transcript" \
-                    else "Picking clips from"
+                doing = {"read_transcript": "Reading the transcript of",
+                         "read_document": "Reading"}.get(call.name, "Picking clips from")
                 on_step("search", f"{doing} {seen.name if seen else gam_id}")
             planned = T.plan(working, call)
             if isinstance(planned, T.ClipJob):
