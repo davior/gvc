@@ -1,4 +1,5 @@
 import client from '@/api/client'
+import type { WebImage } from '@/api/web'
 
 /**
  * GAM, the media library, searched and read through GVC's backend as the signed-in
@@ -132,6 +133,19 @@ export const gamApi = {
         { ids }
       )
       .then((r) => r.data.data.assets)
+  },
+
+  /** Files a picture found on the web in the library, and returns the asset (an
+   *  existing one when GAM already has it). GAM does the fetching. */
+  importImage(image: WebImage): Promise<GamAsset> {
+    return client
+      .post<DataResponse<GamAsset>>('/gam/import-image', {
+        image_url: image.image_url,
+        page_url: image.page_url ?? null,
+        title: image.title ?? '',
+        description: image.description ?? '',
+      })
+      .then((r) => r.data.data)
   },
 
   /** Rejects when GAM has no waveform (422), so the player keeps its flat line. */

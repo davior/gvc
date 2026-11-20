@@ -29,6 +29,7 @@ from app.routers import renders as renders_router
 from app.routers import spec as spec_router
 from app.routers import themes as themes_router
 from app.routers import usage as usage_router
+from app.routers import web as web_router
 from app.schemas import ClientConfig, DataResponse, HealthResponse
 
 logging.basicConfig(level=logging.INFO)
@@ -169,6 +170,7 @@ def me(user: CurrentUser, session: Session = Depends(get_session)) -> DataRespon
 app.include_router(projects_router.router, prefix="/api/projects", tags=["projects"])
 app.include_router(spec_router.router, prefix="/api/spec", tags=["spec"])
 app.include_router(gam_router.router, prefix="/api/gam", tags=["gam"])
+app.include_router(web_router.router, prefix="/api/web", tags=["web"])
 app.include_router(renders_router.router, prefix="/api", tags=["renders"])
 app.include_router(providers_router.router, prefix="/api/providers", tags=["providers"])
 app.include_router(assistant_router.router, prefix="/api/assistant", tags=["assistant"])

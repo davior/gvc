@@ -280,6 +280,11 @@ export default function ProjectView() {
               <li key={key} className="flex items-center gap-2 text-sm">
                 <span className="flex-1 text-gray-700 dark:text-gray-300">
                   “{ref.query}”
+                  {ref.candidates?.length ? (
+                    <span className="ml-1 text-xs text-gray-500">
+                      · {ref.candidates.length} web pictures to choose from
+                    </span>
+                  ) : null}
                 </span>
                 <button
                   type="button"
@@ -363,6 +368,7 @@ export default function ProjectView() {
         <FootageSearch
           title={`Footage for ${draft.segments[finding.index]?.label || 'this scene'}`}
           purpose="scene"
+          projectId={project.id}
           onClose={() => setFinding(null)}
           onPick={(hit, mode) => {
             edit(placeHit(draft, finding.index, hit, mode))
@@ -381,6 +387,8 @@ export default function ProjectView() {
               : 'video'
           }
           moment={placeholder.moment}
+          candidates={placeholder.candidates}
+          projectId={project.id}
           onClose={() => setFinding(null)}
           onPick={(hit) => {
             edit(resolveSearch(draft, finding.key, hit))

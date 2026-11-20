@@ -169,8 +169,12 @@ export function resolveSearch(spec: VideoSpec, key: string, hit: GamHit): VideoS
     ref.moment && hit.asset.asset_type !== 'image'
       ? momentTrim(hit, ref.moment)
       : undefined
+  // The shortlist is dropped once something is chosen: it was only there to choose from,
+  // and its web addresses have no business outliving the choice in the saved spec.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { candidates: _shortlist, ...kept } = ref
   const resolved: AssetRef = {
-    ...ref,
+    ...kept,
     type: ref.type ?? hit.asset.asset_type,
     status: 'resolved',
     result: { from: 'gam', id: hit.asset.id, ...(trim ?? {}) },

@@ -61,6 +61,14 @@ class FakeSuite:
         self.search_down = False
         self.persona_queries: List[dict] = []
         self.personas: List[dict] = []
+        self.image_searches: List[dict] = []
+        self.images: List[dict] = [
+            {"image_url": "https://img.test/river.jpg", "page_url": "https://example.test/river",
+             "title": "Dry riverbed", "thumbnail_url": "https://img.test/river_t.jpg",
+             "width": 1920, "height": 1080, "description": "A cracked, dry riverbed at noon"},
+            {"image_url": "https://img.test/dam.jpg", "description": "A concrete dam"},
+        ]
+        self.image_status: Optional[httpx.Response] = None
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         if self.down:
@@ -79,6 +87,12 @@ class FakeSuite:
             return httpx.Response(200, json={"data": {"results": [
                 {"title": "Water wars, a history", "url": "https://example.test/ww",
                  "snippet": "Disputes over rivers since antiquity."}]}})
+        if request.url.path == "/api/v1/search/images":
+            self.image_searches.append(json.loads(request.content))
+            if self.image_status is not None:
+                return self.image_status
+            return httpx.Response(200, json={"data": {"provider": "Tavily", "kind": "tavily",
+                                                      "results": self.images}})
         if request.url.path == "/api/v1/personas":
             self.persona_queries.append(dict(request.url.params))
             return httpx.Response(200, json={"data": self.personas, "total": len(self.personas),

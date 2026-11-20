@@ -36,7 +36,11 @@ the changes this repository's plan lists as S1–S3, which Notes' copy does not.
   (`tools.specs_for`: not offered where there is no suite, so a model is never told about a
   tool it cannot use). The suite runs it, the results come back numbered for the model to cite,
   a failed one is a result and not a failed turn, and a turn may make only a handful. It never
-  changes the video. A **persona** is the suite's, chosen per turn and kept on the turn row so a
+  changes the video. **Pictures from the web** are the one exception, and only as a shortlist:
+  `find_images` leaves `candidates` on a `search` placeholder (S7), and nothing from the web is
+  on screen until a person chooses one in Footage Search's Web tab, which files it in GAM
+  (`/api/gam/import-image`) and resolves the placeholder to that asset. A render never reads a
+  web address. A **persona** is the suite's, chosen per turn and kept on the turn row so a
   rerun is asked as the same one; this app only names it, and the suite applies its prompt and model.
 - **A narration is one voice.** `SuiteNarrator` sends back the model and voice the first chunk
   resolved, and a model that fails stops the render: the suite never falls back to another
