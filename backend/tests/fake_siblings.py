@@ -35,6 +35,10 @@ class FakeSiblings:
     hits: List[dict] = field(default_factory=list)
     # GAM transcripts by asset id: {"asset_id", "segments": [...]}, as /transcript gives.
     transcripts: Dict[str, dict] = field(default_factory=dict)
+    # GAM document text by asset id, as /text gives its rows. An asset with no entry
+    # has none read yet; `text_route` False is a GAM older than extract_text.
+    documents: Dict[str, List[dict]] = field(default_factory=dict)
+    text_route: bool = True
     # GAM waveforms by asset id ({"duration", "peaks"}), as /peaks gives.
     peaks: Dict[str, dict] = field(default_factory=dict)
     # GAM video versions by asset id, as /versions gives (gam#56). An asset with no
@@ -157,6 +161,13 @@ class FakeSiblings:
                 return httpx.Response(404)
             return httpx.Response(200, json={"data": rows, "total": len(rows),
                                              "limit": len(rows), "offset": 0})
+        if path.endswith("/text") and request.method == "GET":
+            asset_id = path.split("/")[3]
+            if asset_id not in self.assets or not self.text_route:
+                return httpx.Response(404, json={"detail": {"code": "not_found", "message": "gone"}})
+            rows = self.documents.get(asset_id, [])
+            return httpx.Response(200, json={"data": rows, "total": len(rows),
+                                             "limit": len(rows), "offset": 0})
         if path.endswith("/transcript") and request.method == "GET":
             asset_id = path.split("/")[3]
             if asset_id not in self.assets:
@@ -252,10 +263,13 @@ GEN_MODELS = [
 ]
 
 
-def hit(asset: dict, *, start=None, end=None, snippet="", other_matches=0) -> dict:
+def hit(asset: dict, *, start=None, end=None, snippet="", other_matches=0,
+        page_number=None, page_label=None) -> dict:
     data = {"asset": asset, "score": 0.03, "snippet": snippet, "start_time": start,
             "segment_id": "seg" if start is not None else None, "sources": ["keyword"],
             "other_matches": other_matches}
+    if page_label is not None:
+        data.update(page_id="page", page_number=page_number, page_label=page_label)
     if end is not None:
         data["end_time"] = end
     return data
@@ -276,6 +290,12 @@ def transcript(asset_id: str, *segments: tuple) -> dict:
                       for n, word in enumerate(words)],
         })
     return {"asset_id": asset_id, "status": "done", "language": "en", "segments": out}
+
+
+def document_pages(*parts: tuple) -> List[dict]:
+    """GAM's /text rows from (page_number or None, label, text) parts, in order."""
+    return [{"id": f"page{i}", "idx": i, "page_number": number, "label": label, "text": text}
+            for i, (number, label, text) in enumerate(parts)]
 
 
 def dumps(value) -> str:

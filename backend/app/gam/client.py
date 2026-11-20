@@ -19,8 +19,8 @@ import httpx
 from app import outbound
 from app.config import settings
 from app.schemas_gam import (
-    GamAssetRead, GamHit, GamMusic, GamPlaylist, GamPlaylistDetail, GamPlaylistItem, GamSearch,
-    GamTranscript, GamVersion, GamWaveform,
+    GamAssetRead, GamDocumentPage, GamHit, GamMusic, GamPlaylist, GamPlaylistDetail,
+    GamPlaylistItem, GamSearch, GamTranscript, GamVersion, GamWaveform,
 )
 
 logger = logging.getLogger(__name__)
@@ -164,6 +164,8 @@ class GamClient:
                     # editor then sizes the moment itself.
                     end_time=hit.get("end_time"),
                     other_matches=hit.get("other_matches") or 0,
+                    page_number=hit.get("page_number"),
+                    page_label=hit.get("page_label"),
                 )
                 for hit in body.get("data", [])
             ],
@@ -231,6 +233,22 @@ class GamClient:
             code, message = self._detail(response)
             raise GamError(code, message)
         return GamTranscript.model_validate(response.json()["data"])
+
+    def document_text(self, asset_id: str) -> Optional[List[GamDocumentPage]]:
+        """A document's text as GAM extracted it, its parts in reading order.
+
+        Empty when GAM has read nothing from it: it is still being read (GAM does that
+        when the file lands), or it is a scan or a format GAM cannot read. None when GAM
+        answers 404, which is either an asset that is not the caller's or a GAM older
+        than extract_text; the caller tells those apart with `get_asset`.
+        """
+        response = self._request("GET", f"/api/assets/{asset_id}/text")
+        if response.status_code == 404:
+            return None
+        if response.status_code != 200:
+            code, message = self._detail(response)
+            raise GamError(code, message)
+        return [GamDocumentPage.model_validate(raw) for raw in response.json().get("data") or []]
 
     def versions(self, asset_id: str) -> List[GamVersion]:
         """A video's standard-resolution versions, largest first.

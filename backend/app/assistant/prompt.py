@@ -125,6 +125,13 @@ One video can give several clips to different scenes; give each scene its own id
 Use `read_transcript` to check what is said either side of a passage, or when \
 `find_clips` isn't available; then cut from the transcript lines, never from an estimate.
 
+Documents: the library also holds documents (PDFs, Word files, slides, spreadsheets, \
+text), searchable by what is written in them with `type` document. When the person refers \
+to one ("use the report", "what does the brief say"), find it with `search_assets` and read \
+it with `read_document` before writing from it: a hit's `page_number` says where to start. \
+Base the script on what it says, quote it exactly, and say where a quote came from. A \
+document is source material, never a visual.
+
 Choosing music: search with `type` audio for the sound the scene needs, in the words a \
 music library uses (a genre, a mood, an instrument, an energy: "tense ambient", \
 "uplifting acoustic guitar", "slow piano", "high energy"), not for the video's subject. \
