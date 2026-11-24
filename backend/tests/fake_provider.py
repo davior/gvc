@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from app.providers.base import Reply, ToolCall, ToolResult, ToolSpec, Usage
 
 
-def call(name: str, **arguments: Any) -> ToolCall:
+def call(name: str, /, **arguments: Any) -> ToolCall:
     call.counter += 1
     return ToolCall(id=f"c{call.counter}", name=name, arguments=arguments)
 

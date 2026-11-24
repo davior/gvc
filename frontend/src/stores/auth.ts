@@ -5,6 +5,7 @@ import { useProjectStore } from '@/stores/projects'
 import { useRenderStore } from '@/stores/renders'
 import { useAssistantStore } from '@/stores/assistant'
 import { useGenerationStore } from '@/stores/generations'
+import { useRecipeStore } from '@/stores/recipes'
 import { useAppThemeStore } from '@/stores/appTheme'
 
 /**
@@ -75,6 +76,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     useRenderStore.getState().reset()
     useAssistantStore.getState().reset()
     useGenerationStore.getState().reset()
+    useRecipeStore.getState().reset()
     // The theme this person wore must not dress the sign-in page for the next one.
     useAppThemeStore.getState().reset()
     void redirectToLogin()

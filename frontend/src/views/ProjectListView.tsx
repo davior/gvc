@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Film, FileText, ListVideo, Plus, Sparkles, Trash2 } from 'lucide-react'
+import { BookOpen, Film, FileText, ListVideo, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import type { Origin } from '@/api/projects'
 import PlaylistStart from '@/components/PlaylistStart'
@@ -11,12 +11,14 @@ const ORIGIN_LABEL: Record<Origin, string> = {
   note: 'Pushed from Notes',
   brief: 'Drafted from a prompt',
   playlist: 'Built from a GAM playlist',
+  recipe: 'Made from a recipe',
 }
 
 function OriginIcon({ origin }: { origin: Origin }) {
   if (origin === 'note') return <FileText className="h-4 w-4" />
   if (origin === 'brief') return <Sparkles className="h-4 w-4" />
   if (origin === 'playlist') return <ListVideo className="h-4 w-4" />
+  if (origin === 'recipe') return <BookOpen className="h-4 w-4" />
   return <Film className="h-4 w-4" />
 }
 

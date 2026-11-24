@@ -612,6 +612,14 @@ class NoteSource(_Model):
     selection: bool = False             # only part of the note was pushed
 
 
+class RecipeRef(_Model):
+    """The recipe a brief was run from (S8). Its name is kept as it was then, so the
+    provenance still reads after the recipe is renamed or deleted."""
+
+    id: str
+    name: str = ""
+
+
 class BriefSource(_Model):
     """Drafted by an AI from a prompt (S2). Kept so a draft can be traced and redone."""
 
@@ -621,6 +629,8 @@ class BriefSource(_Model):
     drafted_at: Optional[str] = None    # ISO 8601
     provider: Optional[str] = None
     model: Optional[str] = None
+    # Set when the prompt was a recipe's, filled in (S8).
+    recipe: Optional[RecipeRef] = None
 
 
 class PlaylistSource(_Model):

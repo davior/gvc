@@ -275,6 +275,41 @@ assistant's `generate_image` both end up, so neither has to remember to.
   what the theme was, for the reply to say. Deleting the open video's theme also takes
   it off the video, as a proposed edit; other projects naming it just generate unstyled.
 
+### D6. Recipes: a saved request, run as an ordinary turn
+
+A recipe is Gecko Notes' recipe brought over: a name, tags and a prompt with
+`{{placeholders}}`, kept per user (`recipe` table, `/api/recipes`, the Recipes page).
+Here it can also carry the settings a video made from it starts with (`defaults`: a
+theme, an aspect, a partial voice), validated with the spec's own types. Placeholders
+match as Notes' do (ignoring case, spaces, `_` and `-`), so a file exported from Notes
+imports as it is; `{{title}}`, `{{date}}` and `{{time}}` fill themselves, and every other
+one is an input the run form asks for.
+- **A run is a turn, not a second pipeline.** `POST /api/assistant/turns` takes
+  `recipe_id` and `recipe_inputs`, and the server fills the prompt in
+  (`services/recipes.render`), so every client asks the model the same thing. The turn
+  records which recipe it ran. It is followed, stopped and applied like any request, so
+  a recipe run on a project proposes an edit and one run from elsewhere drafts a new
+  video. A video made that way has `origin: recipe` and `source.recipe` (S8); nothing
+  re-reads the recipe afterwards.
+- **Defaults only for a new video.** They are put on the starter the turn begins from
+  (a theme deleted since is skipped, so the user's default stays). On an open video
+  they are only told to the model: changing its format there would be a change nobody
+  pressed Apply on.
+- **The assistant proposes; the person saves.** Unlike themes (D5), which are made at
+  once, a recipe change is a card under the reply (`propose_recipe`: create, update or
+  delete), saved only by its button
+  (`POST /api/assistant/turns/{id}/recipes/{ref}/save`), as a note for Notes is. That
+  was the user's call: a recipe is something run again and again, so an unreviewed
+  rewrite would quietly change every later run. Editing an existing recipe is a
+  first-class use. `get_recipe` gives the model the whole prompt to edit from, an update
+  names only the fields that change, and a second call for the same recipe adds to the
+  pending card instead of making another. The card shows before and after (a line diff
+  of the prompt).
+- **Save checks again.** The model chooses ids, so the recipe must be the caller's. One
+  deleted since the proposal is `recipe_gone`. One edited by hand since (its
+  `updated_at` moved) is `recipe_changed`, so Save never silently undoes an edit the
+  card didn't show. An update writes only the fields it names.
+
 ## Schema changes this goal needs
 
 These change the VideoSpec. They are made in GVC's copy of `spec.py` in M0,
@@ -433,6 +468,12 @@ same backend as `web_search` (Tavily, Brave or SearXNG; not DuckDuckGo).
 - Without the suite, the tool is not offered and the tab says why; the library works as
   before.
 
+### S8. The recipe a brief came from
+
+`BriefSource` may carry `recipe: {id, name}`: the recipe whose prompt, filled in, was
+the brief (D6). The name is kept as it was then, so the provenance still reads after the
+recipe is renamed or deleted. Optional, so every existing spec is unchanged.
+
 ## Changes needed in GAM
 
 Specified here, applied in GAM's repository, not from this one.
@@ -478,6 +519,7 @@ Each milestone ends with something you can use, not just with code merged.
 | **M3** | **Editor** | The M0 scene list grows into the storyboard: a card per segment (thumbnail, label, first line), lanes for audio tracks and overlays against the segments, a per-scene panel (visual, trim, transition, motion with a drag-a-box framing tool, voice), a project defaults panel. Sliders take their ranges from the schema (the Notes spec doc, open decision 12). Undo/redo over `ProjectVersion`. | You can build and fix a whole video by hand without opening the JSON tab |
 | **M4** | **AI drafting** | **Built, with M5, as one assistant.** Providers, usage and pricing copied from GAM's M6, with the clients made multi-turn and tool-calling (Anthropic and OpenAI-compatible, Ollama over `/v1`). A panel beside every page, collapsible as in Notes. From the project list, "describe a video" drafts one: GAM search as a tool, moments said in videos cut in as trims, placeholders for gaps, the draft repaired from its validation issues, applied as a new project with `source: brief` and `author: ai`. Each turn's estimated cost is shown, and usage recorded per project and turn. Turns are background jobs: they finish with the page closed, and wait for Apply. | "Make a 3-minute video about *X* using clips where people talk about it" produces a spec that previews immediately |
 | **M5** | **AI editing** | **Built, with M4.** The §8.2 operations as tools, addressed by id: segments, visuals, placeholders, overlays, tracks and project settings by merge patch. The turn starts from the editor's draft (unsaved edits included) and the focused scene; it ends with one proposal applied into the draft, warned about if the project was saved in between. Generate placeholders are sent to GAM's M8 (see "AI generation" below). Not yet: `split`/`merge` of segments as their own tools (`update_segment` and `add_segment` cover them). | "Change the music after the second chapter to something calmer, and dissolve into the last scene" becomes reviewed, applied edits |
+| **M5r** | **Recipes** | **Built.** D6: the recipe list and page (with import and export, Notes' file included), a picker and run form in the assistant, a run as an ordinary turn with defaults for a new video, and `list_recipes` / `get_recipe` / `propose_recipe` with Save and Discard cards. | "Make me a recipe for vertical product teasers", saved from its card, runs from the picker with its inputs and makes a 9:16 draft |
 | **M6** | **Notes hands over** | GN-V1 to GN-V3: "Make video" in Notes pushes to GVC, and Notes' render pipeline is retired (the Notes spec doc §10, Phase 4). | No render code left in Notes |
 
 **M1 before M2** is the user's call: real media from GAM from the first render, with

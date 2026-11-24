@@ -1,5 +1,6 @@
 import client from '@/api/client'
 import type { VideoSpec } from '@/api/projects'
+import type { RecipeDefaults } from '@/api/recipes'
 
 /**
  * The assistant. A turn is a background job on the server, so nothing here needs the
@@ -28,6 +29,33 @@ export interface NoteProposal {
   note_url: string | null
 }
 
+/** A recipe as a proposal shows it, before or after the change. */
+export interface RecipeDraft {
+  name: string
+  prompt: string
+  tags: string[]
+  defaults: RecipeDefaults
+  inputs: string[]
+}
+
+/**
+ * A change to the recipe list the assistant proposed: a new recipe, an edit to one, or
+ * deleting one. Saved only by its own button, never by Apply, since it is not the video.
+ */
+export interface RecipeProposal {
+  recipe_ref: string
+  op: 'create' | 'update' | 'delete'
+  /** The recipe changed; for a new one, once saved. */
+  recipe_id: string | null
+  /** Update and delete: the recipe as it was when proposed. */
+  before: RecipeDraft | null
+  /** Create and update: as it will be. */
+  after: RecipeDraft | null
+  /** Update: which fields change. */
+  fields: Array<'name' | 'prompt' | 'tags' | 'defaults'>
+  state: 'pending' | 'saved' | 'discarded'
+}
+
 export interface Turn {
   id: string
   session_id: string
@@ -45,6 +73,11 @@ export interface Turn {
   outcome: '' | 'pending' | 'applied' | 'discarded'
   /** Notes for Gecko Notes, each decided apart from the video. Absent on older turns. */
   notes?: NoteProposal[]
+  /** Changes to the recipe list, each decided apart from the video. */
+  recipes?: RecipeProposal[]
+  /** The recipe this turn ran, and its name now (null once deleted). */
+  recipe_id?: string | null
+  recipe_name?: string | null
   /** The project version the turn was asked about. */
   base_version: number | null
   /** The suite persona this turn was asked as, if any. */
@@ -105,6 +138,7 @@ export interface Chat extends ChatSummary {
 }
 
 export interface TurnRequest {
+  /** May be empty when running a recipe: the server fills in its prompt. */
   prompt: string
   session_id?: string | null
   project_id?: string | null
@@ -113,6 +147,9 @@ export interface TurnRequest {
   focus?: string | null
   /** One of the suite's personas, or none. */
   persona_id?: string | null
+  /** Run this recipe, with these values for its inputs. */
+  recipe_id?: string | null
+  recipe_inputs?: Record<string, string>
 }
 
 export interface Persona {
@@ -249,6 +286,19 @@ export const assistantApi = {
   discardNote(id: string, noteRef: string): Promise<Turn> {
     return client
       .post<DataResponse<Turn>>(`/assistant/turns/${id}/notes/${noteRef}/discard`)
+      .then((r) => r.data.data)
+  },
+
+  /** Make a recipe change the assistant proposed: the only way one reaches the list. */
+  saveRecipe(id: string, recipeRef: string): Promise<Turn> {
+    return client
+      .post<DataResponse<Turn>>(`/assistant/turns/${id}/recipes/${recipeRef}/save`)
+      .then((r) => r.data.data)
+  },
+
+  discardRecipe(id: string, recipeRef: string): Promise<Turn> {
+    return client
+      .post<DataResponse<Turn>>(`/assistant/turns/${id}/recipes/${recipeRef}/discard`)
       .then((r) => r.data.data)
   },
 

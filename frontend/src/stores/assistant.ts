@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import { apiErrorMessage } from '@/api/client'
+import type { Recipe } from '@/api/recipes'
+import { useRecipeStore } from '@/stores/recipes'
 import {
   ACTIVE_TURN,
   assistantApi,
@@ -62,11 +64,15 @@ interface AssistantState {
   personas: Persona[]
   /** The one chosen for the next message; null is the assistant as it is. */
   personaId: string | null
+  /** A recipe chosen to run, waiting for its inputs in the panel's run form. */
+  pendingRecipe: Recipe | null
 
   setOpen: (open: boolean) => void
   setWidth: (width: number) => void
   setFocus: (segmentId: string | null) => void
   setPersona: (id: string | null) => void
+  /** Open the run form for a recipe (the picker, or Run on the Recipes page). */
+  runRecipe: (recipe: Recipe | null) => void
   enter: (scope: string | null) => Promise<void>
   openChat: (id: string) => Promise<void>
   newChat: () => void
@@ -78,6 +84,8 @@ interface AssistantState {
   discard: (turnId: string) => Promise<void>
   /** Create or throw away one note the assistant proposed for Gecko Notes. */
   decideNote: (turnId: string, noteRef: string, create: boolean) => Promise<void>
+  /** Save or throw away one recipe change the assistant proposed. */
+  decideRecipe: (turnId: string, recipeRef: string, save: boolean) => Promise<boolean>
   newProject: (turnId: string) => Promise<string | null>
   refreshAttention: () => Promise<void>
   removeChat: (id: string) => Promise<void>
@@ -142,6 +150,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => {
     focus: null,
     personas: [],
     personaId: null,
+    pendingRecipe: null,
 
     setOpen(open) {
       keep(OPEN_KEY, open ? '1' : '0')
@@ -160,6 +169,11 @@ export const useAssistantStore = create<AssistantState>((set, get) => {
 
     setPersona(id) {
       set({ personaId: id })
+    },
+
+    runRecipe(recipe) {
+      if (recipe) keep(OPEN_KEY, '1')
+      set(recipe ? { pendingRecipe: recipe, open: true } : { pendingRecipe: null })
     },
 
     async enter(scope) {
@@ -280,6 +294,23 @@ export const useAssistantStore = create<AssistantState>((set, get) => {
       }
     },
 
+    async decideRecipe(turnId, recipeRef, save) {
+      const mine = token
+      set({ error: null })
+      try {
+        await (save
+          ? assistantApi.saveRecipe(turnId, recipeRef)
+          : assistantApi.discardRecipe(turnId, recipeRef))
+        if (save) void useRecipeStore.getState().load()
+        const chat = get().chat
+        if (mine === token && chat) await reload(mine, chat.id)
+        return true
+      } catch (error) {
+        if (mine === token) set({ error: apiErrorMessage(error) })
+        return false
+      }
+    },
+
     async newProject(turnId) {
       const mine = token
       try {
@@ -368,6 +399,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => {
         focus: null,
         personas: [],
         personaId: null,
+        pendingRecipe: null,
       })
     },
   }

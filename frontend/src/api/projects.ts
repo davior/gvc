@@ -305,7 +305,7 @@ export interface VideoSpec {
   [key: string]: unknown
 }
 
-export type Origin = 'blank' | 'pasted' | 'note' | 'brief' | 'playlist'
+export type Origin = 'blank' | 'pasted' | 'note' | 'brief' | 'playlist' | 'recipe'
 
 export interface ProjectSummary {
   id: string

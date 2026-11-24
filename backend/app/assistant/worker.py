@@ -34,6 +34,7 @@ from app.models.theme import Theme
 from app import suite
 from app.providers import active_provider, build_provider
 from app.providers.base import ProviderError, Reply
+from app.services import recipes as recipe_service
 from app.services import themes as theme_service
 from app.spec.model import dump_spec
 from app.spec.validation import parse_spec
@@ -95,6 +96,7 @@ def _run(turn_id: str) -> None:
         set_fields(session, turn, status="processing", stage="Thinking", progress=0)
         user_id, project_id = turn.user_id, turn.project_id
         persona_id = turn.persona_id
+        recipe_id = turn.recipe_id
         prompt, focus = turn.prompt, turn.focus
         base = json.loads(turn.base_spec or "{}")
         history = history_for(chat, turn_id) if chat else []
@@ -159,6 +161,15 @@ def _run(turn_id: str) -> None:
         with queue.session() as session:
             themes = {t.id: {"name": t.name, "prompt": t.prompt, "is_default": t.is_default}
                       for t in theme_service.listed(session, user_id)}
+            # The list as saved when the turn starts, which is what a proposal is checked
+            # against again on Save (its updated_at), so a later hand edit isn't overwritten.
+            recipes = {}
+            for r in recipe_service.listed(session, user_id):
+                read = recipe_service.read(r)
+                recipes[r.id] = {"name": read.name, "prompt": read.prompt, "tags": read.tags,
+                                 "defaults": read.defaults.model_dump(mode="json",
+                                                                      exclude_none=True),
+                                 "updated_at": r.updated_at.isoformat()}
             if not suite.enabled():
                 provider = build_provider(session, user_id)
                 row = active_provider(session, user_id)
@@ -186,7 +197,7 @@ def _run(turn_id: str) -> None:
                           # A note is created later with the token of whoever presses its
                           # button; offering it only where there is one now keeps a dev
                           # session from being promised a note it can't make.
-                          can_note=token is not None)
+                          can_note=token is not None, recipes=recipes)
         if suite.enabled():
             # The web, through the same connection, credited to this project.
             working.web_search = lambda query: suite.web_search(connection, query, project_id)
@@ -248,7 +259,8 @@ def _run(turn_id: str) -> None:
         working.edit_theme = edit_theme
         working.remove_theme = remove_theme
         system = [REFERENCE, attached,
-                  context(base, focus=focus, from_scratch=project_id is None, themes=themes)]
+                  context(base, focus=focus, from_scratch=project_id is None, themes=themes,
+                          recipes=recipes, ran_recipe=recipe_id)]
         outcome = loop.run(provider, working, system=system, history=history, prompt=prompt,
                            images=images,
                            on_step=on_step, on_reply=on_reply,
@@ -280,7 +292,8 @@ def _run(turn_id: str) -> None:
             connection.close()
         _tokens.pop(turn_id, None)
 
-    reply = outcome.reply or ("Done." if working.changes or working.notes else "")
+    reply = outcome.reply or ("Done." if working.changes or working.notes
+                              or working.recipe_proposals else "")
     proposed = None
     if working.changes:
         canonical = _canonical(working.data)
@@ -301,7 +314,9 @@ def _run(turn_id: str) -> None:
             proposed_spec=json.dumps(proposed, ensure_ascii=False) if proposed else None,
             changes=json.dumps(working.changes if proposed else [], ensure_ascii=False),
             outcome="pending" if proposed else "",
-            proposed_notes=json.dumps(working.notes, ensure_ascii=False) if working.notes else None)
+            proposed_notes=json.dumps(working.notes, ensure_ascii=False) if working.notes else None,
+            proposed_recipes=json.dumps(working.recipe_proposals, ensure_ascii=False)
+            if working.recipe_proposals else None)
 
 
 def _finish(turn_id: str, *, message: str, steps: List[dict], **fields) -> None:
@@ -324,11 +339,13 @@ queue = JobQueue(AssistantTurn, _run, name="assistant",
 
 def submit(session: Session, chat: AssistantSession, *, user_id: str, token: Optional[str],
            prompt: str, base_spec: dict, base_version: Optional[int],
-           focus: Optional[str], persona_id: Optional[str] = None) -> AssistantTurn:
+           focus: Optional[str], persona_id: Optional[str] = None,
+           recipe_id: Optional[str] = None) -> AssistantTurn:
     turn = AssistantTurn(id=str(uuid.uuid4()), session_id=chat.id, user_id=user_id,
                          project_id=chat.project_id, prompt=prompt,
                          base_spec=json.dumps(base_spec, ensure_ascii=False),
-                         base_version=base_version, focus=focus, persona_id=persona_id)
+                         base_version=base_version, focus=focus, persona_id=persona_id,
+                         recipe_id=recipe_id)
     append_message(chat, "user", prompt, turn.id)
     if not chat.title:
         chat.title = prompt.strip().splitlines()[0][:80]

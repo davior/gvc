@@ -22,8 +22,10 @@ import { ACTIVE_TURN, type NoteProposal, type Turn, type TurnStep } from '@/api/
 import { formatCost } from '@/api/usage'
 import { suiteSpeechApi, type DictationReadiness } from '@/api/suiteSpeech'
 import { AttachControls, AttachmentList } from '@/components/AssistantAttachments'
+import { RecipeCard, RecipePicker, RecipeRunForm } from '@/components/AssistantRecipes'
 import Markdown from '@/components/Markdown'
 import { useDictation } from '@/hooks/useDictation'
+import { clockValues } from '@/recipes/variables'
 import { MAX_WIDTH, MIN_WIDTH, useAssistantStore } from '@/stores/assistant'
 import { useGenerationStore } from '@/stores/generations'
 import { useProjectStore } from '@/stores/projects'
@@ -319,6 +321,8 @@ export default function AssistantPanel() {
   const newChat = useAssistantStore((s) => s.newChat)
   const attach = useAssistantStore((s) => s.attach)
   const focus = useAssistantStore((s) => s.focus)
+  const pendingRecipe = useAssistantStore((s) => s.pendingRecipe)
+  const runRecipe = useAssistantStore((s) => s.runRecipe)
   const project = useProjectStore((s) => s.project)
   const draft = useProjectStore((s) => s.draft)
   const [prompt, setPrompt] = useState('')
@@ -379,6 +383,21 @@ export default function AssistantPanel() {
       persona_id: personaId,
     })
     if (ok) setPrompt('')
+  }
+
+  async function runPending(values: Record<string, string>) {
+    if (!pendingRecipe || sending || running) return
+    const ok = await send({
+      prompt: '',
+      recipe_id: pendingRecipe.id,
+      // The asker's own date and time, so {{date}} is theirs, not the server's.
+      recipe_inputs: { ...clockValues(), ...values },
+      draft_spec: here ? draft : null,
+      base_version: here ? here.version : null,
+      focus: here ? focus : null,
+      persona_id: personaId,
+    })
+    if (ok) runRecipe(null)
   }
 
   function startResize(e: React.MouseEvent) {
@@ -499,6 +518,13 @@ export default function AssistantPanel() {
                 Attach a script, a picture, a note or a web page with the paperclip and it
                 works from that. It keeps working if you close this page.
               </p>
+              <p>
+                Run a saved request with the book button, or ask the assistant to write or
+                change one: &ldquo;make me a recipe for 30-second product teasers&rdquo;.{' '}
+                <Link to="/recipes" className="underline">
+                  Your recipes
+                </Link>
+              </p>
             </div>
           )}
           {chat?.messages.map((m, i) => {
@@ -507,6 +533,12 @@ export default function AssistantPanel() {
               const live = turn && ACTIVE_TURN.includes(turn.status)
               return (
                 <div key={i} className="space-y-1">
+                  {turn?.recipe_id && (
+                    <p className="ml-6 text-[11px] text-gray-500">
+                      Ran the recipe{' '}
+                      {turn.recipe_name ? `“${turn.recipe_name}”` : '(since deleted)'}
+                    </p>
+                  )}
                   <div className="ml-6 rounded-lg bg-primary-600 px-3 py-2 text-white">
                     <p className="whitespace-pre-wrap">{m.text}</p>
                   </div>
@@ -546,6 +578,13 @@ export default function AssistantPanel() {
                 )}
                 {turn?.notes?.map((note) => (
                   <NoteCard key={note.note_ref} turnId={turn.id} note={note} />
+                ))}
+                {turn?.recipes?.map((proposal) => (
+                  <RecipeCard
+                    key={proposal.recipe_ref}
+                    turnId={turn.id}
+                    proposal={proposal}
+                  />
                 ))}
                 {turn?.cost != null && turn.cost > 0 && (
                   <p className="text-[11px] text-gray-400">
@@ -595,8 +634,19 @@ export default function AssistantPanel() {
             ))}
           </select>
         )}
+        {pendingRecipe && (
+          <RecipeRunForm
+            key={pendingRecipe.id}
+            recipe={pendingRecipe}
+            inProject={!!scope}
+            busy={sending || !!running || (!!scope && !here)}
+            onRun={(values) => void runPending(values)}
+            onCancel={() => runRecipe(null)}
+          />
+        )}
         <div className="flex items-end gap-2">
           <AttachControls />
+          <RecipePicker disabled={sending || !!running} />
           <textarea
             className="input max-h-40 min-h-[2.5rem] flex-1 resize-y text-sm"
             aria-label="Ask the assistant"

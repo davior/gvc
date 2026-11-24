@@ -34,7 +34,9 @@ from app.providers.base import ProviderError, ToolCall, ToolResult, ToolSpec
 from app.schemas_gam import GamAssetRead, GamDocumentPage, GamTranscript
 from app.render.estimate import estimate
 from app.services import note_media as note_files
+from app.schemas_recipes import MAX_RECIPE_NAME, MAX_RECIPE_PROMPT, RecipeDefaults
 from app.schemas_themes import MAX_THEME_NAME, MAX_THEME_PROMPT
+from app.services import recipes as recipe_rules
 from app.services.themes import theme_id_of
 from app.spec.validation import SpecIssue, parse_spec
 from app.spec.model import MAX_WEB_CANDIDATES
@@ -216,6 +218,17 @@ class Working:
     can_note: bool = False
     notes: List[Dict[str, Any]] = field(default_factory=list)
     max_notes: int = 3
+    # The user's recipes by id, as saved: {"name", "prompt", "tags", "defaults",
+    # "updated_at"}. Read by list_recipes and get_recipe, and the only ids a proposal may
+    # name, since the model chooses them.
+    recipes: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    # Changes to that list proposed this turn, each saved only by its own button
+    # (routers/assistant.py), never here: [{"recipe_ref", "op", "recipe_id", "before",
+    # "after", "fields", "base_updated_at", "state"}].
+    recipe_proposals: List[Dict[str, Any]] = field(default_factory=list)
+    # Updates are the common ask ("retag these four"), so they get more room than new ones.
+    max_recipe_proposals: int = 6
+    max_new_recipes: int = 3
 
     def __post_init__(self) -> None:
         self.data = copy.deepcopy(self.data)
@@ -1208,6 +1221,229 @@ def propose_note(w: Working, title: str, markdown: str, folder: Optional[str] = 
             "The user creates it with the button on your reply; say so, never that it exists.")
 
 
+# ── recipes ───────────────────────────────────────────────────────────────────
+
+# Told apart from an explicit null: in an update, a field left out stays as it is, and a
+# null clears it (a theme, an aspect, a voice).
+_UNSET: Any = object()
+RECIPE_OPS = ("create", "update", "delete")
+
+
+def _recipe_draft(name: str, prompt: str, tags: List[str], defaults: Dict[str, Any]
+                  ) -> Dict[str, Any]:
+    return {"name": name, "prompt": prompt, "tags": tags, "defaults": defaults,
+            "inputs": recipe_rules.inputs_of(prompt)}
+
+
+def _find_recipe(w: Working, recipe: Any) -> str:
+    """The id of one of the user's recipes, given its id or its name (any case)."""
+    if not isinstance(recipe, str) or not recipe.strip():
+        raise ToolFailed("Say which recipe, by its name or id.")
+    wanted = recipe.strip()
+    if wanted in w.recipes:
+        return wanted
+    named = [rid for rid, r in w.recipes.items()
+             if r["name"].strip().lower() == wanted.lower()]
+    if len(named) == 1:
+        return named[0]
+    if len(named) > 1:
+        raise ToolFailed(f"More than one recipe is called {wanted!r}; give its id "
+                         "(list_recipes).")
+    names = ", ".join(repr(r["name"]) for r in w.recipes.values()) or \
+        "none; the user hasn't saved any"
+    raise ToolFailed(f"No recipe {wanted!r}. The recipes are: {names}.")
+
+
+def list_recipes(w: Working, tag: Optional[str] = None) -> str:
+    """The user's recipes, enough to choose one: get_recipe has the whole prompt."""
+    tag = (tag or "").strip().lower()
+    rows = [(rid, r) for rid, r in w.recipes.items() if not tag or tag in r["tags"]]
+    if not rows:
+        return "No recipes" + (f" tagged {tag!r}." if tag else "; the user hasn't saved any.")
+    pending = {p["recipe_id"] for p in w.recipe_proposals if p.get("recipe_id")}
+    out = []
+    for rid, r in rows:
+        prompt = r["prompt"]
+        out.append({"id": rid, "name": r["name"], "tags": r["tags"],
+                    "inputs": recipe_rules.inputs_of(prompt), "defaults": r["defaults"],
+                    "prompt": prompt[:200] + ("…" if len(prompt) > 200 else ""),
+                    **({"proposed_change_pending": True} if rid in pending else {})})
+    return json.dumps(out, ensure_ascii=False)
+
+
+def get_recipe(w: Working, recipe: str) -> str:
+    """One recipe whole, so an edit is written over its real text, not a preview."""
+    rid = _find_recipe(w, recipe)
+    r = w.recipes[rid]
+    return json.dumps({"id": rid, "name": r["name"], "prompt": r["prompt"], "tags": r["tags"],
+                       "inputs": recipe_rules.inputs_of(r["prompt"]),
+                       "defaults": r["defaults"]}, ensure_ascii=False)
+
+
+def _recipe_defaults(w: Working, base: Dict[str, Any], theme: Any, aspect: Any,
+                     voice: Any) -> Dict[str, Any]:
+    """`base` with the named defaults changed: left out stays, null (or "none") clears."""
+    out = dict(base)
+    if theme is not _UNSET:
+        if theme is None or (isinstance(theme, str) and theme.strip().lower() in ("", "none")):
+            out.pop("theme_id", None)
+        else:
+            out["theme_id"] = _find_theme(w, theme)
+    if aspect is not _UNSET:
+        if aspect is None or aspect == "":
+            out.pop("aspect", None)
+        else:
+            out["aspect"] = aspect
+    if voice is not _UNSET:
+        if voice is None or voice == "":
+            out.pop("voice", None)
+        else:
+            if isinstance(voice, str):
+                voice = {"voice": voice}
+            if not isinstance(voice, dict):
+                raise ToolFailed("voice is an object: {provider, voice, speed, expressivity}.")
+            out["voice"] = {**(out.get("voice") or {}), **voice}
+    try:
+        checked = RecipeDefaults.model_validate(out)
+    except ValueError as exc:
+        raise ToolFailed(f"Those defaults aren't valid: {exc}. aspect is 16:9, 9:16 or 1:1; "
+                         "voice is {provider, voice, speed (0.5-2), expressivity (-2..2)}."
+                         ) from exc
+    return checked.model_dump(mode="json", exclude_none=True)
+
+
+def _recipe_text(name: Any, prompt: Any) -> None:
+    if name is not _UNSET and (not isinstance(name, str) or not name.strip()
+                               or len(name.strip()) > MAX_RECIPE_NAME):
+        raise ToolFailed(f"A recipe's name is 1 to {MAX_RECIPE_NAME} characters.")
+    if prompt is not _UNSET and (not isinstance(prompt, str) or not prompt.strip()
+                                 or len(prompt.strip()) > MAX_RECIPE_PROMPT):
+        raise ToolFailed(f"A recipe's prompt is 1 to {MAX_RECIPE_PROMPT} characters.")
+
+
+def _recipe_tags(tags: Any) -> List[str]:
+    if isinstance(tags, str):
+        tags = tags.split(",")
+    if not isinstance(tags, list):
+        raise ToolFailed("tags is a list of short words.")
+    return recipe_rules.clean_tags(tags)
+
+
+def _name_taken(w: Working, name: str, other_than: Optional[str]) -> bool:
+    return any(r["name"].strip().lower() == name.lower()
+               for rid, r in w.recipes.items() if rid != other_than)
+
+
+def _hold(w: Working, entry: Dict[str, Any], replacing: Optional[Dict[str, Any]]) -> None:
+    if replacing is not None:
+        entry["recipe_ref"] = replacing["recipe_ref"]
+        w.recipe_proposals[w.recipe_proposals.index(replacing)] = entry
+        return
+    if len(w.recipe_proposals) >= w.max_recipe_proposals:
+        raise ToolFailed(f"That's the {w.max_recipe_proposals} recipe changes one request "
+                         "may propose. Tell the user what is left to do.")
+    w.recipe_proposals.append(entry)
+
+
+_SAVE_HINT = ("The user saves it with the button on your reply; say so, never that it is "
+              "saved.")
+
+
+def propose_recipe(w: Working, op: str, recipe: Optional[str] = None, name: Any = _UNSET,
+                   prompt: Any = _UNSET, tags: Any = _UNSET, theme: Any = _UNSET,
+                   aspect: Any = _UNSET, voice: Any = _UNSET) -> str:
+    """Propose a new recipe, a change to one, or deleting one. Nothing is saved here.
+
+    Not a change to the video, so it is kept apart from `w.changes`: a turn may propose an
+    edit, a recipe, or both, and each is decided on its own. Proposing for the same recipe
+    again rewrites the card rather than adding a second, and an update builds on the one
+    already pending, so a model refining its own edit ends with one card holding all of it.
+    """
+    if op not in RECIPE_OPS:
+        raise ToolFailed("op is create, update or delete.")
+    _recipe_text(name, prompt)
+
+    if op == "create":
+        if name is _UNSET or prompt is _UNSET:
+            raise ToolFailed("A new recipe needs a name and a prompt.")
+        name, prompt = name.strip(), prompt.strip()
+        if _name_taken(w, name, None):
+            raise ToolFailed(f"There is already a recipe called {name!r}; propose an update "
+                             "to it (op update), or choose another name.")
+        held = next((p for p in w.recipe_proposals if p["op"] == "create"
+                     and p["after"]["name"].lower() == name.lower()), None)
+        if held is None and sum(p["op"] == "create" for p in w.recipe_proposals) \
+                >= w.max_new_recipes:
+            raise ToolFailed(f"That's the {w.max_new_recipes} new recipes one request may "
+                             "propose.")
+        defaults = _recipe_defaults(w, {}, theme, aspect, voice)
+        after = _recipe_draft(name, prompt, _recipe_tags([] if tags is _UNSET else tags),
+                              defaults)
+        _hold(w, {"recipe_ref": uuid.uuid4().hex, "op": "create", "recipe_id": None,
+                  "before": None, "after": after, "fields": [], "base_updated_at": None,
+                  "state": "pending"}, held)
+        inputs = ", ".join(after["inputs"]) or "none"
+        return f"Proposed the new recipe {name!r} (inputs: {inputs}). {_SAVE_HINT}"
+
+    # A recipe this turn proposed creating isn't saved yet, so changing or deleting it
+    # changes or withdraws that proposal.
+    made = _pending_create(w, recipe)
+    if made is not None:
+        if op == "delete":
+            w.recipe_proposals.remove(made)
+            return f"Withdrew the proposed recipe {made['after']['name']!r}."
+        a = made["after"]
+        new_name = a["name"] if name is _UNSET else name.strip()
+        if _name_taken(w, new_name, None):
+            raise ToolFailed(f"There is already a recipe called {new_name!r}.")
+        made["after"] = _recipe_draft(
+            new_name, a["prompt"] if prompt is _UNSET else prompt.strip(),
+            a["tags"] if tags is _UNSET else _recipe_tags(tags),
+            _recipe_defaults(w, a["defaults"], theme, aspect, voice))
+        return f"Changed the proposed new recipe {new_name!r}. {_SAVE_HINT}"
+
+    rid = _find_recipe(w, recipe)
+    saved = w.recipes[rid]
+    before = _recipe_draft(saved["name"], saved["prompt"], list(saved["tags"]),
+                           dict(saved["defaults"]))
+    held = next((p for p in w.recipe_proposals if p.get("recipe_id") == rid), None)
+
+    if op == "delete":
+        _hold(w, {"recipe_ref": uuid.uuid4().hex, "op": "delete", "recipe_id": rid,
+                  "before": before, "after": None, "fields": [],
+                  "base_updated_at": saved["updated_at"], "state": "pending"}, held)
+        return f"Proposed deleting the recipe {saved['name']!r}. {_SAVE_HINT}"
+
+    if all(v is _UNSET for v in (name, prompt, tags, theme, aspect, voice)):
+        raise ToolFailed("Say what to change: name, prompt, tags, theme, aspect or voice.")
+    # Built on the pending update, if any, so a second call adds to the first.
+    start = held["after"] if held is not None and held["op"] == "update" else before
+    new_name = start["name"] if name is _UNSET else name.strip()
+    if _name_taken(w, new_name, rid):
+        raise ToolFailed(f"There is already a recipe called {new_name!r}.")
+    after = _recipe_draft(new_name, start["prompt"] if prompt is _UNSET else prompt.strip(),
+                          start["tags"] if tags is _UNSET else _recipe_tags(tags),
+                          _recipe_defaults(w, start["defaults"], theme, aspect, voice))
+    changed = [f for f in ("name", "prompt", "tags", "defaults") if after[f] != before[f]]
+    if not changed:
+        raise ToolFailed(f"That leaves the recipe {saved['name']!r} as it is.")
+    _hold(w, {"recipe_ref": uuid.uuid4().hex, "op": "update", "recipe_id": rid,
+              "before": before, "after": after, "fields": changed,
+              "base_updated_at": saved["updated_at"], "state": "pending"}, held)
+    return (f"Proposed changing the recipe {saved['name']!r}: {', '.join(changed)}. "
+            f"{_SAVE_HINT}")
+
+
+def _pending_create(w: Working, recipe: Any) -> Optional[Dict[str, Any]]:
+    """The create proposed this turn that `recipe` names, when it names no saved one."""
+    if not isinstance(recipe, str) or not recipe.strip():
+        return None
+    wanted = recipe.strip()
+    if wanted in w.recipes or _name_taken(w, wanted, None):
+        return None
+    return next((p for p in w.recipe_proposals if p["op"] == "create"
+                 and p["after"]["name"].lower() == wanted.lower()), None)
+
 def web_search(w: Working, query: str) -> str:
     query = (query or "").strip()
     if not query:
@@ -1532,6 +1768,37 @@ TOOLS: List[Tuple[ToolSpec, Callable[..., str]]] = [
                   "folder": {"type": "string",
                              "description": "Only when the user names a folder."}},
                "required": ["title", "markdown"]}), propose_note),
+    (ToolSpec("list_recipes",
+              "The user's recipes: saved requests with {{inputs}} they run to make or change "
+              "a video. Each has its id, name, tags, inputs, defaults and the start of its "
+              "prompt. tag: only those with that tag.",
+              {"type": "object", "properties": {"tag": _STR}}), list_recipes),
+    (ToolSpec("get_recipe", "One of the user's recipes whole, by name or id: read it before "
+              "proposing a change to its prompt.",
+              {"type": "object", "properties": {"recipe": _STR}, "required": ["recipe"]}),
+     get_recipe),
+    (ToolSpec("propose_recipe",
+              "Propose a change to the user's recipe list: a new recipe (op create, with name "
+              "and prompt), a change to one (op update: recipe, and only the fields that "
+              "change; null clears theme, aspect or voice), or deleting one (op delete: "
+              "recipe). Nothing is saved until the user presses the button on your reply. It "
+              "does not change the video. Only when the user asks about recipes.",
+              {"type": "object", "properties": {
+                  "op": {"type": "string", "enum": list(RECIPE_OPS)},
+                  "recipe": {"type": "string",
+                             "description": "update and delete: its name or id"},
+                  "name": _STR,
+                  "prompt": {"type": "string",
+                             "description": "The whole request, standing alone. {{name}} for "
+                             "what changes between runs; {{title}}, {{date}} fill themselves."},
+                  "tags": {"type": "array", "items": _STR},
+                  "theme": {"type": ["string", "null"],
+                            "description": "A theme's name or id for videos made from it"},
+                  "aspect": {"type": ["string", "null"], "enum": ["16:9", "9:16", "1:1", None]},
+                  "voice": {"type": ["object", "null"], "properties": {
+                      "provider": _STR, "voice": _STR, "speed": _NUM,
+                      "expressivity": {"type": "integer"}}}},
+               "required": ["op"]}), propose_recipe),
     (ToolSpec("web_search", "Search the web, for what the library cannot say: a fact for the "
               "script, who someone is, when something happened. Returns titles, links and short "
               "passages. Say where a fact came from; it is not a way to find footage (use "
@@ -1559,7 +1826,7 @@ _HANDLERS = {spec.name: handler for spec, handler in TOOLS}
 
 # Read-only tools, which neither change the video nor count as an edit in the steps.
 READS = {"get_spec", "search_assets", "read_transcript", "read_document", "find_clips",
-         "get_asset", "estimate", "web_search"}
+         "get_asset", "estimate", "web_search", "list_recipes", "get_recipe"}
 
 
 def specs_for(w: Working) -> List[ToolSpec]:
