@@ -70,10 +70,25 @@ describe('generation store', () => {
     })
     expect(use).toHaveBeenCalledWith('g', 'x1')
 
-    // Discarded, it stays out: the row says it was used.
+    // Discarded, it goes back in: a placeholder with a finished picture is never left
+    // empty. It is recorded only the once.
     projects.discard()
-    await useGenerationStore.getState().load('p')
+    await useGenerationStore.getState().fill()
+    expect(useProjectStore.getState().draft?.assets?.a_dam).toMatchObject({
+      result: { from: 'gam', id: 'x1' },
+    })
     expect(use).toHaveBeenCalledTimes(1)
+  })
+
+  it('fills a placeholder whose picture was lost from the draft, with the one chosen', async () => {
+    vi.spyOn(generationsApi, 'list').mockResolvedValue([generation({ used_id: 'x2' })])
+    const use = vi.spyOn(generationsApi, 'use')
+    await useGenerationStore.getState().load('p')
+    expect(useProjectStore.getState().draft?.assets?.a_dam).toMatchObject({
+      status: 'ready',
+      result: { from: 'gam', id: 'x2' },
+    })
+    expect(use).not.toHaveBeenCalled()
   })
 
   it('switches to another output', async () => {

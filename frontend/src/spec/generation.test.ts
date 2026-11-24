@@ -5,6 +5,7 @@ import { gamIdsIn } from '@/spec/footage'
 import {
   dollars,
   estimateCost,
+  fillFinished,
   fillGenerated,
   latestByKey,
   unmadeGenerates,
@@ -47,6 +48,32 @@ describe('generated assets in a spec', () => {
     expect(unmadeGenerates(next).map((p) => p.key)).toEqual(['a_song'])
     expect(gamIdsIn(next)).toEqual(['x1'])
     expect(fillGenerated(spec, 'a_nope', 'x1')).toBe(spec)
+  })
+
+  it('fills empty placeholders from finished generations, and only those', () => {
+    type Rows = Parameters<typeof fillFinished>[1]
+    const rows = [
+      {
+        id: '1',
+        asset_key: 'a_dam',
+        status: 'done',
+        result_ids: ['x1', 'x2'],
+        used_id: 'x2',
+      },
+      // A later run that failed doesn't hide the earlier one's pictures.
+      { id: '2', asset_key: 'a_dam', status: 'error', result_ids: [], used_id: null },
+      { id: '3', asset_key: 'a_gone', status: 'done', result_ids: ['y1'], used_id: null },
+    ] as Rows
+    const { spec: filled, filled: made } = fillFinished(spec, rows)
+    expect(filled.assets?.a_dam).toMatchObject({ result: { from: 'gam', id: 'x2' } })
+    expect(made.map((f) => [f.row.id, f.assetId])).toEqual([['1', 'x2']])
+    expect(unmadeGenerates(filled).map((u) => u.key)).toEqual(['a_song'])
+
+    // Already filled: left as it is.
+    expect(fillFinished(filled, rows).filled).toEqual([])
+    // Still running: nothing yet.
+    const running = [{ ...rows[0], status: 'processing', result_ids: [] }] as Rows
+    expect(fillFinished(spec, running).filled).toEqual([])
   })
 
   it('takes the latest generation of each placeholder', () => {

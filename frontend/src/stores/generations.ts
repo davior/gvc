@@ -7,7 +7,7 @@ import {
   type GenerationModel,
   type GenerationStart,
 } from '@/api/generations'
-import { fillGenerated } from '@/spec/generation'
+import { fillFinished, fillGenerated } from '@/spec/generation'
 import { useProjectStore } from '@/stores/projects'
 
 /**
@@ -15,9 +15,10 @@ import { useProjectStore } from '@/stores/projects'
  *
  * Polled every few seconds while any runs: each read of the list is also what makes
  * GVC catch up with GAM, so the poll is the only thing following them. A finished one
- * whose output isn't in the video yet is put into the editor's draft, and that choice
- * recorded, so it lands once: after that, Discard drops it like any other edit, and
- * the placeholder offers the outputs again.
+ * is put into the editor's draft whenever the draft's placeholder is empty (`fill`,
+ * which the editor also calls on every change of draft), and the output recorded as
+ * used the first time. Putting it in only once, as this used to, lost the picture for
+ * good whenever that draft wasn't the one saved.
  */
 
 const POLL_MS = 3000
@@ -33,6 +34,8 @@ interface GenerationState {
   loadModels: () => Promise<void>
   start: (body: GenerationStart) => Promise<boolean>
   cancel: (id: string) => Promise<void>
+  /** Put every finished, unplaced output into the draft's empty placeholders. */
+  fill: () => Promise<void>
   /** Put this output in the video in place of the one there. */
   choose: (id: string, assetId: string) => Promise<void>
   reset: () => void
@@ -61,15 +64,18 @@ export const useGenerationStore = create<GenerationState>((set, get) => {
   }
 
   async function settle(mine: number) {
-    const fresh = get().rows.filter(
-      (r) => r.status === 'done' && r.result_ids.length > 0 && !r.used_id
-    )
-    if (fresh.length === 0) return
-    void useProjectStore.getState().loadGamAssets(fresh.flatMap((r) => r.result_ids))
-    for (const row of fresh) {
-      if (!putInDraft(row, row.result_ids[0])) continue
+    const projects = useProjectStore.getState()
+    const draft = projects.draft
+    if (!draft || projects.project?.id !== get().projectId) return
+    const { spec, filled } = fillFinished(draft, get().rows)
+    if (filled.length === 0) return
+    // Every output, not just the one placed: the others are offered as alternatives.
+    void projects.loadGamAssets(filled.flatMap((f) => f.row.result_ids))
+    projects.edit(spec)
+    for (const { row, assetId } of filled) {
+      if (row.used_id === assetId) continue
       try {
-        const used = await generationsApi.use(row.id, row.result_ids[0])
+        const used = await generationsApi.use(row.id, assetId)
         if (mine !== token) return
         replace(used)
       } catch {
@@ -160,6 +166,10 @@ export const useGenerationStore = create<GenerationState>((set, get) => {
       } catch (error) {
         if (mine === token) set({ error: apiErrorMessage(error) })
       }
+    },
+
+    async fill() {
+      await settle(token)
     },
 
     async choose(id, assetId) {

@@ -33,6 +33,38 @@ export function fillGenerated(spec: VideoSpec, key: string, assetId: string): Vi
   }
 }
 
+/**
+ * Every empty placeholder that a finished generation has outputs for, filled: with the
+ * output already chosen for it, else the first. The newest finished run for each key
+ * wins, so a later "Try again" that failed doesn't hide the pictures an earlier one made.
+ *
+ * Keyed on the spec rather than on whether the row was used before: a draft that lost
+ * its picture (discarded, left unsaved, replaced by an assistant proposal written
+ * against the saved version) would otherwise keep the placeholder "still to make" for
+ * good, with the picture sitting unused in GAM.
+ */
+export function fillFinished(
+  spec: VideoSpec,
+  rows: Generation[]
+): { spec: VideoSpec; filled: { row: Generation; assetId: string }[] } {
+  const done: Record<string, Generation> = {}
+  for (const row of rows)
+    if (row.status === 'done' && row.result_ids.length > 0) done[row.asset_key] = row
+  const filled: { row: Generation; assetId: string }[] = []
+  let next = spec
+  for (const { key } of unmadeGenerates(spec)) {
+    const row = done[key]
+    if (!row) continue
+    const assetId =
+      row.used_id && row.result_ids.includes(row.used_id)
+        ? row.used_id
+        : row.result_ids[0]
+    next = fillGenerated(next, key, assetId)
+    filled.push({ row, assetId })
+  }
+  return { spec: next, filled }
+}
+
 /** The latest generation for each placeholder. The list comes oldest first. */
 export function latestByKey(rows: Generation[]): Record<string, Generation> {
   const latest: Record<string, Generation> = {}
