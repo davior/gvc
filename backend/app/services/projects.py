@@ -137,6 +137,12 @@ def save(session: Session, project: Project, spec: VideoSpec, *, message: str) -
     return _commit_spec(session, project, spec, author="user", message=message or "Edited")
 
 
+def save_generated(session: Session, project: Project, spec: VideoSpec, *, author: str,
+                   message: str) -> ProjectVersion:
+    """Finished generations put into their placeholders (`generation.service.fill_saved`)."""
+    return _commit_spec(session, project, spec, author=author, message=message)
+
+
 def versions(session: Session, project: Project, *, limit: int, offset: int) -> Tuple[List[ProjectVersion], int]:
     total = session.exec(
         select(func.count()).select_from(ProjectVersion).where(ProjectVersion.project_id == project.id)

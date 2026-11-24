@@ -15,7 +15,10 @@ from app.generation.catalogue import (
     CatalogueError, default_params, estimate, kind_for, pick_model, project_models, target_size,
 )
 from app.models.generation import Generation
+from app.models.project import Project
+from app.services import projects as project_service
 from app.services import themes
+from app.spec.validation import parse_spec
 
 logger = logging.getLogger(__name__)
 
@@ -207,6 +210,54 @@ def refresh(session: Session, gam: GamClient, rows: List[Generation]) -> None:
         changed = True
     if changed:
         session.commit()
+
+
+def fill_saved(session: Session, project: Project, rows: List[Generation]) -> bool:
+    """Put every finished generation into the saved video's empty placeholder, as one new
+    version. True when it wrote one.
+
+    The saved video, not only the editor's draft: a picture that landed only in a draft
+    was lost with it (a draft discarded, a page left while the picture was still being
+    made, a proposal applied over it), and its placeholder stayed "still to make" for
+    good. Only empty placeholders are filled, so nothing a person chose is replaced, and
+    one only in an unsaved draft is left to the editor, which fills the draft the same way.
+    """
+    done: Dict[str, Generation] = {}
+    for row in rows:
+        if row.status == "done" and json.loads(row.result_ids or "[]"):
+            done[row.asset_key] = row  # oldest first, so the newest finished run wins
+    if not done:
+        return False
+    data = project_service.decode(project.spec)
+    assets = data.get("assets") or {}
+    filled: List[Generation] = []
+    for key, row in done.items():
+        ref = assets.get(key)
+        if not isinstance(ref, dict) or ref.get("from") != "generate" or ref.get("result"):
+            continue
+        ids = json.loads(row.result_ids)
+        chosen = row.used_id if row.used_id in ids else ids[0]
+        assets[key] = {**ref, "status": "ready", "result": {"from": "gam", "id": chosen}}
+        row.used_id = chosen
+        session.add(row)
+        filled.append(row)
+    if not filled:
+        return False
+    spec, issues = parse_spec(data)
+    if spec is None:
+        # The stored spec was valid a moment ago and only results were added; if that
+        # somehow fails, leave it to the editor rather than fail the read.
+        logger.warning("Could not fill generated pictures into %s: %s", project.id, issues)
+        session.rollback()
+        return False
+    names = ", ".join(repr(r.prompt[:40]) for r in filled[:3])
+    more = f" and {len(filled) - 3} more" if len(filled) > 3 else ""
+    project_service.save_generated(
+        session, project, spec,
+        # Whoever started them: the assistant's pictures are its change, the rest the user's.
+        author="ai" if all(r.turn_id for r in filled) else "user",
+        message=f"Generated {'picture' if len(filled) == 1 else 'pictures'} put in: {names}{more}")
+    return True
 
 
 def cancel(session: Session, gam: GamClient, row: Generation) -> None:

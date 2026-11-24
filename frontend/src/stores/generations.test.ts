@@ -91,6 +91,41 @@ describe('generation store', () => {
     expect(use).not.toHaveBeenCalled()
   })
 
+  it('loads the version the server saved the picture into, leaving the draft unedited', async () => {
+    const saved: Project = {
+      ...project,
+      version: 2,
+      spec: {
+        ...project.spec,
+        assets: {
+          a_dam: {
+            from: 'generate',
+            type: 'image',
+            prompt: 'A dam',
+            status: 'ready',
+            result: { from: 'gam', id: 'x1' },
+          },
+        },
+      },
+    }
+    vi.spyOn(projectsApi, 'get').mockResolvedValue(saved)
+    vi.spyOn(projectsApi, 'versions').mockResolvedValue({
+      data: [],
+      total: 0,
+      limit: 50,
+      offset: 0,
+    })
+    vi.spyOn(generationsApi, 'list').mockResolvedValue([generation({ used_id: 'x1' })])
+    const use = vi.spyOn(generationsApi, 'use')
+    await useGenerationStore.getState().load('p')
+
+    const projects = useProjectStore.getState()
+    expect(projects.dirty).toBe(false)
+    expect(projects.project?.version).toBe(2)
+    expect(projects.draft?.assets?.a_dam).toMatchObject({ result: { id: 'x1' } })
+    expect(use).not.toHaveBeenCalled()
+  })
+
   it('switches to another output', async () => {
     vi.spyOn(generationsApi, 'list').mockResolvedValue([generation({ used_id: 'x1' })])
     const use = vi

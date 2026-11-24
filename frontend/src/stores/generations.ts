@@ -63,14 +63,27 @@ export const useGenerationStore = create<GenerationState>((set, get) => {
     return true
   }
 
-  async function settle(mine: number) {
-    const projects = useProjectStore.getState()
+  async function settle(mine: number, fromServer = false) {
+    let projects = useProjectStore.getState()
+    if (!projects.draft || projects.project?.id !== get().projectId) return
+    if (fillFinished(projects.draft, get().rows).filled.length === 0) return
+    // Every output, not just the one placed: the others are offered as alternatives.
+    // The store fetches only the ones it hasn't got.
+    void projects.loadGamAssets(
+      get().rows.flatMap((r) => (r.status === 'done' ? r.result_ids : []))
+    )
+    // Reading the list saved the finished ones into the video (the server's
+    // `fill_saved`), so load that version first: an unedited draft then needs nothing
+    // filled and stays unedited. Only a draft with edits of its own is filled here.
+    if (fromServer) {
+      await projects.reload()
+      if (mine !== token) return
+      projects = useProjectStore.getState()
+    }
     const draft = projects.draft
     if (!draft || projects.project?.id !== get().projectId) return
     const { spec, filled } = fillFinished(draft, get().rows)
     if (filled.length === 0) return
-    // Every output, not just the one placed: the others are offered as alternatives.
-    void projects.loadGamAssets(filled.flatMap((f) => f.row.result_ids))
     projects.edit(spec)
     for (const { row, assetId } of filled) {
       if (row.used_id === assetId) continue
@@ -94,7 +107,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => {
         const rows = await generationsApi.list(projectId)
         if (mine !== token) return
         set({ rows })
-        await settle(mine)
+        await settle(mine, true)
       } catch (error) {
         if (mine !== token) return
         set({ error: apiErrorMessage(error) })
@@ -121,7 +134,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => {
         // Old outputs need their pictures for the alternatives, not only new ones.
         const made = rows.flatMap((r) => r.result_ids)
         if (made.length) void useProjectStore.getState().loadGamAssets(made)
-        await settle(mine)
+        await settle(mine, true)
         poll(mine)
       } catch (error) {
         if (mine !== token) return
