@@ -3,14 +3,18 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from app.schemas_recipes import MAX_INPUT_CHARS, RecipeDefaults
 
 
 class TurnCreate(BaseModel):
     # None: continue in a new session (for this project, or for a new video).
     session_id: Optional[str] = None
     project_id: Optional[str] = None
-    prompt: str = Field(min_length=1, max_length=20_000)
+    # What to ask. With `recipe_id` it may be empty: the recipe's prompt, filled in, is
+    # what is asked, and the server fills it in so every client asks the same thing.
+    prompt: str = Field(default="", max_length=20_000)
     # The editor's draft, unsaved edits included. Absent: the saved version (or, with
     # no project, a blank starter).
     draft_spec: Optional[Dict[str, Any]] = None
@@ -21,6 +25,19 @@ class TurnCreate(BaseModel):
     # One of the suite's personas (`GET /assistant/personas`), or none. The suite is the
     # authority on whether it exists: an unknown one ends the turn with the suite's sentence.
     persona_id: Optional[str] = Field(default=None, max_length=64)
+    # Run one of the user's recipes, with these values for its inputs (names match
+    # loosely). `date` and `time` may come in here too, from the asker's own clock.
+    recipe_id: Optional[str] = Field(default=None, max_length=64)
+    recipe_inputs: Dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _something_to_ask(self) -> "TurnCreate":
+        if not self.recipe_id and not self.prompt.strip():
+            raise ValueError("Say what to do, or run a recipe")
+        if len(self.recipe_inputs) > 50 or any(
+                len(k) > 100 or len(v) > MAX_INPUT_CHARS for k, v in self.recipe_inputs.items()):
+            raise ValueError(f"A recipe input is at most {MAX_INPUT_CHARS} characters")
+        return self
 
 
 class PersonaRead(BaseModel):
@@ -48,6 +65,28 @@ class NoteProposalRead(BaseModel):
     note_url: Optional[str] = None  # once created: the note's page in Gecko Notes
 
 
+class RecipeDraft(BaseModel):
+    """A recipe as a proposal shows it: the whole of it, before or after."""
+
+    name: str = ""
+    prompt: str = ""
+    tags: List[str] = []
+    defaults: RecipeDefaults = Field(default_factory=RecipeDefaults)
+    inputs: List[str] = []
+
+
+class RecipeProposalRead(BaseModel):
+    """A change to the user's recipe list the assistant proposed, saved only by its button."""
+
+    recipe_ref: str
+    op: str                          # create | update | delete
+    recipe_id: Optional[str] = None  # the recipe changed; for a create, once saved
+    before: Optional[RecipeDraft] = None   # update and delete: as it was when proposed
+    after: Optional[RecipeDraft] = None    # create and update: as it will be
+    fields: List[str] = []           # update: which fields change
+    state: str = "pending"           # pending | saved | discarded
+
+
 class TurnRead(BaseModel):
     id: str
     session_id: str
@@ -64,6 +103,10 @@ class TurnRead(BaseModel):
     changes: List[str] = []
     outcome: str = ""
     notes: List[NoteProposalRead] = []
+    recipes: List[RecipeProposalRead] = []
+    # The recipe this turn ran, if any, and its name as it is now (None once deleted).
+    recipe_id: Optional[str] = None
+    recipe_name: Optional[str] = None
     base_version: Optional[int] = None
     persona_id: Optional[str] = None
     cost: Optional[float] = None

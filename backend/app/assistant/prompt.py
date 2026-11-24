@@ -18,6 +18,9 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Optional
 
+from app.schemas_recipes import RecipeDefaults
+from app.services.recipes import describe_defaults
+
 REFERENCE = """\
 You are the editor inside Gecko Video Creator (GVC), working with the user on one narrated \
 video. You can build a video from nothing, from a brief, or from material in their asset \
@@ -197,6 +200,20 @@ asking for edits; make none unless also asked. The user creates the note with th
 under your reply: say what it contains, never that it has been created. Name a folder only \
 if the user did.
 
+## Recipes
+A recipe is one of the user's saved requests, run again whenever they want a video of that \
+kind: a prompt with `{{inputs}}` filled in each time (`{{topic}}`, `{{audience}}`), and \
+optional defaults (a theme, an aspect, a voice) that a new video made from it starts with. \
+When the user asks to make, change or delete a recipe, use `propose_recipe`; for a change, \
+read the recipe with `get_recipe` first and name only the fields that change. Nothing is \
+saved until they press the button under your reply, so say what you proposed, never that it \
+is saved. A recipe's prompt must stand alone, as if typed fresh with no conversation behind \
+it: never "the video above" or "as we discussed". Put what changes between runs in \
+`{{inputs}}` with clear names, use `{{title}}` and `{{date}}` where useful (they fill \
+themselves), and keep tags short and lowercase. Asking for a recipe is not asking for a \
+video: make no edits to the video unless also asked. Only touch the recipes the user means; \
+when it isn't clear which, ask.
+
 ## Pacing
 Narration reads at about 15 characters a second. A 3-minute video is about 2,500 characters \
 of narration over 10-20 segments. Keep beats to one or two sentences each so pictures can \
@@ -249,9 +266,33 @@ def _theme_lines(data: Dict[str, Any], themes: Dict[str, Dict[str, str]]) -> str
     return "Themes (style.theme; the text is what each adds to a prompt):\n" + "\n".join(lines)
 
 
+def _recipe_lines(recipes: Dict[str, Dict[str, Any]]) -> str:
+    if not recipes:
+        return "Recipes: the user has none saved."
+    lines = [f"- {r['name']} (id {rid})" + (f" [{', '.join(r['tags'])}]" if r["tags"] else "")
+             for rid, r in recipes.items()]
+    return ("Recipes (list_recipes and get_recipe have the rest):\n" + "\n".join(lines))
+
+
+def _ran_recipe_lines(recipe: Dict[str, Any], themes: Dict[str, Dict[str, str]],
+                      from_scratch: bool) -> str:
+    said = describe_defaults(RecipeDefaults.model_validate(recipe["defaults"]),
+                             {tid: t["name"] for tid, t in themes.items()})
+    line = f"This request is the user's recipe {recipe['name']!r}, filled in."
+    if said and from_scratch:
+        line += f" The working copy already has its defaults ({said}); keep them."
+    elif said:
+        # Never applied to a video that exists: its format is the user's, not the recipe's.
+        line += (f" Its defaults ({said}) are for new videos and have not been applied "
+                 "here; change those settings only if the request asks for it.")
+    return line
+
+
 def context(data: Dict[str, Any], *, focus: Optional[str], from_scratch: bool,
             attached: Optional[str] = None,
-            themes: Optional[Dict[str, Dict[str, str]]] = None) -> str:
+            themes: Optional[Dict[str, Dict[str, str]]] = None,
+            recipes: Optional[Dict[str, Dict[str, Any]]] = None,
+            ran_recipe: Optional[str] = None) -> str:
     """This project, for this turn."""
     parts = []
     if from_scratch:
@@ -264,7 +305,10 @@ def context(data: Dict[str, Any], *, focus: Optional[str], from_scratch: bool,
                      + (f" ({label})" if label else ""))
     if attached:
         parts.append("The user attached these library assets to start from:\n" + attached)
+    if ran_recipe and recipes and ran_recipe in recipes:
+        parts.append(_ran_recipe_lines(recipes[ran_recipe], themes or {}, from_scratch))
     parts.append(_theme_lines(data, themes or {}))
+    parts.append(_recipe_lines(recipes or {}))
     parts.append("Asset registry:\n" + _registry_lines(data))
     parts.append("The video now (VideoSpec JSON):\n"
                  + json.dumps(data, ensure_ascii=False, separators=(",", ":")))

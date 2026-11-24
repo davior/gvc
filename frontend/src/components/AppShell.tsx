@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { LogOut, Moon, Settings, Sun } from 'lucide-react'
+import { BookOpen, LogOut, Moon, Settings, Sun } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import AssistantMarker from '@/components/AssistantMarker'
 import AssistantPanel from '@/components/AssistantPanel'
@@ -41,6 +41,14 @@ export default function AppShell({ children }: Props) {
 
           <div className="ml-auto flex items-center gap-3">
             {user && <AssistantMarker />}
+            <Link
+              to="/recipes"
+              className="btn btn-ghost p-2"
+              aria-label="Recipes"
+              title="Recipes"
+            >
+              <BookOpen className="h-4 w-4" />
+            </Link>
             <Link
               to="/settings"
               className="btn btn-ghost p-2"

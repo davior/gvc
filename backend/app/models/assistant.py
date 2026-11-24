@@ -74,6 +74,14 @@ class AssistantTurn(SQLModel, table=True):
     # the video, so it is made by its own button (routers/assistant.py), never by loading
     # the spec into the editor.
     proposed_notes: Optional[str] = None
+    # The recipe this turn ran, if any (a run is an ordinary turn whose prompt is the
+    # recipe's, filled in). No foreign key: deleting the recipe leaves the turn as it was.
+    recipe_id: Optional[str] = None
+    # JSON: recipes proposed for the user's list, each decided on its own by its own
+    # button, as notes are: [{"recipe_ref", "op": "create"|"update"|"delete", "recipe_id",
+    # "before", "after", "fields", "base_updated_at", "state": "pending"|"saved"|
+    # "discarded", "saved_id"}]. None when the turn proposed none.
+    proposed_recipes: Optional[str] = None
     cost: Optional[float] = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)

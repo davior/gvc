@@ -27,27 +27,37 @@ from app.providers import active_provider
 from app.schemas import DataResponse, ListResponse
 from app.schemas_assistant import (
     AttachmentRead, Message, NewProjectRead, NoteAttach, NoteChoice, NoteProposalRead, SessionCreate,
-    PersonaRead, SessionRead, SessionSummary, Step, TurnCreate, TurnRead, UrlAttach,
+    PersonaRead, RecipeProposalRead, SessionRead, SessionSummary, Step, TurnCreate, TurnRead,
+    UrlAttach,
 )
+from app.models.recipe import Recipe
+from app.schemas_recipes import MAX_RECIPE_PROMPT, RecipeDefaults
 from app.services import projects as project_service
+from app.services import recipes as recipe_service
 from app.services import themes
 from app.services.users import ensure_user
-from app.spec.model import BriefSource, dump_spec
+from app.spec.model import BriefSource, RecipeRef, dump_spec
 from app.spec.starter import starter_spec
 from app.spec.validation import parse_spec
 
 router = APIRouter()
 
 
-def _turn_read(turn: AssistantTurn) -> TurnRead:
+def _turn_read(turn: AssistantTurn, session: Session) -> TurnRead:
     proposal = json.loads(turn.proposed_spec) if turn.proposed_spec and \
         turn.outcome == "pending" else None
+    recipe = session.get(Recipe, turn.recipe_id) if turn.recipe_id else None
     return TurnRead(
         id=turn.id, session_id=turn.session_id, project_id=turn.project_id, status=turn.status,
         stage=turn.stage, detail=turn.detail, error=turn.error_message, prompt=turn.prompt,
         steps=[Step(**s) for s in json.loads(turn.steps or "[]")], reply=turn.reply,
         proposed_spec=proposal, changes=json.loads(turn.changes or "[]"), outcome=turn.outcome,
         notes=[NoteProposalRead(**n) for n in json.loads(turn.proposed_notes or "[]")],
+        recipes=[RecipeProposalRead(**{k: v for k, v in r.items() if k != "base_updated_at"})
+                 for r in json.loads(turn.proposed_recipes or "[]")],
+        recipe_id=turn.recipe_id,
+        recipe_name=recipe.name if recipe is not None and recipe.user_id == turn.user_id
+        else None,
         base_version=turn.base_version, persona_id=turn.persona_id, cost=turn.cost,
         created_at=turn.created_at, updated_at=turn.updated_at,
     )
@@ -125,7 +135,7 @@ def _session_read(session: Session, row: AssistantSession) -> SessionRead:
         **_summary(row).model_dump(),
         messages=[Message(**m) for m in json.loads(row.messages or "[]")],
         attachments=[_attachment_read(a) for a in json.loads(row.attachments or "[]")],
-        turns=[_turn_read(t) for t in turns],
+        turns=[_turn_read(t, session) for t in turns],
         cost=round(sum(t.cost or 0.0 for t in turns), 6),
     )
 
@@ -328,6 +338,11 @@ def start_turn(body: TurnCreate, user: CurrentUser, token: CallerToken,
                                     "message": "Set up an AI provider in Settings first."})
     project = project_service.get_owned(session, user, body.project_id) if body.project_id \
         else None
+    recipe = None
+    if body.recipe_id:
+        recipe = recipe_service.owned(session, user.id, body.recipe_id)
+        if recipe is None:
+            raise _not_found("Recipe")
     if body.session_id:
         chat = _owned_session(session, user, body.session_id)
         if chat.project_id != (project.id if project else None):
@@ -359,12 +374,49 @@ def start_turn(body: TurnCreate, user: CurrentUser, token: CallerToken,
         starter = starter_spec("Untitled video")
         themes.settle(session, user.id, starter, use_default=True)
         base = dump_spec(starter)
-    turn = worker.submit(session, chat, user_id=user.id, token=token, prompt=body.prompt.strip(),
+        if recipe is not None:
+            base = _with_recipe_defaults(session, user.id, base, recipe)
+    prompt = body.prompt.strip()
+    if recipe is not None:
+        prompt = _recipe_prompt(recipe, body.recipe_inputs,
+                                title=project.title if project is not None else None)
+    turn = worker.submit(session, chat, user_id=user.id, token=token, prompt=prompt,
                          base_spec=base,
                          base_version=body.base_version if body.base_version is not None
                          else (project.head_seq if project else None),
-                         focus=body.focus, persona_id=body.persona_id or None)
-    return DataResponse(data=_turn_read(turn))
+                         focus=body.focus, persona_id=body.persona_id or None,
+                         recipe_id=recipe.id if recipe is not None else None)
+    return DataResponse(data=_turn_read(turn, session))
+
+
+def _recipe_prompt(recipe: Recipe, inputs: dict, *, title: Optional[str]) -> str:
+    """What a run asks: the recipe's prompt with its inputs and built-ins filled in.
+
+    The date and time here are the server's (UTC); the browser sends the asker's own,
+    which win. `{{title}}` is the open video's; from the project list there is no video
+    yet, so it is left as typed, which shows it wasn't filled.
+    """
+    now = utcnow()
+    values = {"date": f"{now.day} {now:%B %Y}", "time": f"{now:%H:%M}"}
+    if title:
+        values["title"] = title
+    values.update(inputs)
+    prompt = recipe_service.render(recipe.prompt, values).strip()
+    if len(prompt) > 20_000:
+        raise _refused("prompt_too_long", "With its inputs filled in, that recipe is over "
+                       "20,000 characters. Shorten the inputs.",
+                       status.HTTP_422_UNPROCESSABLE_ENTITY)
+    return prompt
+
+
+def _with_recipe_defaults(session: Session, user_id: str, base: dict, recipe: Recipe) -> dict:
+    """A new video's starter with the recipe's defaults on it. A theme deleted since the
+    recipe was saved is left out, so the starter keeps the user's default instead of
+    naming nothing."""
+    defaults = recipe_service.decode_defaults(recipe.defaults)
+    if defaults.theme_id and themes.owned(session, user_id, defaults.theme_id) is None:
+        defaults = defaults.model_copy(update={"theme_id": None})
+    return recipe_service.apply_defaults(base, defaults)
 
 
 @router.get("/turns", response_model=ListResponse[TurnRead])
@@ -377,13 +429,13 @@ def list_turns(user: CurrentUser, attention: bool = False,
         query = query.where((col(AssistantTurn.status).in_(ACTIVE_STATUSES))
                             | (AssistantTurn.outcome == "pending"))
     rows = session.exec(query.order_by(AssistantTurn.created_at.desc()).limit(limit)).all()
-    return ListResponse(data=[_turn_read(t) for t in rows], total=len(rows), limit=limit, offset=0)
+    return ListResponse(data=[_turn_read(t, session) for t in rows], total=len(rows), limit=limit, offset=0)
 
 
 @router.get("/turns/{turn_id}", response_model=DataResponse[TurnRead])
 def get_turn(turn_id: str, user: CurrentUser,
              session: Session = Depends(get_session)) -> DataResponse[TurnRead]:
-    return DataResponse(data=_turn_read(_owned_turn(session, user, turn_id)))
+    return DataResponse(data=_turn_read(_owned_turn(session, user, turn_id), session))
 
 
 @router.delete("/turns/{turn_id}", response_model=DataResponse[TurnRead])
@@ -402,7 +454,7 @@ def stop_turn(turn_id: str, user: CurrentUser,
             session.add(turn)
             session.commit()
             session.refresh(turn)
-    return DataResponse(data=_turn_read(turn))
+    return DataResponse(data=_turn_read(turn, session))
 
 
 def _decide(session: Session, user, turn_id: str, outcome: str) -> AssistantTurn:
@@ -422,13 +474,13 @@ def _decide(session: Session, user, turn_id: str, outcome: str) -> AssistantTurn
 def mark_applied(turn_id: str, user: CurrentUser,
                  session: Session = Depends(get_session)) -> DataResponse[TurnRead]:
     """The editor loaded the proposal into its draft (saving it is the editor's)."""
-    return DataResponse(data=_turn_read(_decide(session, user, turn_id, "applied")))
+    return DataResponse(data=_turn_read(_decide(session, user, turn_id, "applied"), session))
 
 
 @router.post("/turns/{turn_id}/discarded", response_model=DataResponse[TurnRead])
 def mark_discarded(turn_id: str, user: CurrentUser,
                    session: Session = Depends(get_session)) -> DataResponse[TurnRead]:
-    return DataResponse(data=_turn_read(_decide(session, user, turn_id, "discarded")))
+    return DataResponse(data=_turn_read(_decide(session, user, turn_id, "discarded"), session))
 
 
 def _proposed_note(turn: AssistantTurn, note_ref: str) -> tuple:
@@ -475,7 +527,7 @@ def create_note(turn_id: str, note_ref: str, user: CurrentUser, token: CallerTok
         raise _refused(exc.code, exc.message, exc.status_code) from exc
     note["state"] = "created"
     note["note_url"] = f"{settings.notes_url.rstrip('/')}/notes/{made.id}"
-    return DataResponse(data=_turn_read(_save_notes(session, turn, notes)))
+    return DataResponse(data=_turn_read(_save_notes(session, turn, notes), session))
 
 
 @router.post("/turns/{turn_id}/notes/{note_ref}/discard", response_model=DataResponse[TurnRead])
@@ -487,7 +539,86 @@ def discard_note(turn_id: str, note_ref: str, user: CurrentUser,
         raise _refused("nothing_pending", f"That note was already {note.get('state')}",
                        status.HTTP_409_CONFLICT)
     note["state"] = "discarded"
-    return DataResponse(data=_turn_read(_save_notes(session, turn, notes)))
+    return DataResponse(data=_turn_read(_save_notes(session, turn, notes), session))
+
+
+def _proposed_recipe(turn: AssistantTurn, recipe_ref: str) -> tuple:
+    proposals = json.loads(turn.proposed_recipes or "[]")
+    for proposal in proposals:
+        if proposal.get("recipe_ref") == recipe_ref:
+            if proposal.get("state") != "pending":
+                raise _refused("nothing_pending",
+                               f"That recipe change was already {proposal.get('state')}",
+                               status.HTTP_409_CONFLICT)
+            return proposals, proposal
+    raise _refused("not_found", "That turn proposed no such recipe", status.HTTP_404_NOT_FOUND)
+
+
+def _save_recipes(session: Session, turn: AssistantTurn, proposals: list) -> AssistantTurn:
+    turn.proposed_recipes = json.dumps(proposals, ensure_ascii=False)
+    turn.updated_at = utcnow()
+    session.add(turn)
+    session.commit()
+    session.refresh(turn)
+    return turn
+
+
+@router.post("/turns/{turn_id}/recipes/{recipe_ref}/save", response_model=DataResponse[TurnRead])
+def save_recipe(turn_id: str, recipe_ref: str, user: CurrentUser,
+                session: Session = Depends(get_session)) -> DataResponse[TurnRead]:
+    """Make the recipe change the assistant proposed: the only way one reaches the list.
+
+    Checked again here rather than trusted from the turn. A recipe since deleted is
+    `recipe_gone`, and one changed by hand since the proposal was made is
+    `recipe_changed`: saving over it would silently undo that edit, which the card,
+    showing the recipe as it was, never asked about. An update writes only the fields the
+    proposal changes.
+    """
+    turn = _owned_turn(session, user, turn_id)
+    proposals, proposal = _proposed_recipe(turn, recipe_ref)
+    op, after = proposal["op"], proposal.get("after") or {}
+    if op == "create":
+        ensure_user(session, user)
+        row = Recipe(id=str(uuid.uuid4()), user_id=user.id, name="", prompt="")
+        row = recipe_service.save(session, row, name=after["name"], prompt=after["prompt"],
+                                  tags=after.get("tags") or [],
+                                  defaults=RecipeDefaults.model_validate(after.get("defaults") or {}))
+        proposal["recipe_id"] = row.id
+    else:
+        row = recipe_service.owned(session, user.id, proposal.get("recipe_id"))
+        if row is None:
+            raise _refused("recipe_gone", "That recipe has been deleted since this was "
+                           "proposed.", status.HTTP_409_CONFLICT)
+        if row.updated_at.isoformat() != proposal.get("base_updated_at"):
+            raise _refused("recipe_changed", "You changed this recipe after the assistant "
+                           "proposed this; ask again.", status.HTTP_409_CONFLICT)
+        if op == "delete":
+            session.delete(row)
+            session.commit()
+        else:
+            fields = set(proposal.get("fields") or [])
+            if "prompt" in fields and len(after.get("prompt") or "") > MAX_RECIPE_PROMPT:
+                raise _refused("invalid_recipe", "That prompt is too long",
+                               status.HTTP_422_UNPROCESSABLE_ENTITY)
+            recipe_service.save(
+                session, row,
+                name=after["name"] if "name" in fields else None,
+                prompt=after["prompt"] if "prompt" in fields else None,
+                tags=after["tags"] if "tags" in fields else None,
+                defaults=RecipeDefaults.model_validate(after["defaults"])
+                if "defaults" in fields else None)
+    proposal["state"] = "saved"
+    return DataResponse(data=_turn_read(_save_recipes(session, turn, proposals), session))
+
+
+@router.post("/turns/{turn_id}/recipes/{recipe_ref}/discard",
+             response_model=DataResponse[TurnRead])
+def discard_recipe(turn_id: str, recipe_ref: str, user: CurrentUser,
+                   session: Session = Depends(get_session)) -> DataResponse[TurnRead]:
+    turn = _owned_turn(session, user, turn_id)
+    proposals, proposal = _proposed_recipe(turn, recipe_ref)
+    proposal["state"] = "discarded"
+    return DataResponse(data=_turn_read(_save_recipes(session, turn, proposals), session))
 
 
 @router.post("/turns/{turn_id}/new-project", response_model=DataResponse[NewProjectRead],
@@ -518,10 +649,14 @@ def apply_as_new_project(turn_id: str, user: CurrentUser, token: CallerToken,
             provider = active_provider(session, user.id)
             source_provider = provider.provider_type if provider else None
             source_model = provider.model if provider else None
+        recipe = recipe_service.owned(session, user.id, turn.recipe_id)
         spec.source = BriefSource(kind="brief", prompt=turn.prompt,
                                   drafted_at=turn.created_at.isoformat(timespec="seconds") + "Z",
-                                  provider=source_provider, model=source_model)
-    project = project_service.create(session, user, spec, origin="brief",
+                                  provider=source_provider, model=source_model,
+                                  recipe=RecipeRef(id=recipe.id, name=recipe.name)
+                                  if recipe is not None else None)
+    project = project_service.create(session, user, spec,
+                                     origin="recipe" if turn.recipe_id else "brief",
                                      message="Drafted by the assistant", author="ai",
                                      default_theme=False)
     turn.outcome, turn.project_id, turn.updated_at = "applied", project.id, utcnow()

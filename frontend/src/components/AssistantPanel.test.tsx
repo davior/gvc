@@ -4,7 +4,10 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { assistantApi, type Attachment, type Chat, type Turn } from '@/api/assistant'
 import type { Project, VideoSpec } from '@/api/projects'
+import { recipesApi, type Recipe } from '@/api/recipes'
+import { themesApi } from '@/api/themes'
 import AssistantPanel from '@/components/AssistantPanel'
+import { useRecipeStore } from '@/stores/recipes'
 import { useAssistantStore } from '@/stores/assistant'
 import { useProjectStore } from '@/stores/projects'
 
@@ -87,6 +90,9 @@ beforeEach(() => {
   useProjectStore.setState({ project, draft: spec, dirty: false })
   vi.spyOn(assistantApi, 'attention').mockResolvedValue([])
   vi.spyOn(assistantApi, 'personas').mockResolvedValue([])
+  useRecipeStore.getState().reset()
+  vi.spyOn(recipesApi, 'list').mockResolvedValue([])
+  vi.spyOn(themesApi, 'list').mockResolvedValue([])
 })
 afterEach(() => vi.restoreAllMocks())
 
@@ -417,5 +423,108 @@ describe('AssistantPanel', () => {
     await screen.findByLabelText('Ask the assistant')
     expect(screen.queryByRole('combobox', { name: 'Persona' })).toBeNull()
     expect(useAssistantStore.getState().error).toBeNull()
+  })
+})
+
+const explainer: Recipe = {
+  id: 'r1',
+  name: 'Explainer',
+  prompt: 'A 60-second explainer about {{topic}} on {{date}}',
+  tags: ['short'],
+  defaults: { aspect: '9:16' },
+  inputs: ['topic'],
+  sort_order: 0,
+  created_at: '',
+  updated_at: '',
+}
+
+describe('AssistantPanel recipes', () => {
+  it('runs a recipe from the picker with its inputs and the local date', async () => {
+    vi.mocked(recipesApi.list).mockResolvedValue([explainer])
+    vi.spyOn(assistantApi, 'sessions').mockResolvedValue([])
+    const running = turn({ project_id: null, outcome: '', proposed_spec: null })
+    const start = vi.spyOn(assistantApi, 'start').mockResolvedValue(running)
+    vi.spyOn(assistantApi, 'session').mockResolvedValue(chat(running))
+    at('/projects')
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Run a recipe' }))
+    await userEvent.click(await screen.findByRole('button', { name: /Explainer/ }))
+    const form = screen.getByRole('form', { name: 'Run Explainer' })
+    expect(form).toHaveTextContent('A new video starts with 9:16')
+    await userEvent.type(screen.getByLabelText('topic'), 'rivers')
+    await userEvent.click(screen.getByRole('button', { name: /^Run$/ }))
+
+    const sent = start.mock.calls[0][0]
+    expect(sent).toMatchObject({
+      prompt: '',
+      recipe_id: 'r1',
+      project_id: null,
+      draft_spec: null,
+    })
+    expect(sent.recipe_inputs?.topic).toBe('rivers')
+    expect(sent.recipe_inputs?.date).toBeTruthy()
+    await waitFor(() => expect(useAssistantStore.getState().pendingRecipe).toBeNull())
+  })
+
+  it('on a project, says the defaults will not change the video', async () => {
+    vi.spyOn(assistantApi, 'sessions').mockResolvedValue([])
+    at('/p/p1')
+    await screen.findByLabelText('Ask the assistant')
+    useAssistantStore.getState().runRecipe(explainer)
+    expect(
+      await screen.findByText(/are for new videos and won't change this one/)
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Run on this video/ })).toBeInTheDocument()
+  })
+
+  it('shows a proposed edit to a recipe as a diff and saves it on its button', async () => {
+    const proposal = {
+      recipe_ref: 'rr1',
+      op: 'update' as const,
+      recipe_id: 'r1',
+      before: {
+        name: 'Explainer',
+        prompt: 'Make {{topic}}\nKeep it short',
+        tags: ['edu'],
+        defaults: {},
+        inputs: ['topic'],
+      },
+      after: {
+        name: 'Explainer',
+        prompt: 'Make {{topic}} in a {{tone}} tone\nKeep it short',
+        tags: ['edu'],
+        defaults: { aspect: '9:16' as const },
+        inputs: ['topic', 'tone'],
+      },
+      fields: ['prompt' as const, 'defaults' as const],
+      state: 'pending' as const,
+    }
+    const asked = turn({
+      proposed_spec: null,
+      changes: [],
+      outcome: '',
+      recipes: [proposal],
+    })
+    const saved = turn({ ...asked, recipes: [{ ...proposal, state: 'saved' }] })
+    vi.spyOn(assistantApi, 'sessions').mockResolvedValue([chat(asked)])
+    vi.spyOn(assistantApi, 'session')
+      .mockResolvedValueOnce(chat(asked))
+      .mockResolvedValue(chat(saved))
+    const save = vi.spyOn(assistantApi, 'saveRecipe').mockResolvedValue(saved)
+    at('/p/p1')
+
+    const card = await screen.findByLabelText('Change recipe: Explainer')
+    const diff = screen.getByLabelText('Prompt changes')
+    expect(diff).toHaveTextContent('− Make {{topic}}')
+    expect(diff).toHaveTextContent('+ Make {{topic}} in a {{tone}} tone')
+    expect(diff).toHaveTextContent('Keep it short')
+    expect(card).toHaveTextContent(/New videos start with: none → 9:16/)
+    expect(screen.queryByRole('button', { name: 'Apply' })).toBeNull()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    expect(save).toHaveBeenCalledWith('t1', 'rr1')
+    expect(await screen.findByText(/Saved\./)).toBeInTheDocument()
+    // The list is read again, since the assistant's change came from outside it.
+    expect(recipesApi.list).toHaveBeenCalled()
   })
 })
