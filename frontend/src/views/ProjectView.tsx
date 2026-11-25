@@ -32,7 +32,13 @@ import VoiceSettings from '@/components/VoiceSettings'
 import WaveformSettings from '@/components/WaveformSettings'
 import SceneList from '@/components/SceneList'
 import { RUNNING } from '@/api/generations'
-import { gamIdsIn, placeHit, resolveSearch, unresolvedSearches } from '@/spec/footage'
+import {
+  gamIdsIn,
+  placeHit,
+  resolveSearch,
+  unresolvedSearches,
+  usedAssetKeys,
+} from '@/spec/footage'
 import { canGenerate, latestByKey, unmadeGenerates } from '@/spec/generation'
 import { useGenerationStore } from '@/stores/generations'
 import { useProjectStore } from '@/stores/projects'
@@ -123,8 +129,11 @@ export default function ProjectView() {
   }
 
   const source = draft.source
-  const toFind = unresolvedSearches(draft)
-  const toMake = unmadeGenerates(draft)
+  // Only what the video still uses: a placeholder left in the registry after its scene
+  // got a picture some other way is not still to find or make.
+  const used = usedAssetKeys(draft)
+  const toFind = unresolvedSearches(draft).filter(({ key }) => used.has(key))
+  const toMake = unmadeGenerates(draft).filter(({ key }) => used.has(key))
   const latest = latestByKey(generations)
   const placeholder =
     finding?.kind === 'resolve'
