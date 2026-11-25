@@ -246,19 +246,59 @@ user sees the changes separately.
 """
 
 
+def _used_keys(data: Dict[str, Any]) -> set:
+    """The registry keys the video draws or plays. The editor's `usedAssetKeys` is the
+    same rule: a key can outlive its scene (`generate_image` adds a new key rather than
+    filling the old placeholder), and the model shouldn't take such an orphan for work
+    still to do."""
+    used = set()
+    style = data.get("style") if isinstance(data.get("style"), dict) else {}
+    used.add((style.get("background") or {}).get("asset"))
+    chrome = data.get("chrome") if isinstance(data.get("chrome"), dict) else {}
+    used.add((chrome.get("watermark") or {}).get("asset"))
+    for segment in data.get("segments") or []:
+        used.add((segment.get("visual") or {}).get("asset"))
+        for overlay in segment.get("overlays") or []:
+            if overlay.get("type") == "image":
+                used.add(overlay.get("asset"))
+    for track in data.get("audio_tracks") or []:
+        used.add(track.get("asset"))
+    assets = data.get("assets") or {}
+    for key in list(used):
+        ref = assets.get(key) or {}
+        if ref.get("from") == "generate":
+            used.update(ref.get("base_assets") or [])
+    used.discard(None)
+    return used
+
+
 def _registry_lines(data: Dict[str, Any]) -> str:
+    # A filled placeholder is described as what it now holds: listed as "to generate",
+    # the model offered to make pictures the video already had.
+    used = _used_keys(data)
     lines = []
     for key, ref in (data.get("assets") or {}).items():
         source = ref.get("from")
+        result = (ref.get("result") or {}).get("id")
         if source == "gam":
-            lines.append(f"- {key}: library {ref.get('type') or 'asset'} "
-                         f"{ref.get('label') or ''} (gam_id {ref.get('id')})".rstrip())
+            line = (f"- {key}: library {ref.get('type') or 'asset'} "
+                    f"{ref.get('label') or ''} (gam_id {ref.get('id')})").rstrip()
+        elif source == "search" and ref.get("status") == "resolved" and result:
+            line = f"- {key}: found footage for {ref.get('query')!r} (gam_id {result})"
         elif source == "search":
-            lines.append(f"- {key}: placeholder, footage to find: {ref.get('query')!r}")
+            line = f"- {key}: placeholder, footage to find: {ref.get('query')!r}"
+        elif source == "generate" and result:
+            line = (f"- {key}: generated {ref.get('type') or 'asset'}, done: "
+                    f"{ref.get('prompt')!r} (gam_id {result})")
         elif source == "generate":
-            lines.append(f"- {key}: placeholder, to generate: {ref.get('prompt')!r}")
+            line = f"- {key}: placeholder, to generate: {ref.get('prompt')!r}"
         elif source == "notes":
-            lines.append(f"- {key}: a file still in Gecko Notes ({ref.get('label') or ref.get('url')})")
+            line = f"- {key}: a file still in Gecko Notes ({ref.get('label') or ref.get('url')})"
+        else:
+            continue
+        if key not in used:
+            line += " [not used in the video]"
+        lines.append(line)
     return "\n".join(lines) or "(empty)"
 
 
