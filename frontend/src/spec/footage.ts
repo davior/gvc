@@ -215,7 +215,9 @@ export function unresolvedSearches(
  * always adds a new key rather than filling the scene's placeholder, and placing a
  * library picture on a scene replaces its visual without removing the old key. The
  * "to find" and "to make" lists are read through this, or every such orphan sits on
- * them for good with the scene already showing its picture.
+ * them for good with the scene already showing its picture. The backend's
+ * `used_asset_keys` (backend/app/spec/usage.py) is the same rule, for what the assistant
+ * is told is unused and may remove; keep the two alike.
  */
 export function usedAssetKeys(spec: VideoSpec): Set<string> {
   const used = new Set<string>()

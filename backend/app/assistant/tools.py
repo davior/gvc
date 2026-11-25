@@ -38,6 +38,7 @@ from app.schemas_recipes import MAX_RECIPE_NAME, MAX_RECIPE_PROMPT, RecipeDefaul
 from app.schemas_themes import MAX_THEME_NAME, MAX_THEME_PROMPT
 from app.services import recipes as recipe_rules
 from app.services.themes import theme_id_of
+from app.spec.usage import used_asset_keys
 from app.spec.validation import SpecIssue, parse_spec
 from app.spec.model import MAX_WEB_CANDIDATES
 
@@ -1037,6 +1038,51 @@ def remove_audio_track(w: Working, track_id: str) -> str:
     return w.commit(candidate, f"Removed audio track {track_id}")
 
 
+def remove_unused_placeholders(w: Working, keys: Optional[List[str]] = None) -> str:
+    """Take placeholders nothing in the video uses out of the registry.
+
+    What a person calls "still to make" or "still to find" is the editor's list of
+    placeholders the video uses; an unused one is a leftover from a scene that got its
+    picture another way, and was all the lists showed before they filtered them out. It
+    is still in the registry, and a person who saw it there asks for it gone in their own
+    words ("the invalid ones", "the stale still-to-make items").
+
+    Only placeholders, and only unused ones: a library file left in the registry costs
+    nothing and may be wanted again, and a used placeholder is real work still to do, so
+    removing it would leave a scene pointing at nothing.
+    """
+    assets = w.data.get("assets") or {}
+    used = used_asset_keys(w.data)
+    unused = [k for k, ref in assets.items()
+              if isinstance(ref, dict) and ref.get("from") in ("search", "generate")
+              and k not in used]
+    if keys is not None:
+        if not isinstance(keys, list) or not all(isinstance(k, str) for k in keys):
+            raise ToolFailed("keys is a list of asset keys.")
+        missing = [k for k in keys if k not in assets]
+        if missing:
+            raise ToolFailed(f"No asset {', '.join(map(repr, missing))} in the registry.")
+        busy = [k for k in keys if k in used]
+        if busy:
+            raise ToolFailed(f"{', '.join(map(repr, busy))} "
+                             f"{'is' if len(busy) == 1 else 'are'} used in the video, so not "
+                             "removed. Change or remove what uses it first.")
+        library = [k for k in keys if k not in unused]
+        if library:
+            raise ToolFailed(f"{', '.join(map(repr, library))} "
+                             f"{'is' if len(library) == 1 else 'are'} not a placeholder; "
+                             "only unused placeholders are removed.")
+        unused = [k for k in unused if k in keys]
+    if not unused:
+        return "Nothing to remove: every placeholder in the registry is used in the video."
+    candidate = copy.deepcopy(w.data)
+    for key in unused:
+        candidate["assets"].pop(key, None)
+    names = ", ".join(unused[:5]) + (f" and {len(unused) - 5} more" if len(unused) > 5 else "")
+    return w.commit(candidate, f"Removed {len(unused)} unused "
+                               f"placeholder{'s' if len(unused) != 1 else ''}: {names}")
+
+
 _PROJECT_KEYS = ("title", "style", "output", "voice", "chrome", "credits")
 
 
@@ -1916,6 +1962,14 @@ TOOLS: List[Tuple[ToolSpec, Callable[..., str]]] = [
     (ToolSpec("remove_audio_track", "Remove an audio track.",
               {"type": "object", "properties": {"track_id": _STR}, "required": ["track_id"]}),
      remove_audio_track),
+    (ToolSpec("remove_unused_placeholders",
+              "Remove placeholders (search or generate) that nothing in the video uses: "
+              "leftovers marked [not used in the video] in the registry. Use it when the user "
+              "asks to clear stale, invalid, leftover or duplicate 'still to make' / 'still to "
+              "find' items. Without keys, removes every unused placeholder; with keys, only "
+              "those. Never removes a placeholder the video uses, or a library file.",
+              {"type": "object", "properties": {"keys": {"type": "array", "items": _STR}}}),
+     remove_unused_placeholders),
     (ToolSpec("set_project",
               "Change project-wide settings by merge patch: title, style (default transition, "
               "motion, background, cards…), output, voice, chrome, credits.",

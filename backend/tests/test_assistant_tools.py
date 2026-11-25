@@ -704,3 +704,34 @@ def test_a_turn_finds_a_document_and_reads_the_page_its_hit_named(gam, siblings)
     assert "Reading Water board report" in steps
     # Reading changes nothing in the video.
     assert w.changes == []
+
+
+def test_unused_placeholders_are_removed_and_used_ones_and_library_files_kept():
+    data = spec()
+    data["assets"].update({
+        "a_old": {"from": "generate", "type": "image", "prompt": "A dam"},
+        "a_lost": {"from": "search", "query": "river"},
+        "a_todo": {"from": "generate", "type": "image", "prompt": "A bridge"},
+        "a_spare": {"from": "gam", "id": "q", "type": "image"},
+    })
+    data["segments"].append({"id": "s_bridge", "kind": "scene", "label": "Bridge",
+                             "visual": {"asset": "a_todo"}})
+    w = Working(data)
+
+    result = run(w, "remove_unused_placeholders", keys=["a_todo"])
+    assert result.is_error and "used in the video" in result.content
+    result = run(w, "remove_unused_placeholders", keys=["a_spare"])
+    assert result.is_error and "not a placeholder" in result.content
+    assert w.changes == []
+
+    result = run(w, "remove_unused_placeholders", keys=["a_old"])
+    assert not result.is_error and set(w.data["assets"]) >= {"a_lost", "a_todo"}
+    assert "a_old" not in w.data["assets"]
+
+    result = run(w, "remove_unused_placeholders")
+    assert not result.is_error and "1 unused placeholder" in result.content
+    assert set(w.data["assets"]) == {"a_map", "a_todo", "a_spare"}
+    assert w.valid
+
+    result = run(w, "remove_unused_placeholders")
+    assert not result.is_error and "Nothing to remove" in result.content

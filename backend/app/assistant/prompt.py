@@ -20,6 +20,7 @@ from typing import Any, Dict, Optional
 
 from app.schemas_recipes import RecipeDefaults
 from app.services.recipes import describe_defaults
+from app.spec.usage import used_asset_keys
 
 REFERENCE = """\
 You are the editor inside Gecko Video Creator (GVC), working with the user on one narrated \
@@ -171,6 +172,17 @@ words in an overlay instead.
 the user they can generate it from the scene with the Generate button.
 - Music and sound effects can't be generated; find them in the library.
 
+## "Still to make" and "still to find"
+These are the editor's lists of placeholders the video still needs filled: "still to \
+make" is generate placeholders without a picture, "still to find" is search placeholders \
+without footage. A placeholder marked `[not used in the video]` in the registry is a \
+leftover: its scene got a picture some other way (often a `generate_image`, which adds a \
+new key), so it needs nothing. When the user asks to clear the still-to-make or \
+still-to-find items that are wrong, stale, invalid, duplicated or already done, they mean \
+these: call `remove_unused_placeholders`, and say how many went. A placeholder the video \
+does use is real work left: offer to generate or find it, and remove it only by changing \
+what uses it, when they ask.
+
 ## Theme
 A theme is one of the user's named looks (realistic, 3D, a colour scheme...). The video's \
 theme is `style.theme`, and its text is added to the end of every picture and clip prompt \
@@ -246,36 +258,10 @@ user sees the changes separately.
 """
 
 
-def _used_keys(data: Dict[str, Any]) -> set:
-    """The registry keys the video draws or plays. The editor's `usedAssetKeys` is the
-    same rule: a key can outlive its scene (`generate_image` adds a new key rather than
-    filling the old placeholder), and the model shouldn't take such an orphan for work
-    still to do."""
-    used = set()
-    style = data.get("style") if isinstance(data.get("style"), dict) else {}
-    used.add((style.get("background") or {}).get("asset"))
-    chrome = data.get("chrome") if isinstance(data.get("chrome"), dict) else {}
-    used.add((chrome.get("watermark") or {}).get("asset"))
-    for segment in data.get("segments") or []:
-        used.add((segment.get("visual") or {}).get("asset"))
-        for overlay in segment.get("overlays") or []:
-            if overlay.get("type") == "image":
-                used.add(overlay.get("asset"))
-    for track in data.get("audio_tracks") or []:
-        used.add(track.get("asset"))
-    assets = data.get("assets") or {}
-    for key in list(used):
-        ref = assets.get(key) or {}
-        if ref.get("from") == "generate":
-            used.update(ref.get("base_assets") or [])
-    used.discard(None)
-    return used
-
-
 def _registry_lines(data: Dict[str, Any]) -> str:
     # A filled placeholder is described as what it now holds: listed as "to generate",
     # the model offered to make pictures the video already had.
-    used = _used_keys(data)
+    used = used_asset_keys(data)
     lines = []
     for key, ref in (data.get("assets") or {}).items():
         source = ref.get("from")
