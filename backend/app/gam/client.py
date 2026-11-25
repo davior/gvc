@@ -78,6 +78,24 @@ def _playlist(raw: Dict[str, Any]) -> GamPlaylist:
     )
 
 
+def _playlist_detail(raw: Dict[str, Any]) -> GamPlaylistDetail:
+    items = [
+        GamPlaylistItem(
+            id=item["id"], asset_id=item["asset_id"], asset_name=item.get("asset_name") or "",
+            asset_type=item.get("asset_type") or "", in_point=item.get("in_point"),
+            out_point=item.get("out_point"), start=item.get("start") or 0.0,
+            end=item.get("end"), image_seconds=item.get("image_seconds"),
+            label=item.get("label"), note=item.get("note"),
+            asset_duration_seconds=item.get("asset_duration_seconds"),
+            width=item.get("width"), height=item.get("height"),
+            file_url=_absolute(item.get("file_url")),
+            thumb_url=_absolute(item.get("thumb_url")), missing=bool(item.get("missing")),
+        )
+        for item in raw.get("items", [])
+    ]
+    return GamPlaylistDetail(**_playlist(raw).model_dump(), items=items)
+
+
 def _music(raw: Dict[str, Any]) -> Optional[GamMusic]:
     """GAM's flat `music_*` fields as one object, or None when none of them says anything.
 
@@ -186,21 +204,38 @@ class GamClient:
             raise GamError(code, message)
         return to_asset(response.json()["data"])
 
-    def playlists(self) -> List[GamPlaylist]:
-        """The caller's playlists in GAM, newest edit first.
+    @staticmethod
+    def _without_playlists() -> GamError:
+        return GamError("gam_without_playlists",
+                        "This version of the asset library has no playlists. Update GAM.",
+                        status_code=409)
+
+    def playlists(self, query: str = "") -> List[GamPlaylist]:
+        """The caller's playlists in GAM, newest edit first; with `query`, only those whose
+        name or description holds it.
 
         A GAM from before playlists (gam#70) has no such route and answers 404, which is
         said as that rather than as a failure: the rest of the library still works.
+
+        The match is made here as well as asked of GAM: a GAM from before its playlist
+        search ignores `q` and sends them all, and the caller should not be able to tell.
         """
-        response = self._request("GET", "/api/playlists", params={"limit": 500})
+        query = query.strip()
+        params: Dict[str, Any] = {"limit": 500}
+        if query:
+            params["q"] = query
+        response = self._request("GET", "/api/playlists", params=params)
         if response.status_code == 404:
-            raise GamError("gam_without_playlists",
-                           "This version of the asset library has no playlists. Update GAM.",
-                           status_code=409)
+            raise self._without_playlists()
         if response.status_code != 200:
             code, message = self._detail(response)
             raise GamError(code, message)
-        return [_playlist(raw) for raw in response.json().get("data", [])]
+        rows = [_playlist(raw) for raw in response.json().get("data", [])]
+        if query:
+            needle = query.casefold()
+            rows = [p for p in rows
+                    if needle in p.name.casefold() or needle in (p.description or "").casefold()]
+        return rows
 
     def playlist(self, playlist_id: str) -> Optional[GamPlaylistDetail]:
         """One playlist and its items in order, or None when it is not the caller's."""
@@ -210,20 +245,54 @@ class GamClient:
         if response.status_code != 200:
             code, message = self._detail(response)
             raise GamError(code, message)
-        raw = response.json()["data"]
-        items = [
-            GamPlaylistItem(
-                id=item["id"], asset_id=item["asset_id"], asset_name=item.get("asset_name") or "",
-                asset_type=item.get("asset_type") or "", in_point=item.get("in_point"),
-                out_point=item.get("out_point"), start=item.get("start") or 0.0,
-                end=item.get("end"), image_seconds=item.get("image_seconds"),
-                label=item.get("label"), note=item.get("note"),
-                asset_duration_seconds=item.get("asset_duration_seconds"),
-                thumb_url=_absolute(item.get("thumb_url")), missing=bool(item.get("missing")),
-            )
-            for item in raw.get("items", [])
-        ]
-        return GamPlaylistDetail(**_playlist(raw).model_dump(), items=items)
+        return _playlist_detail(response.json()["data"])
+
+    # ── changing playlists ───────────────────────────────────────────────────
+    # As the caller, so GAM's own checks decide: that each asset is theirs and playable,
+    # and that a range lies inside its file. GAM answers each change with the whole
+    # playlist, which is passed back so the screen never reads it twice.
+
+    def _playlist_change(self, response: httpx.Response, *, created: bool = False
+                         ) -> Optional[GamPlaylistDetail]:
+        """GAM's answer to a change: the playlist as it now is, or None when the playlist
+        (or the item) is not the caller's. GAM's refusal of what was asked (a document,
+        a range outside the file, too many items) is the person's to fix, so a 400 with
+        GAM's own sentence; anything else is GAM failing."""
+        if response.status_code == 404:
+            return None
+        if response.status_code == 405:
+            raise self._without_playlists()
+        if response.status_code not in ((200, 201) if created else (200,)):
+            code, message = self._detail(response)
+            status = response.status_code if response.status_code in (400, 409, 422) else 502
+            raise GamError(code, message, status_code=400 if status == 422 else status)
+        return _playlist_detail(response.json()["data"])
+
+    def create_playlist(self, name: str, description: Optional[str] = None,
+                        items: Optional[List[Dict[str, Any]]] = None) -> GamPlaylistDetail:
+        """A new playlist, with its first items if any: all of them or none, as GAM adds."""
+        response = self._request("POST", "/api/playlists", json={
+            "name": name, "description": description, "items": items or []})
+        # Only a GAM without the route answers 404 here: an item naming an asset that is
+        # not the caller's is GAM's 400, which `_playlist_change` passes on.
+        if response.status_code == 404:
+            raise self._without_playlists()
+        made = self._playlist_change(response, created=True)
+        assert made is not None
+        return made
+
+    def add_playlist_items(self, playlist_id: str, items: List[Dict[str, Any]],
+                           position: Optional[int] = None) -> Optional[GamPlaylistDetail]:
+        """Items added at `position` (the end when None). All or none, as GAM does it."""
+        body: Dict[str, Any] = {"items": items}
+        if position is not None:
+            body["position"] = position
+        return self._playlist_change(
+            self._request("POST", f"/api/playlists/{playlist_id}/items", json=body), created=True)
+
+    def remove_playlist_item(self, playlist_id: str, item_id: str) -> Optional[GamPlaylistDetail]:
+        return self._playlist_change(
+            self._request("DELETE", f"/api/playlists/{playlist_id}/items/{item_id}"))
 
     def transcript(self, asset_id: str) -> Optional[GamTranscript]:
         """Everything said in an asset, with word timings. None for an unknown asset; an

@@ -82,6 +82,13 @@ class AssistantTurn(SQLModel, table=True):
     # "before", "after", "fields", "base_updated_at", "state": "pending"|"saved"|
     # "discarded", "saved_id"}]. None when the turn proposed none.
     proposed_recipes: Optional[str] = None
+    # JSON: changes to the user's GAM playlists, each made by its own button as notes are,
+    # with the token of whoever presses it: [{"playlist_ref", "playlist_id" (None for a
+    # new one until made), "name", "description", "add": [{"asset_id", "name", "type",
+    # "in_point"?, "out_point"?, "image_seconds"?, "label"?, "note"?}], "remove":
+    # [{"item_id", "name", "label"}], "state": "pending"|"applied"|"discarded",
+    # "skipped"}]. None when the turn proposed none.
+    proposed_playlists: Optional[str] = None
     cost: Optional[float] = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)

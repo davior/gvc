@@ -163,6 +163,72 @@ describe('AssistantPanel', () => {
     expect(useProjectStore.getState().dirty).toBe(false)
   })
 
+  it('offers a playlist change on its own and makes it in GAM on its button', async () => {
+    const proposal = {
+      playlist_ref: 'pl1',
+      playlist_id: 'p9',
+      name: 'The financial crisis',
+      description: null,
+      add: [
+        {
+          asset_id: 'v2',
+          name: 'Street',
+          type: 'video',
+          in_point: 61,
+          out_point: 64,
+          image_seconds: null,
+          label: 'Queues',
+          note: null,
+        },
+      ],
+      remove: [{ item_id: 'it-2', name: 'Map', label: null }],
+      state: 'pending' as const,
+      skipped: [],
+      playlist_url: null,
+    }
+    const asked = turn({
+      proposed_spec: null,
+      changes: [],
+      outcome: '',
+      playlists: [proposal],
+    })
+    const made = turn({
+      ...asked,
+      playlists: [
+        {
+          ...proposal,
+          state: 'applied',
+          skipped: ['Map: already gone from the playlist.'],
+          playlist_url: 'https://gam.test/playlists/p9',
+        },
+      ],
+    })
+    vi.spyOn(assistantApi, 'sessions').mockResolvedValue([chat(asked)])
+    vi.spyOn(assistantApi, 'session')
+      .mockResolvedValueOnce(chat(asked))
+      .mockResolvedValue(chat(made))
+    const apply = vi.spyOn(assistantApi, 'applyPlaylist').mockResolvedValue(made)
+    at('/p/p1')
+
+    const card = await screen.findByLabelText('Playlist: The financial crisis')
+    expect(card).toHaveTextContent('add 1, remove 1 items')
+    // Not an edit to the video: nothing to apply in the editor.
+    expect(screen.queryByRole('button', { name: 'Apply' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Show the items' }))
+    expect(screen.getByLabelText('Changes to The financial crisis')).toHaveTextContent(
+      'Queues (Street) · 1:01–1:04'
+    )
+
+    await userEvent.click(screen.getByRole('button', { name: 'Change in GAM' }))
+    expect(apply).toHaveBeenCalledWith('t1', 'pl1')
+    expect(await screen.findByRole('link', { name: 'Open in GAM' })).toHaveAttribute(
+      'href',
+      'https://gam.test/playlists/p9'
+    )
+    expect(screen.getByText('Map: already gone from the playlist.')).toBeInTheDocument()
+    expect(useProjectStore.getState().dirty).toBe(false)
+  })
+
   it('draws a reply written in Markdown instead of showing its marks', async () => {
     const t = turn({ reply: 'Two **scenes** change:\n\n- The valley\n- The river' })
     vi.spyOn(assistantApi, 'sessions').mockResolvedValue([chat(t)])

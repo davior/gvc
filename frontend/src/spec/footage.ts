@@ -32,6 +32,13 @@ export function momentTrim(
   size: MomentSize = {}
 ): Required<Trim> | undefined {
   if (hit.start_time === null) return undefined
+  if (hit.exact && hit.end_time !== null) {
+    // A playlist's range is a cut someone already chose: used as it is, not padded or
+    // resized to the placeholder's moment, only kept inside the file.
+    const duration = hit.asset.duration_seconds
+    const out = duration ? Math.min(hit.end_time, duration) : hit.end_time
+    return { in: hit.start_time, out: Math.max(out, hit.start_time + 0.1) }
+  }
   const { min, max, pad = 0.5 } = size
   const start = hit.start_time
   const end = hit.end_time ?? start + DEFAULT_MOMENT_SECONDS

@@ -385,3 +385,141 @@ describe('FootageSearch: a sound’s moment', () => {
     })
   })
 })
+
+describe('FootageSearch: GAM playlists', () => {
+  const crisis = {
+    id: 'p1',
+    name: 'The financial crisis',
+    description: 'Everyone on 2008.',
+    item_count: 2,
+    total_seconds: 42.5,
+    thumb_url: null,
+    updated_at: null,
+  }
+  const item = (id: string, overrides: Record<string, unknown> = {}) => ({
+    id,
+    asset_id: 'g1',
+    asset_name: 'Archive interview',
+    asset_type: 'video',
+    in_point: 62,
+    out_point: 101.5,
+    start: 62,
+    end: 101.5,
+    image_seconds: null,
+    label: 'On the bailout',
+    note: null,
+    asset_duration_seconds: 1800,
+    width: null,
+    height: null,
+    file_url: 'https://gam.test/media/g1?sig=x',
+    thumb_url: null,
+    missing: false,
+    ...overrides,
+  })
+  const detail = {
+    ...crisis,
+    items: [
+      item('it-1'),
+      item('it-2', {
+        asset_id: 'i1',
+        asset_name: 'Map',
+        asset_type: 'image',
+        in_point: null,
+        out_point: null,
+        start: 0,
+        end: 3,
+        image_seconds: 3,
+        label: null,
+        asset_duration_seconds: null,
+      }),
+    ],
+  }
+
+  it('searches playlists by name, goes through the items in order and uses one as it is cut', async () => {
+    const list = vi.spyOn(gamApi, 'playlists').mockResolvedValue([crisis])
+    vi.spyOn(gamApi, 'playlist').mockResolvedValue(detail)
+    const onPick = vi.fn()
+    render(
+      <FootageSearch title="Footage" purpose="scene" onPick={onPick} onClose={vi.fn()} />
+    )
+
+    await userEvent.click(screen.getByRole('button', { name: /Playlists/ }))
+    await userEvent.type(
+      await screen.findByLabelText('Search playlists'),
+      'crisis{Enter}'
+    )
+    expect(list).toHaveBeenLastCalledWith('crisis')
+    await userEvent.click(
+      await screen.findByRole('button', { name: /The financial crisis/ })
+    )
+
+    const items = await screen.findByLabelText('Items of The financial crisis')
+    expect(items).toHaveTextContent(/1.*On the bailout.*1:02–1:41.*2.*Map.*3 s/)
+    await userEvent.click(screen.getByRole('button', { name: /^1 On the bailout/ }))
+    // The item's own range, not padded as a search hit's moment would be.
+    expect(screen.getByText('Uses 1:02–1:41 (40 s)')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Use as b-roll' }))
+    const [hit] = onPick.mock.calls[0]
+    expect([hit.start_time, hit.end_time, hit.exact]).toEqual([62, 101.5, true])
+  })
+
+  it('takes an item out of the playlist', async () => {
+    vi.spyOn(gamApi, 'playlists').mockResolvedValue([crisis])
+    vi.spyOn(gamApi, 'playlist').mockResolvedValue(detail)
+    const remove = vi
+      .spyOn(gamApi, 'removePlaylistItem')
+      .mockResolvedValue({ ...detail, items: detail.items.slice(1) })
+    render(
+      <FootageSearch title="Footage" purpose="scene" onPick={vi.fn()} onClose={vi.fn()} />
+    )
+
+    await userEvent.click(screen.getByRole('button', { name: /Playlists/ }))
+    await userEvent.click(
+      await screen.findByRole('button', { name: /The financial crisis/ })
+    )
+    await userEvent.click(
+      await screen.findByRole('button', {
+        name: 'Remove On the bailout from the playlist',
+      })
+    )
+    expect(remove).toHaveBeenCalledWith('p1', 'it-1')
+    expect(screen.queryByText('On the bailout')).toBeNull()
+  })
+
+  it('adds the selected moment to a playlist, or to a new one', async () => {
+    vi.spyOn(gamApi, 'search').mockResolvedValue(result([spoken]))
+    vi.spyOn(gamApi, 'playlists').mockResolvedValue([crisis])
+    const add = vi.spyOn(gamApi, 'addPlaylistItems').mockResolvedValue(detail)
+    const create = vi
+      .spyOn(gamApi, 'createPlaylist')
+      .mockResolvedValue({ ...detail, id: 'p2', name: 'Water' })
+    render(
+      <FootageSearch title="Footage" purpose="scene" onPick={vi.fn()} onClose={vi.fn()} />
+    )
+
+    await userEvent.type(
+      screen.getByLabelText('Search the asset library'),
+      'water{Enter}'
+    )
+    await userEvent.click(
+      await screen.findByRole('button', { name: /Archive interview/ })
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Add to a GAM playlist' }))
+    const group = await screen.findByRole('group', { name: 'Add to a GAM playlist' })
+    expect(group).toHaveTextContent('Adds 12:13–12:22.')
+    await userEvent.click(screen.getByRole('button', { name: 'Add' }))
+    expect(add).toHaveBeenCalledWith('p1', [
+      { asset_id: 'g1', in_point: 733.5, out_point: 742 },
+    ])
+    expect(await screen.findByText('Added to The financial crisis.')).toBeInTheDocument()
+
+    await userEvent.selectOptions(screen.getByLabelText('Playlist'), 'New playlist…')
+    await userEvent.type(screen.getByLabelText("New playlist's name"), 'Water')
+    await userEvent.click(screen.getByRole('button', { name: 'Add' }))
+    expect(create).toHaveBeenCalledWith({
+      name: 'Water',
+      items: [{ asset_id: 'g1', in_point: 733.5, out_point: 742 }],
+    })
+    expect(await screen.findByText('Added to Water.')).toBeInTheDocument()
+  })
+})

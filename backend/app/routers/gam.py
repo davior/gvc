@@ -9,7 +9,7 @@ from app.gam.client import GamClient
 from app.schemas import DataResponse, ListResponse
 from app.schemas_gam import (
     AssetLookup, AssetLookupResult, GamAssetRead, GamPlaylist, GamPlaylistDetail, GamSearch, GamWaveform,
-    ImageImport,
+    ImageImport, PlaylistCreate, PlaylistItemsAdd,
 )
 
 router = APIRouter()
@@ -83,17 +83,54 @@ def peaks(asset_id: str, gam: GamClient = Depends(get_gam)) -> DataResponse[GamW
     return DataResponse(data=waveform)
 
 
+def _found(playlist: Optional[GamPlaylistDetail], what: str = "playlist") -> GamPlaylistDetail:
+    if playlist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail={"code": "not_found", "message": f"No such {what} in GAM."})
+    return playlist
+
+
 @router.get("/playlists", response_model=ListResponse[GamPlaylist])
-def playlists(gam: GamClient = Depends(get_gam)) -> ListResponse[GamPlaylist]:
-    """The caller's GAM playlists, to start a video from one."""
-    rows = gam.playlists()
+def playlists(q: str = Query(default="", max_length=200),
+              gam: GamClient = Depends(get_gam)) -> ListResponse[GamPlaylist]:
+    """The caller's GAM playlists, newest edit first: to start a video from one, to take
+    footage from, or to add to. `q` keeps those whose name or description holds it."""
+    rows = gam.playlists(q)
     return ListResponse(data=rows, total=len(rows), limit=len(rows), offset=0)
+
+
+@router.post("/playlists", response_model=DataResponse[GamPlaylistDetail],
+             status_code=status.HTTP_201_CREATED)
+def create_playlist(body: PlaylistCreate,
+                    gam: GamClient = Depends(get_gam)) -> DataResponse[GamPlaylistDetail]:
+    """A new playlist in the caller's library, with its first items if any.
+
+    A playlist is GAM's, not part of a video: making one here changes nothing in any
+    project, the same as making it in GAM.
+    """
+    made = gam.create_playlist(body.name.strip(), body.description,
+                               [i.model_dump(exclude_none=True) for i in body.items])
+    return DataResponse(data=made)
 
 
 @router.get("/playlists/{playlist_id}", response_model=DataResponse[GamPlaylistDetail])
 def playlist(playlist_id: str, gam: GamClient = Depends(get_gam)) -> DataResponse[GamPlaylistDetail]:
-    found = gam.playlist(playlist_id)
-    if found is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                            detail={"code": "not_found", "message": "No such playlist in GAM."})
-    return DataResponse(data=found)
+    return DataResponse(data=_found(gam.playlist(playlist_id)))
+
+
+@router.post("/playlists/{playlist_id}/items", response_model=DataResponse[GamPlaylistDetail],
+             status_code=status.HTTP_201_CREATED)
+def add_playlist_items(playlist_id: str, body: PlaylistItemsAdd,
+                       gam: GamClient = Depends(get_gam)) -> DataResponse[GamPlaylistDetail]:
+    """Items added to a playlist, all or none, and the playlist as it now is."""
+    items = [i.model_dump(exclude_none=True) for i in body.items]
+    return DataResponse(data=_found(gam.add_playlist_items(playlist_id, items, body.position)))
+
+
+@router.delete("/playlists/{playlist_id}/items/{item_id}",
+               response_model=DataResponse[GamPlaylistDetail])
+def remove_playlist_item(playlist_id: str, item_id: str,
+                         gam: GamClient = Depends(get_gam)) -> DataResponse[GamPlaylistDetail]:
+    """One item out of a playlist. The asset stays in the library."""
+    return DataResponse(data=_found(gam.remove_playlist_item(playlist_id, item_id),
+                                    "playlist or item"))

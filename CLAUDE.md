@@ -42,6 +42,12 @@ the changes this repository's plan lists as S1–S3, which Notes' copy does not.
   (`/api/gam/import-image`) and resolves the placeholder to that asset. A render never reads a
   web address. A **persona** is the suite's, chosen per turn and kept on the turn row so a
   rerun is asked as the same one; this app only names it, and the suite applies its prompt and model.
+- **GAM's playlists are the user's, not the video's.** GVC searches, reads and changes them
+  as the caller through `/api/gam/playlists`, with GAM's own checks. The assistant only reads
+  them (`search_playlists`, `read_playlist`, an item's range passed on as an exact `trim`);
+  `propose_playlist` leaves a card, and only `POST /api/assistant/turns/{id}/playlists/{ref}/
+  apply` changes GAM, with that request's token. Additions go first in one all-or-none call,
+  so a refusal leaves the proposal pending and GAM unchanged.
 - **Recipes are proposed, never written by the assistant** (plan D6). `propose_recipe`
   (create, update or delete) leaves a card on the turn, and only
   `POST /api/assistant/turns/{id}/recipes/{ref}/save` changes the list. It checks again

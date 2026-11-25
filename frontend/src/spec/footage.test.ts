@@ -58,6 +58,22 @@ function spec(): VideoSpec {
 }
 
 describe('momentTrim', () => {
+  it("uses a playlist item's range as it is, inside the file", () => {
+    expect(
+      momentTrim({ ...hit(), start_time: 62, end_time: 101.5, exact: true })
+    ).toEqual({
+      in: 62,
+      out: 101.5,
+    })
+    // Not resized to a placeholder's moment either: it is a cut someone chose.
+    expect(
+      momentTrim(
+        { ...hit(), start_time: 10, end_time: 12, exact: true },
+        { min: 6, max: 8 }
+      )
+    ).toEqual({ in: 10, out: 12 })
+  })
+
   it('pads what was said so a cut does not clip a word', () => {
     expect(momentTrim(hit())).toEqual({ in: 733.5, out: 742 })
   })

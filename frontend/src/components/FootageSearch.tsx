@@ -1,5 +1,13 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
-import { Film, Globe, Image as ImageIcon, Library, Search, X } from 'lucide-react'
+import {
+  Film,
+  Globe,
+  Image as ImageIcon,
+  Library,
+  ListVideo,
+  Search,
+  X,
+} from 'lucide-react'
 import { apiErrorMessage } from '@/api/client'
 import { webApi, type WebImage } from '@/api/web'
 import {
@@ -12,6 +20,7 @@ import {
 import { clock, momentTrim, type MomentSize, type PlaceMode } from '@/spec/footage'
 import WaveformPlayer from '@/components/WaveformPlayer'
 import WebPictures from '@/components/WebPictures'
+import { AddToPlaylist, PlaylistBrowser } from '@/components/GamPlaylists'
 
 /**
  * - `scene`: footage for one scene, as b-roll under its narration or as a clip with
@@ -39,7 +48,7 @@ interface Props {
   projectId?: string
 }
 
-type Source = 'library' | 'web'
+type Source = 'library' | 'web' | 'playlists'
 
 /** What choosing a web picture is called, in the words the library's results use. */
 const WEB_USE_LABEL: Record<Purpose, string> = {
@@ -96,6 +105,8 @@ export default function FootageSearch({
   const [selected, setSelected] = useState<GamHit | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Bumped when the selection was added to a playlist, so an open one shows it.
+  const [playlistsChanged, setPlaylistsChanged] = useState(0)
 
   async function run(event?: FormEvent, from: Source = source) {
     event?.preventDefault()
@@ -118,6 +129,9 @@ export default function FootageSearch({
   function switchTo(next: Source) {
     setSource(next)
     setError(null)
+    setSelected(null)
+    // A playlist is found by its name, in its own box, not by the footage words.
+    if (next === 'playlists') return
     // Searching the other place for the same words is what switching is for.
     if (next === 'web' ? web === null : result === null) void run(undefined, next)
   }
@@ -158,40 +172,42 @@ export default function FootageSearch({
           </button>
         </div>
 
-        <form onSubmit={(e) => void run(e)} className="flex gap-2">
-          <input
-            className="input flex-1"
-            aria-label={
-              source === 'web'
-                ? 'Search the web for pictures'
-                : 'Search the asset library'
-            }
-            placeholder={
-              source === 'web'
-                ? 'What the picture shows: e.g. a dry riverbed at noon'
-                : 'What is said, or what it shows: e.g. people talking about water'
-            }
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            autoFocus
-          />
-          <button type="submit" className="btn btn-primary" disabled={busy}>
-            <Search className="mr-1 inline h-4 w-4" />
-            Search
-          </button>
-        </form>
-
-        {webOffered && (
-          <div className="flex gap-1" role="group" aria-label="Where to look">
-            <button
-              type="button"
-              aria-pressed={source === 'library'}
-              className={`btn text-xs ${source === 'library' ? 'btn-secondary' : 'btn-ghost'}`}
-              onClick={() => switchTo('library')}
-            >
-              <Library className="mr-1 inline h-3 w-3" />
-              Library
+        {source !== 'playlists' && (
+          <form onSubmit={(e) => void run(e)} className="flex gap-2">
+            <input
+              className="input flex-1"
+              aria-label={
+                source === 'web'
+                  ? 'Search the web for pictures'
+                  : 'Search the asset library'
+              }
+              placeholder={
+                source === 'web'
+                  ? 'What the picture shows: e.g. a dry riverbed at noon'
+                  : 'What is said, or what it shows: e.g. people talking about water'
+              }
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              autoFocus
+            />
+            <button type="submit" className="btn btn-primary" disabled={busy}>
+              <Search className="mr-1 inline h-4 w-4" />
+              Search
             </button>
+          </form>
+        )}
+
+        <div className="flex gap-1" role="group" aria-label="Where to look">
+          <button
+            type="button"
+            aria-pressed={source === 'library'}
+            className={`btn text-xs ${source === 'library' ? 'btn-secondary' : 'btn-ghost'}`}
+            onClick={() => switchTo('library')}
+          >
+            <Library className="mr-1 inline h-3 w-3" />
+            Library
+          </button>
+          {webOffered && (
             <button
               type="button"
               aria-pressed={source === 'web'}
@@ -201,8 +217,17 @@ export default function FootageSearch({
               <Globe className="mr-1 inline h-3 w-3" />
               Web pictures
             </button>
-          </div>
-        )}
+          )}
+          <button
+            type="button"
+            aria-pressed={source === 'playlists'}
+            className={`btn text-xs ${source === 'playlists' ? 'btn-secondary' : 'btn-ghost'}`}
+            onClick={() => switchTo('playlists')}
+          >
+            <ListVideo className="mr-1 inline h-3 w-3" />
+            Playlists
+          </button>
+        </div>
 
         {source === 'library' && (
           <div className="flex gap-1" role="group" aria-label="Kind of media">
@@ -243,56 +268,66 @@ export default function FootageSearch({
           )
         ) : (
           <div className="grid min-h-0 flex-1 gap-3 overflow-hidden md:grid-cols-2">
-            <ul className="space-y-1 overflow-auto" aria-label="Results">
-              {result?.data.length === 0 && (
-                <li className="text-sm text-gray-500">Nothing in the library matches.</li>
-              )}
-              {result?.data.map((h, i) => (
-                <li key={`${h.asset.id}-${i}`}>
-                  <button
-                    type="button"
-                    aria-pressed={selected === h}
-                    onClick={() => setSelected(h)}
-                    className={`flex w-full gap-2 rounded p-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700 ${
-                      selected === h ? 'bg-primary-50 dark:bg-gray-700' : ''
-                    }`}
-                  >
-                    {h.asset.thumb_url ? (
-                      <img
-                        src={h.asset.thumb_url}
-                        alt=""
-                        className="h-12 w-20 shrink-0 rounded object-cover"
-                      />
-                    ) : (
-                      <span className="flex h-12 w-20 shrink-0 items-center justify-center rounded bg-gray-100 dark:bg-gray-800">
-                        {h.asset.asset_type === 'image' ? (
-                          <ImageIcon className="h-4 w-4 text-gray-400" />
-                        ) : (
-                          <Film className="h-4 w-4 text-gray-400" />
+            {source === 'playlists' ? (
+              <PlaylistBrowser
+                selected={selected}
+                onSelect={setSelected}
+                refreshKey={playlistsChanged}
+              />
+            ) : (
+              <ul className="space-y-1 overflow-auto" aria-label="Results">
+                {result?.data.length === 0 && (
+                  <li className="text-sm text-gray-500">
+                    Nothing in the library matches.
+                  </li>
+                )}
+                {result?.data.map((h, i) => (
+                  <li key={`${h.asset.id}-${i}`}>
+                    <button
+                      type="button"
+                      aria-pressed={selected === h}
+                      onClick={() => setSelected(h)}
+                      className={`flex w-full gap-2 rounded p-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700 ${
+                        selected === h ? 'bg-primary-50 dark:bg-gray-700' : ''
+                      }`}
+                    >
+                      {h.asset.thumb_url ? (
+                        <img
+                          src={h.asset.thumb_url}
+                          alt=""
+                          className="h-12 w-20 shrink-0 rounded object-cover"
+                        />
+                      ) : (
+                        <span className="flex h-12 w-20 shrink-0 items-center justify-center rounded bg-gray-100 dark:bg-gray-800">
+                          {h.asset.asset_type === 'image' ? (
+                            <ImageIcon className="h-4 w-4 text-gray-400" />
+                          ) : (
+                            <Film className="h-4 w-4 text-gray-400" />
+                          )}
+                        </span>
+                      )}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+                          {h.asset.name}
+                        </span>
+                        {h.start_time !== null && (
+                          <span className="text-xs text-gray-500">
+                            at {clock(h.start_time)}
+                            {h.end_time !== null && `–${clock(h.end_time)}`}
+                          </span>
                         )}
+                        {audioSummary(h.asset) && (
+                          <span className="block truncate text-xs text-gray-500">
+                            {audioSummary(h.asset)}
+                          </span>
+                        )}
+                        {h.snippet && <Snippet text={h.snippet} />}
                       </span>
-                    )}
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-gray-900 dark:text-gray-100">
-                        {h.asset.name}
-                      </span>
-                      {h.start_time !== null && (
-                        <span className="text-xs text-gray-500">
-                          at {clock(h.start_time)}
-                          {h.end_time !== null && `–${clock(h.end_time)}`}
-                        </span>
-                      )}
-                      {audioSummary(h.asset) && (
-                        <span className="block truncate text-xs text-gray-500">
-                          {audioSummary(h.asset)}
-                        </span>
-                      )}
-                      {h.snippet && <Snippet text={h.snippet} />}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
 
             {selected && (
               <div className="space-y-2" aria-label="Selected">
@@ -406,6 +441,11 @@ export default function FootageSearch({
                     </button>
                   )}
                 </div>
+                <AddToPlaylist
+                  hit={selected}
+                  trim={trim}
+                  onAdded={() => setPlaylistsChanged((n) => n + 1)}
+                />
                 {purpose === 'scene' && isVideo && (
                   <p className="text-xs text-gray-500">
                     B-roll plays silently under this scene&apos;s narration. With its

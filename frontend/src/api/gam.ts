@@ -67,6 +67,8 @@ export interface GamHit {
   start_time: number | null
   /** Null on a GAM older than gam#36; the editor then sizes the moment itself. */
   end_time: number | null
+  /** The moment is a cut already chosen (a playlist item's range), to use as it is. */
+  exact?: boolean
 }
 
 export interface GamSearch {
@@ -105,16 +107,137 @@ export interface GamPlaylist {
   updated_at: string | null
 }
 
+/** One entry of a GAM playlist: an asset and the stretch of it to play. `start`/`end`
+ *  are resolved by GAM (the whole file when the item has no range); `in_point` and
+ *  `out_point` are what is stored, both null for a whole asset. */
+export interface GamPlaylistItem {
+  id: string
+  asset_id: string
+  asset_name: string
+  asset_type: string
+  in_point: number | null
+  out_point: number | null
+  start: number
+  end: number | null
+  image_seconds: number | null
+  label: string | null
+  note: string | null
+  asset_duration_seconds: number | null
+  width: number | null
+  height: number | null
+  file_url: string | null
+  thumb_url: string | null
+  missing: boolean
+}
+
+export interface GamPlaylistDetail extends GamPlaylist {
+  items: GamPlaylistItem[]
+}
+
+/** An item to put in a playlist, as GAM takes it. GAM checks it is yours and playable. */
+export interface PlaylistItemIn {
+  asset_id: string
+  in_point?: number
+  out_point?: number
+  image_seconds?: number
+  label?: string
+  note?: string
+}
+
+/**
+ * A playlist item as a search hit, so it is previewed and placed the way a hit is. Its
+ * range is `exact`: the cut someone chose, used as it is.
+ */
+export function playlistItemHit(item: GamPlaylistItem): GamHit {
+  const ranged = item.asset_type !== 'image' && item.in_point !== null
+  return {
+    asset: {
+      id: item.asset_id,
+      name: item.asset_name,
+      asset_type: item.asset_type,
+      duration_seconds: item.asset_duration_seconds,
+      width: item.width,
+      height: item.height,
+      file_url: item.file_url,
+      thumb_url: item.thumb_url,
+      credit: '',
+      parent_asset_id: null,
+      in_point: null,
+      out_point: null,
+      missing: item.missing,
+    },
+    score: 0,
+    snippet: item.label ?? '',
+    start_time: ranged ? item.start : null,
+    end_time: ranged ? item.end : null,
+    exact: ranged,
+  }
+}
+
+/** What a hit would be as a playlist item: its moment, else the whole asset. */
+export function playlistItemFor(
+  hit: GamHit,
+  trim?: { in: number; out: number }
+): PlaylistItemIn {
+  const item: PlaylistItemIn = { asset_id: hit.asset.id }
+  if (hit.asset.asset_type !== 'image' && trim) {
+    item.in_point = trim.in
+    item.out_point = trim.out
+  }
+  return item
+}
+
 interface ListResponse<T> {
   data: T[]
   total: number
 }
 
 export const gamApi = {
-  /** Rejects with `gam_without_playlists` when GAM predates playlists. */
-  playlists(): Promise<GamPlaylist[]> {
+  /** Rejects with `gam_without_playlists` when GAM predates playlists. `q` keeps those
+   *  whose name or description holds it. */
+  playlists(q = ''): Promise<GamPlaylist[]> {
     return client
-      .get<ListResponse<GamPlaylist>>('/gam/playlists')
+      .get<ListResponse<GamPlaylist>>('/gam/playlists', {
+        params: q.trim() ? { q: q.trim() } : undefined,
+      })
+      .then((r) => r.data.data)
+  },
+
+  /** One playlist and its items in order. */
+  playlist(id: string): Promise<GamPlaylistDetail> {
+    return client
+      .get<DataResponse<GamPlaylistDetail>>(`/gam/playlists/${id}`)
+      .then((r) => r.data.data)
+  },
+
+  createPlaylist(body: {
+    name: string
+    description?: string
+    items?: PlaylistItemIn[]
+  }): Promise<GamPlaylistDetail> {
+    return client
+      .post<DataResponse<GamPlaylistDetail>>('/gam/playlists', body)
+      .then((r) => r.data.data)
+  },
+
+  /** Adds at `position`, else at the end; all or none. Returns the playlist as it is now. */
+  addPlaylistItems(
+    id: string,
+    items: PlaylistItemIn[],
+    position?: number
+  ): Promise<GamPlaylistDetail> {
+    return client
+      .post<DataResponse<GamPlaylistDetail>>(`/gam/playlists/${id}/items`, {
+        items,
+        position,
+      })
+      .then((r) => r.data.data)
+  },
+
+  /** Takes one item out; the asset stays in the library. */
+  removePlaylistItem(id: string, itemId: string): Promise<GamPlaylistDetail> {
+    return client
+      .delete<DataResponse<GamPlaylistDetail>>(`/gam/playlists/${id}/items/${itemId}`)
       .then((r) => r.data.data)
   },
 

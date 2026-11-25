@@ -29,6 +29,37 @@ export interface NoteProposal {
   note_url: string | null
 }
 
+/** An item the assistant proposed putting in a GAM playlist. */
+export interface PlaylistItemProposal {
+  asset_id: string
+  name: string
+  type: string
+  in_point: number | null
+  out_point: number | null
+  image_seconds: number | null
+  label: string | null
+  note: string | null
+}
+
+/**
+ * A change to one of the user's GAM playlists, or a new one. Not part of the video: made
+ * in GAM by its own button, as whoever presses it.
+ */
+export interface PlaylistProposal {
+  playlist_ref: string
+  /** Null for a new playlist until it is made. */
+  playlist_id: string | null
+  name: string
+  description: string | null
+  add: PlaylistItemProposal[]
+  remove: { item_id: string; name: string; label: string | null }[]
+  state: 'pending' | 'applied' | 'discarded'
+  /** Once applied: what could not be done, one sentence each. */
+  skipped: string[]
+  /** Once applied: the playlist's page in GAM. */
+  playlist_url: string | null
+}
+
 /** A recipe as a proposal shows it, before or after the change. */
 export interface RecipeDraft {
   name: string
@@ -75,6 +106,8 @@ export interface Turn {
   notes?: NoteProposal[]
   /** Changes to the recipe list, each decided apart from the video. */
   recipes?: RecipeProposal[]
+  /** Changes to GAM playlists, each decided apart from the video. */
+  playlists?: PlaylistProposal[]
   /** The recipe this turn ran, and its name now (null once deleted). */
   recipe_id?: string | null
   recipe_name?: string | null
@@ -286,6 +319,19 @@ export const assistantApi = {
   discardNote(id: string, noteRef: string): Promise<Turn> {
     return client
       .post<DataResponse<Turn>>(`/assistant/turns/${id}/notes/${noteRef}/discard`)
+      .then((r) => r.data.data)
+  },
+
+  /** Make a proposed playlist change in GAM, as the caller. */
+  applyPlaylist(id: string, playlistRef: string): Promise<Turn> {
+    return client
+      .post<DataResponse<Turn>>(`/assistant/turns/${id}/playlists/${playlistRef}/apply`)
+      .then((r) => r.data.data)
+  },
+
+  discardPlaylist(id: string, playlistRef: string): Promise<Turn> {
+    return client
+      .post<DataResponse<Turn>>(`/assistant/turns/${id}/playlists/${playlistRef}/discard`)
       .then((r) => r.data.data)
   },
 

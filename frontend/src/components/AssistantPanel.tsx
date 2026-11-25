@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import { Link, useMatch, useNavigate } from 'react-router-dom'
 import { ACTIVE_TURN, type NoteProposal, type Turn, type TurnStep } from '@/api/assistant'
+import PlaylistProposalCard from '@/components/AssistantPlaylists'
 import { formatCost } from '@/api/usage'
 import { suiteSpeechApi, type DictationReadiness } from '@/api/suiteSpeech'
 import { AttachControls, AttachmentList } from '@/components/AssistantAttachments'
@@ -578,6 +579,13 @@ export default function AssistantPanel() {
                 )}
                 {turn?.notes?.map((note) => (
                   <NoteCard key={note.note_ref} turnId={turn.id} note={note} />
+                ))}
+                {turn?.playlists?.map((proposal) => (
+                  <PlaylistProposalCard
+                    key={proposal.playlist_ref}
+                    turnId={turn.id}
+                    proposal={proposal}
+                  />
                 ))}
                 {turn?.recipes?.map((proposal) => (
                   <RecipeCard

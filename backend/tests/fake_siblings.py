@@ -72,6 +72,10 @@ class FakeSiblings:
     # GAM playlists by id (gam#70), as GET /api/playlists/{id} gives them. None: a GAM
     # from before playlists, which has no such route.
     playlists: Optional[Dict[str, dict]] = field(default_factory=dict)
+    # Every change asked of those playlists, in order: (kind, body or item id, auth).
+    playlist_writes: List[tuple] = field(default_factory=list)
+    # False: a GAM from before its playlist search, which ignores `?q=`.
+    playlists_search: bool = True
     # Pictures filed through GAM's `import-image`, as sent. A status in
     # `import_image_status` is answered instead (404: a GAM from before the route).
     imported_images: List[dict] = field(default_factory=list)
@@ -130,6 +134,78 @@ class FakeSiblings:
             return httpx.Response(404, json={"detail": {"code": "not_found", "message": "gone"}})
         return httpx.Response(200, json={"data": note})
 
+    def _playlists(self, request: httpx.Request) -> httpx.Response:
+        """GAM's playlist routes, over `self.playlists`, with GAM's checks that matter here:
+        the asset must be in `self.assets` and not a document. `playlists_search` False
+        is a GAM from before `?q=`, which ignores it."""
+        path, method = request.url.path, request.method
+        parts = path.split("/")  # ["", "api", "playlists", id?, "items"?, item_id?]
+        missing = httpx.Response(404, json={"detail": {"code": "not_found", "message": "No such playlist."}})
+
+        def items_of(body):
+            made = []
+            for raw in body.get("items") or []:
+                asset = self.assets.get(raw["asset_id"])
+                if asset is None:
+                    return None, httpx.Response(400, json={"detail": {"code": "not_found", "message": "No such asset."}})
+                if asset.get("asset_type") == "document":
+                    return None, httpx.Response(400, json={"detail": {
+                        "code": "not_playable", "message": "A document can't go in a playlist."}})
+                item = playlist_item(raw["asset_id"], asset.get("asset_type") or "video",
+                                     start=raw.get("in_point"), end=raw.get("out_point"),
+                                     label=raw.get("label"), image_seconds=raw.get("image_seconds"))
+                item["id"] = f"item-{len(self.playlist_writes)}-{len(made)}"
+                item["note"] = raw.get("note")
+                made.append(item)
+            return made, None
+
+        def renumber(playlist):
+            for n, item in enumerate(playlist["items"]):
+                item["position"] = n
+            playlist["item_count"] = len(playlist["items"])
+            return httpx.Response(200 if method == "DELETE" else 201, json={"data": playlist})
+
+        if path == "/api/playlists" and method == "GET":
+            q = (request.url.params.get("q") or "").lower() if self.playlists_search else ""
+            rows = [{k: v for k, v in p.items() if k != "items"} for p in self.playlists.values()
+                    if not q or q in p["name"].lower() or q in (p.get("description") or "").lower()]
+            return httpx.Response(200, json={"data": rows, "total": len(rows),
+                                             "limit": 500, "offset": 0})
+        if path == "/api/playlists" and method == "POST":
+            body = json.loads(request.content)
+            self.playlist_writes.append(("create", body, request.headers.get("authorization")))
+            made, refused = items_of(body)
+            if refused:
+                return refused
+            new_id = f"pl-{len(self.playlist_writes)}"
+            self.playlists[new_id] = gam_playlist(new_id, body["name"], made,
+                                                  description=body.get("description"))
+            return renumber(self.playlists[new_id])
+        playlist = self.playlists.get(parts[3])
+        if playlist is None:
+            return missing
+        if len(parts) == 4 and method == "GET":
+            return httpx.Response(200, json={"data": playlist})
+        if len(parts) == 5 and parts[4] == "items" and method == "POST":
+            body = json.loads(request.content)
+            self.playlist_writes.append(("add", body, request.headers.get("authorization")))
+            made, refused = items_of(body)
+            if refused:
+                return refused
+            at = body.get("position")
+            at = len(playlist["items"]) if at is None else min(at, len(playlist["items"]))
+            playlist["items"][at:at] = made
+            return renumber(playlist)
+        if len(parts) == 6 and parts[4] == "items" and method == "DELETE":
+            self.playlist_writes.append(("remove", parts[5], request.headers.get("authorization")))
+            kept = [i for i in playlist["items"] if i["id"] != parts[5]]
+            if len(kept) == len(playlist["items"]):
+                return httpx.Response(404, json={"detail": {
+                    "code": "not_found", "message": "No such item in this playlist."}})
+            playlist["items"] = kept
+            return renumber(playlist)
+        return httpx.Response(405, json={"detail": "Method Not Allowed"})
+
     def _gam(self, request: httpx.Request) -> httpx.Response:
         if self.gam_down:
             raise httpx.ConnectError("refused", request=request)
@@ -146,14 +222,7 @@ class FakeSiblings:
         if path.startswith("/api/playlists"):
             if self.playlists is None:
                 return httpx.Response(404, json={"detail": "Not Found"})
-            if path == "/api/playlists":
-                rows = [{k: v for k, v in p.items() if k != "items"} for p in self.playlists.values()]
-                return httpx.Response(200, json={"data": rows, "total": len(rows),
-                                                 "limit": 500, "offset": 0})
-            found = self.playlists.get(path.rsplit("/", 1)[-1])
-            if found is None:
-                return httpx.Response(404, json={"detail": {"code": "not_found", "message": "No such playlist."}})
-            return httpx.Response(200, json={"data": found})
+            return self._playlists(request)
         if path.endswith("/peaks") and request.method == "GET":
             waveform = self.peaks.get(path.split("/")[3])
             if waveform is None:
