@@ -84,6 +84,12 @@ interface AssistantState {
   discard: (turnId: string) => Promise<void>
   /** Create or throw away one note the assistant proposed for Gecko Notes. */
   decideNote: (turnId: string, noteRef: string, create: boolean) => Promise<void>
+  /** Make (or discard) a proposed GAM playlist change. True when it went through. */
+  decidePlaylist: (
+    turnId: string,
+    playlistRef: string,
+    apply: boolean
+  ) => Promise<boolean>
   /** Save or throw away one recipe change the assistant proposed. */
   decideRecipe: (turnId: string, recipeRef: string, save: boolean) => Promise<boolean>
   newProject: (turnId: string) => Promise<string | null>
@@ -291,6 +297,22 @@ export const useAssistantStore = create<AssistantState>((set, get) => {
         if (mine === token && chat) await reload(mine, chat.id)
       } catch (error) {
         if (mine === token) set({ error: apiErrorMessage(error) })
+      }
+    },
+
+    async decidePlaylist(turnId, playlistRef, apply) {
+      const mine = token
+      set({ error: null })
+      try {
+        await (apply
+          ? assistantApi.applyPlaylist(turnId, playlistRef)
+          : assistantApi.discardPlaylist(turnId, playlistRef))
+        const chat = get().chat
+        if (mine === token && chat) await reload(mine, chat.id)
+        return true
+      } catch (error) {
+        if (mine === token) set({ error: apiErrorMessage(error) })
+        return false
       }
     },
 

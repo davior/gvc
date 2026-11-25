@@ -218,6 +218,14 @@ class Working:
     can_note: bool = False
     notes: List[Dict[str, Any]] = field(default_factory=list)
     max_notes: int = 3
+    # Changes to the user's GAM playlists proposed this turn, each made only by its own
+    # button (routers/assistant.py), with the token of whoever presses it, so offered only
+    # where there is a token now, as notes are: [{"playlist_ref", "playlist_id", "name",
+    # "description", "add", "remove", "state", "skipped"}].
+    can_playlist: bool = False
+    playlists: List[Dict[str, Any]] = field(default_factory=list)
+    max_playlists: int = 3
+    max_playlist_items: int = 60
     # The user's recipes by id, as saved: {"name", "prompt", "tags", "defaults",
     # "updated_at"}. Read by list_recipes and get_recipe, and the only ids a proposal may
     # name, since the model chooses them.
@@ -1221,6 +1229,205 @@ def propose_note(w: Working, title: str, markdown: str, folder: Optional[str] = 
             "The user creates it with the button on your reply; say so, never that it exists.")
 
 
+# ── GAM playlists ─────────────────────────────────────────────────────────────
+# A playlist is the user's, in GAM, and not part of the video. Reading one is a look;
+# changing one is a proposal made by its own button, never here: the same rule as a
+# note, for the same reason (it changes something outside this video, as the user).
+
+PLAYLIST_PAGE = 50
+MAX_PLAYLISTS_LISTED = 25
+
+
+def _need_gam(w: Working) -> GamClient:
+    if w.gam is None:
+        raise ToolFailed("The asset library isn't reachable in this turn.")
+    return w.gam
+
+
+def search_playlists(w: Working, query: str = "") -> str:
+    gam = _need_gam(w)
+    try:
+        found = gam.playlists(query or "")
+    except GamError as exc:
+        raise ToolFailed(f"The asset library failed: {exc.message}")
+    if not found:
+        return (f"No playlist matches {query!r}." if (query or "").strip()
+                else "The user has no playlists in GAM.")
+    rows = []
+    for p in found[:MAX_PLAYLISTS_LISTED]:
+        row: Dict[str, Any] = {"playlist_id": p.id, "name": p.name, "items": p.item_count,
+                               "seconds": round(p.total_seconds, 1)}
+        if p.description:
+            row["description"] = p.description[:200]
+        rows.append(row)
+    more = len(found) - len(rows)
+    result = {"playlists": rows}
+    if more > 0:
+        result["more"] = f"{more} more; search with words from the name to narrow it"
+    return _compact(result)
+
+
+def _playlist_row(n: int, item) -> Dict[str, Any]:
+    row: Dict[str, Any] = {"n": n, "item_id": item.id, "gam_id": item.asset_id,
+                           "name": item.asset_name, "type": item.asset_type}
+    if item.asset_type == "image":
+        row["seconds"] = item.image_seconds or 5.0
+    elif item.end is not None:
+        # The stretch the playlist plays, as set_visual's trim, so placing it keeps the
+        # moment the person chose rather than growing it to whole sentences.
+        row["trim"] = {"in": round(item.start, 2), "out": round(item.end, 2)}
+        if item.in_point is None:
+            row["whole"] = True
+    if item.label:
+        row["label"] = item.label
+    if item.note:
+        row["note"] = item.note[:300]
+    if item.missing:
+        row["missing"] = True
+    return row
+
+
+def read_playlist(w: Working, playlist_id: str, start: int = 1) -> str:
+    gam = _need_gam(w)
+    try:
+        playlist = gam.playlist(playlist_id)
+    except GamError as exc:
+        raise ToolFailed(f"The asset library failed: {exc.message}")
+    if playlist is None:
+        raise ToolFailed(f"No playlist {playlist_id!r}. search_playlists lists them.")
+    first = max(1, int(start or 1))
+    page = playlist.items[first - 1:first - 1 + PLAYLIST_PAGE]
+    for item in page:
+        # Known by name and type to set_visual and the rest, as a search hit is; without a
+        # moment, since a playlist's range goes in as the trim it names.
+        if item.asset_id not in w.hits:
+            w.hits[item.asset_id] = Hit(item.asset_id, item.asset_name, item.asset_type,
+                                        item.asset_duration_seconds, None, None)
+    result: Dict[str, Any] = {"playlist_id": playlist.id, "name": playlist.name,
+                              "count": len(playlist.items),
+                              "items": [_playlist_row(first + i, item) for i, item in enumerate(page)]}
+    if playlist.description:
+        result["description"] = playlist.description[:500]
+    last = first - 1 + len(page)
+    if last < len(playlist.items):
+        result["more"] = f"items {last + 1}-{len(playlist.items)}: read_playlist with start {last + 1}"
+    return _compact(result)
+
+
+def _proposed_item(w: Working, raw: Any) -> Dict[str, Any]:
+    """One item to add, checked as far as can be before GAM checks it again on the button."""
+    if not isinstance(raw, dict) or not raw.get("gam_id"):
+        raise ToolFailed("Each item to add needs its gam_id.")
+    gam_id = str(raw["gam_id"])
+    hit = w.hits.get(gam_id)
+    name, kind, duration = (hit.name, hit.asset_type, hit.duration) if hit else (None, None, None)
+    if hit is None:
+        try:
+            asset = _need_gam(w).get_asset(gam_id)
+        except GamError as exc:
+            raise ToolFailed(f"The asset library failed: {exc.message}")
+        if asset is None:
+            raise ToolFailed(f"No asset {gam_id!r} in the library. Never invent a gam_id.")
+        name, kind, duration = asset.name, asset.asset_type, asset.duration_seconds
+    if kind not in ("video", "audio", "image"):
+        raise ToolFailed(f"{name or gam_id} is a {kind or 'file'}; a playlist plays only "
+                         "video, sound and pictures.")
+    item: Dict[str, Any] = {"asset_id": gam_id, "name": name or gam_id, "type": kind}
+    start, end = raw.get("start_seconds"), raw.get("end_seconds")
+    if kind == "image":
+        if start is not None or end is not None:
+            raise ToolFailed(f"{name} is a picture, which has no range; give seconds instead.")
+        if raw.get("seconds") is not None:
+            seconds = float(raw["seconds"])
+            if not 0 < seconds <= 600:
+                raise ToolFailed("A picture shows for between 0 and 600 seconds.")
+            item["image_seconds"] = seconds
+    elif start is not None or end is not None:
+        if start is None or end is None:
+            raise ToolFailed("Give both start_seconds and end_seconds, or neither for the whole file.")
+        start, end = float(start), float(end)
+        if start < 0 or end <= start:
+            raise ToolFailed(f"{start}-{end} is not a range: the end must come after the start.")
+        if duration and end > duration + 0.05:
+            raise ToolFailed(f"{name} is {round(duration, 1)} s long; {end} is past its end.")
+        item["in_point"], item["out_point"] = round(start, 2), round(end, 2)
+    for key, limit in (("label", 255), ("note", 500)):
+        text = (raw.get(key) or "").strip()
+        if text:
+            item[key] = text[:limit]
+    return item
+
+
+def propose_playlist(w: Working, playlist_id: Optional[str] = None, name: Optional[str] = None,
+                     description: Optional[str] = None, add: Optional[List[Any]] = None,
+                     remove: Optional[List[str]] = None) -> str:
+    """A change to one of the user's GAM playlists, or a new one, made by its button.
+
+    The same playlist (by id, or a new one by name) again adds to the same proposal, so
+    a model working through a long list in several calls leaves one card, not several.
+    """
+    gam = _need_gam(w)
+    add, remove = list(add or []), [str(r) for r in (remove or [])]
+    name = (name or "").strip()
+    if not playlist_id and not name:
+        raise ToolFailed("Give playlist_id (an existing playlist) or name (a new one).")
+    if not add and not remove and not playlist_id:
+        raise ToolFailed("A new playlist needs items to add.")
+    existing = None
+    if playlist_id:
+        try:
+            existing = gam.playlist(playlist_id)
+        except GamError as exc:
+            raise ToolFailed(f"The asset library failed: {exc.message}")
+        if existing is None:
+            raise ToolFailed(f"No playlist {playlist_id!r}. search_playlists lists them.")
+    elif remove:
+        raise ToolFailed("A new playlist has nothing to remove.")
+    if not add and not remove:
+        raise ToolFailed("Say what to add or remove.")
+
+    held = next((p for p in w.playlists if (playlist_id and p["playlist_id"] == playlist_id)
+                 or (not playlist_id and not p["playlist_id"]
+                     and p["name"].lower() == name.lower())), None)
+    if held is None and len(w.playlists) >= w.max_playlists:
+        raise ToolFailed(f"That's the {w.max_playlists} playlists one request may change.")
+    entry = held or {"playlist_ref": uuid.uuid4().hex, "playlist_id": playlist_id,
+                     "name": existing.name if existing else name, "description": None,
+                     "add": [], "remove": [], "state": "pending", "skipped": []}
+
+    items_held = sum(len(p["add"]) for p in w.playlists)
+    if items_held + len(add) > w.max_playlist_items:
+        raise ToolFailed(f"One request may add at most {w.max_playlist_items} items "
+                         f"({items_held} already proposed).")
+    # Every item checked before any is kept, so a mistake costs nothing and the model
+    # hears which one it was.
+    new_items = [_proposed_item(w, raw) for raw in add]
+    by_id = {i.id: i for i in existing.items} if existing else {}
+    removals = []
+    for item_id in remove:
+        item = by_id.get(item_id)
+        if item is None:
+            raise ToolFailed(f"{item_id!r} is not an item of {entry['name']!r}; "
+                             "read_playlist gives each item's item_id.")
+        if item_id not in {r["item_id"] for r in entry["remove"] + removals}:
+            removals.append({"item_id": item_id, "name": item.asset_name, "label": item.label})
+
+    if description is not None and not existing:
+        entry["description"] = description.strip()[:5000] or None
+    entry["add"] = entry["add"] + new_items
+    entry["remove"] = entry["remove"] + removals
+    if held is None:
+        w.playlists.append(entry)
+    what = []
+    if entry["add"]:
+        what.append(f"add {len(entry['add'])}")
+    if entry["remove"]:
+        what.append(f"remove {len(entry['remove'])}")
+    target = f"the playlist {entry['name']!r}" if existing else f"a new playlist {entry['name']!r}"
+    return (f"Proposed to {' and '.join(what)} item(s) in {target}. Nothing changes in GAM "
+            "until the user presses the button on your reply; say so, never that it is done.")
+
+
 # ── recipes ───────────────────────────────────────────────────────────────────
 
 # Told apart from an explicit null: in an update, a field left out stays as it is, and a
@@ -1768,6 +1975,40 @@ TOOLS: List[Tuple[ToolSpec, Callable[..., str]]] = [
                   "folder": {"type": "string",
                              "description": "Only when the user names a folder."}},
                "required": ["title", "markdown"]}), propose_note),
+    (ToolSpec("search_playlists",
+              "The user's playlists in GAM (named, ordered runs of videos, sounds, pictures "
+              "and moments of them), newest first: each one's playlist_id, name, item count "
+              "and length. query: words from the name or description; omit it for all.",
+              {"type": "object", "properties": {"query": _STR}}), search_playlists),
+    (ToolSpec("read_playlist",
+              "The items of one GAM playlist in order, numbered n: each one's item_id, its "
+              "gam_id, name and type, and what it plays: trim (in/out seconds, to pass as is "
+              "to set_visual or an audio track) or a picture's seconds; its label and note. "
+              "A long playlist comes in pages and says where to carry on (start).",
+              {"type": "object", "properties": {
+                  "playlist_id": _STR, "start": {"type": "integer", "minimum": 1}},
+               "required": ["playlist_id"]}), read_playlist),
+    (ToolSpec("propose_playlist",
+              "Propose a change to the user's GAM playlists: a new playlist (name, with "
+              "items to add) or a change to one (playlist_id, with items to add and/or "
+              "item_ids to remove). Each item to add is a library asset by gam_id, with "
+              "start_seconds/end_seconds for a moment of a video or sound (neither: all of "
+              "it), or seconds for how long a picture shows; label: a few words; note: why "
+              "it is there. Added at the end, in order. Calling again for the same playlist "
+              "adds to the same proposal. Nothing changes in GAM until the user presses the "
+              "button on your reply, and it does not change the video. Only when the user "
+              "asks for a playlist to be made or changed.",
+              {"type": "object", "properties": {
+                  "playlist_id": {"type": "string", "description": "An existing playlist"},
+                  "name": {"type": "string", "description": "A new playlist's name"},
+                  "description": _STR,
+                  "add": {"type": "array", "items": {"type": "object", "properties": {
+                      "gam_id": _STR, "start_seconds": _NUM, "end_seconds": _NUM,
+                      "seconds": _NUM, "label": _STR, "note": _STR},
+                      "required": ["gam_id"]}},
+                  "remove": {"type": "array", "items": _STR,
+                             "description": "item_ids from read_playlist"}}}),
+     propose_playlist),
     (ToolSpec("list_recipes",
               "The user's recipes: saved requests with {{inputs}} they run to make or change "
               "a video. Each has its id, name, tags, inputs, defaults and the start of its "
@@ -1826,17 +2067,19 @@ _HANDLERS = {spec.name: handler for spec, handler in TOOLS}
 
 # Read-only tools, which neither change the video nor count as an edit in the steps.
 READS = {"get_spec", "search_assets", "read_transcript", "read_document", "find_clips",
-         "get_asset", "estimate", "web_search", "list_recipes", "get_recipe"}
+         "get_asset", "estimate", "web_search", "list_recipes", "get_recipe",
+         "search_playlists", "read_playlist"}
 
 
 def specs_for(w: Working) -> List[ToolSpec]:
     """The tools a turn is offered: all of them, except the web (pages or pictures) where
-    there is none, and
-    notes where there is no token to make one with."""
+    there is none, and notes and playlist changes where there is no token to make them
+    with (or, for a playlist, no library)."""
     return [s for s in SPECS
             if (s.name != "web_search" or w.web_search is not None)
             and (s.name != "find_images" or w.image_search is not None)
-            and (s.name != "propose_note" or w.can_note)]
+            and (s.name != "propose_note" or w.can_note)
+            and (s.name != "propose_playlist" or (w.can_playlist and w.gam is not None))]
 
 
 def execute(w: Working, call: ToolCall) -> ToolResult:

@@ -22,12 +22,13 @@ from app.config import settings
 from app.database import get_session
 from app.jobs.runner import ACTIVE_STATUSES
 from app.models.assistant import AssistantSession, AssistantTurn
+from app.gam.client import GamClient, GamError
 from app.notes.client import NotesClient, NotesError
 from app.providers import active_provider
 from app.schemas import DataResponse, ListResponse
 from app.schemas_assistant import (
-    AttachmentRead, Message, NewProjectRead, NoteAttach, NoteChoice, NoteProposalRead, SessionCreate,
-    PersonaRead, RecipeProposalRead, SessionRead, SessionSummary, Step, TurnCreate, TurnRead,
+    AttachmentRead, Message, NewProjectRead, NoteAttach, NoteChoice, NoteProposalRead,
+    PlaylistProposalRead, SessionCreate, PersonaRead, RecipeProposalRead, SessionRead, SessionSummary, Step, TurnCreate, TurnRead,
     UrlAttach,
 )
 from app.models.recipe import Recipe
@@ -55,6 +56,7 @@ def _turn_read(turn: AssistantTurn, session: Session) -> TurnRead:
         notes=[NoteProposalRead(**n) for n in json.loads(turn.proposed_notes or "[]")],
         recipes=[RecipeProposalRead(**{k: v for k, v in r.items() if k != "base_updated_at"})
                  for r in json.loads(turn.proposed_recipes or "[]")],
+        playlists=[PlaylistProposalRead(**p) for p in json.loads(turn.proposed_playlists or "[]")],
         recipe_id=turn.recipe_id,
         recipe_name=recipe.name if recipe is not None and recipe.user_id == turn.user_id
         else None,
@@ -540,6 +542,81 @@ def discard_note(turn_id: str, note_ref: str, user: CurrentUser,
                        status.HTTP_409_CONFLICT)
     note["state"] = "discarded"
     return DataResponse(data=_turn_read(_save_notes(session, turn, notes), session))
+
+
+def _proposed_playlist(turn: AssistantTurn, playlist_ref: str) -> tuple:
+    proposals = json.loads(turn.proposed_playlists or "[]")
+    for proposal in proposals:
+        if proposal.get("playlist_ref") == playlist_ref:
+            if proposal.get("state") != "pending":
+                raise _refused("nothing_pending",
+                               f"That playlist change was already {proposal.get('state')}",
+                               status.HTTP_409_CONFLICT)
+            return proposals, proposal
+    raise _refused("not_found", "That turn proposed no such playlist", status.HTTP_404_NOT_FOUND)
+
+
+def _save_playlists(session: Session, turn: AssistantTurn, proposals: list) -> AssistantTurn:
+    turn.proposed_playlists, turn.updated_at = json.dumps(proposals, ensure_ascii=False), utcnow()
+    session.add(turn)
+    session.commit()
+    session.refresh(turn)
+    return turn
+
+
+_ITEM_FIELDS = ("asset_id", "in_point", "out_point", "image_seconds", "label", "note")
+
+
+@router.post("/turns/{turn_id}/playlists/{playlist_ref}/apply", response_model=DataResponse[TurnRead])
+def apply_playlist(turn_id: str, playlist_ref: str, user: CurrentUser, token: CallerToken,
+                   session: Session = Depends(get_session)) -> DataResponse[TurnRead]:
+    """Make a proposed playlist change in GAM, as the person who pressed the button.
+
+    Their token, not the turn's (gone by now), so GAM checks again that every asset is
+    theirs and every range fits. The additions go first, in one call that GAM makes all
+    or none: if GAM refuses them nothing has changed, the proposal stays pending, and the
+    person reads GAM's sentence. Removals come after, one by one, and an item someone
+    already took out is said as skipped rather than failing what was done.
+    """
+    turn = _owned_turn(session, user, turn_id)
+    proposals, proposal = _proposed_playlist(turn, playlist_ref)
+    items = [{k: i[k] for k in _ITEM_FIELDS if i.get(k) is not None} for i in proposal.get("add") or []]
+    skipped: List[str] = []
+    gam = GamClient(token)
+    try:
+        if proposal.get("playlist_id"):
+            playlist_id = proposal["playlist_id"]
+            if items:
+                if gam.add_playlist_items(playlist_id, items) is None:
+                    raise _refused("not_found", f"The playlist {proposal['name']!r} is no longer "
+                                   "in GAM.", status.HTTP_404_NOT_FOUND)
+            elif gam.playlist(playlist_id) is None:
+                raise _refused("not_found", f"The playlist {proposal['name']!r} is no longer in GAM.",
+                               status.HTTP_404_NOT_FOUND)
+            for removal in proposal.get("remove") or []:
+                if gam.remove_playlist_item(playlist_id, removal["item_id"]) is None:
+                    skipped.append(f"{removal.get('label') or removal.get('name') or 'An item'}: "
+                                   "already gone from the playlist.")
+        else:
+            made = gam.create_playlist(proposal["name"], proposal.get("description"), items)
+            playlist_id = made.id
+    except GamError as exc:
+        raise _refused(exc.code, exc.message, exc.status_code) from exc
+    finally:
+        gam.close()
+    proposal.update(state="applied", playlist_id=playlist_id, skipped=skipped,
+                    playlist_url=f"{settings.gam_base_url.rstrip('/')}/playlists/{playlist_id}")
+    return DataResponse(data=_turn_read(_save_playlists(session, turn, proposals), session))
+
+
+@router.post("/turns/{turn_id}/playlists/{playlist_ref}/discard",
+             response_model=DataResponse[TurnRead])
+def discard_playlist(turn_id: str, playlist_ref: str, user: CurrentUser,
+                     session: Session = Depends(get_session)) -> DataResponse[TurnRead]:
+    turn = _owned_turn(session, user, turn_id)
+    proposals, proposal = _proposed_playlist(turn, playlist_ref)
+    proposal["state"] = "discarded"
+    return DataResponse(data=_turn_read(_save_playlists(session, turn, proposals), session))
 
 
 def _proposed_recipe(turn: AssistantTurn, recipe_ref: str) -> tuple:

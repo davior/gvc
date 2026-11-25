@@ -188,6 +188,10 @@ class GamPlaylistItem(BaseModel):
     label: Optional[str] = None
     note: Optional[str] = None
     asset_duration_seconds: Optional[float] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    # Signed and expiring like every GAM URL: to preview the item now, never to store.
+    file_url: Optional[str] = None
     thumb_url: Optional[str] = None
     missing: bool = False
 
@@ -204,3 +208,28 @@ class GamPlaylist(BaseModel):
 
 class GamPlaylistDetail(GamPlaylist):
     items: List[GamPlaylistItem] = Field(default_factory=list)
+
+
+class PlaylistItemIn(BaseModel):
+    """An item to put in a GAM playlist, as GAM takes it: an asset and, for video or
+    sound, the stretch of it to play (none: the whole file). GAM checks the rest: that
+    the asset is the caller's and playable, and that the range lies inside it."""
+
+    asset_id: str = Field(min_length=1)
+    in_point: Optional[float] = Field(default=None, ge=0)
+    out_point: Optional[float] = Field(default=None, gt=0)
+    image_seconds: Optional[float] = Field(default=None, gt=0)
+    label: Optional[str] = Field(default=None, max_length=255)
+    note: Optional[str] = Field(default=None, max_length=500)
+
+
+class PlaylistCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    description: Optional[str] = Field(default=None, max_length=5_000)
+    items: List[PlaylistItemIn] = Field(default_factory=list, max_length=200)
+
+
+class PlaylistItemsAdd(BaseModel):
+    items: List[PlaylistItemIn] = Field(min_length=1, max_length=200)
+    # Where in the playlist to insert them; the end when absent.
+    position: Optional[int] = Field(default=None, ge=0)

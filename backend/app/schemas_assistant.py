@@ -65,6 +65,40 @@ class NoteProposalRead(BaseModel):
     note_url: Optional[str] = None  # once created: the note's page in Gecko Notes
 
 
+class PlaylistItemProposal(BaseModel):
+    """An item the assistant proposed adding to a GAM playlist."""
+
+    asset_id: str
+    name: str = ""
+    type: str = ""
+    in_point: Optional[float] = None
+    out_point: Optional[float] = None
+    image_seconds: Optional[float] = None
+    label: Optional[str] = None
+    note: Optional[str] = None
+
+
+class PlaylistRemovalProposal(BaseModel):
+    item_id: str
+    name: str = ""
+    label: Optional[str] = None
+
+
+class PlaylistProposalRead(BaseModel):
+    """A change to one of the user's GAM playlists, or a new one, made only by its button."""
+
+    playlist_ref: str
+    playlist_id: Optional[str] = None   # None for a new playlist until it is made
+    name: str
+    description: Optional[str] = None
+    add: List[PlaylistItemProposal] = []
+    remove: List[PlaylistRemovalProposal] = []
+    state: str = "pending"              # pending | applied | discarded
+    # Once applied: what could not be done (an item already gone), one sentence each.
+    skipped: List[str] = []
+    playlist_url: Optional[str] = None  # once applied: the playlist's page in GAM
+
+
 class RecipeDraft(BaseModel):
     """A recipe as a proposal shows it: the whole of it, before or after."""
 
@@ -104,6 +138,7 @@ class TurnRead(BaseModel):
     outcome: str = ""
     notes: List[NoteProposalRead] = []
     recipes: List[RecipeProposalRead] = []
+    playlists: List[PlaylistProposalRead] = []
     # The recipe this turn ran, if any, and its name as it is now (None once deleted).
     recipe_id: Optional[str] = None
     recipe_name: Optional[str] = None

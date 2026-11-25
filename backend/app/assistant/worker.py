@@ -197,7 +197,8 @@ def _run(turn_id: str) -> None:
                           # A note is created later with the token of whoever presses its
                           # button; offering it only where there is one now keeps a dev
                           # session from being promised a note it can't make.
-                          can_note=token is not None, recipes=recipes)
+                          can_note=token is not None, can_playlist=token is not None,
+                          recipes=recipes)
         if suite.enabled():
             # The web, through the same connection, credited to this project.
             working.web_search = lambda query: suite.web_search(connection, query, project_id)
@@ -293,7 +294,7 @@ def _run(turn_id: str) -> None:
         _tokens.pop(turn_id, None)
 
     reply = outcome.reply or ("Done." if working.changes or working.notes
-                              or working.recipe_proposals else "")
+                              or working.recipe_proposals or working.playlists else "")
     proposed = None
     if working.changes:
         canonical = _canonical(working.data)
@@ -316,7 +317,9 @@ def _run(turn_id: str) -> None:
             outcome="pending" if proposed else "",
             proposed_notes=json.dumps(working.notes, ensure_ascii=False) if working.notes else None,
             proposed_recipes=json.dumps(working.recipe_proposals, ensure_ascii=False)
-            if working.recipe_proposals else None)
+            if working.recipe_proposals else None,
+            proposed_playlists=json.dumps(working.playlists, ensure_ascii=False)
+            if working.playlists else None)
 
 
 def _finish(turn_id: str, *, message: str, steps: List[dict], **fields) -> None:
