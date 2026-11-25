@@ -206,6 +206,40 @@ export function unresolvedSearches(
   )
 }
 
+/**
+ * The registry keys something in the video draws or plays: a scene's visual, an image
+ * overlay, an audio track, the background picture, the watermark, and the pictures a
+ * used clip is made from.
+ *
+ * A key can stay in `assets` after nothing uses it: the assistant's `generate_image`
+ * always adds a new key rather than filling the scene's placeholder, and placing a
+ * library picture on a scene replaces its visual without removing the old key. The
+ * "to find" and "to make" lists are read through this, or every such orphan sits on
+ * them for good with the scene already showing its picture. The backend's
+ * `used_asset_keys` (backend/app/spec/usage.py) is the same rule, for what the assistant
+ * is told is unused and may remove; keep the two alike.
+ */
+export function usedAssetKeys(spec: VideoSpec): Set<string> {
+  const used = new Set<string>()
+  const add = (key: string | undefined) => {
+    if (key) used.add(key)
+  }
+  add(spec.style?.background?.asset)
+  add(spec.chrome?.watermark?.asset)
+  for (const segment of spec.segments ?? []) {
+    add(segment.visual?.asset)
+    for (const overlay of segment.overlays ?? [])
+      if (overlay.type === 'image') add(overlay.asset)
+  }
+  for (const track of spec.audio_tracks ?? []) add(track.asset)
+  // A clip still to make needs its base pictures first, so they count as used too.
+  for (const key of [...used]) {
+    const ref = spec.assets?.[key]
+    if (ref?.from === 'generate') for (const base of ref.base_assets ?? []) add(base)
+  }
+  return used
+}
+
 /** The GAM ids a spec shows, including resolved placeholders: what to look up. */
 export function gamIdsIn(spec: VideoSpec): string[] {
   const ids = Object.values(spec.assets ?? {}).flatMap((ref) =>

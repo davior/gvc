@@ -20,6 +20,7 @@ from typing import Any, Dict, Optional
 
 from app.schemas_recipes import RecipeDefaults
 from app.services.recipes import describe_defaults
+from app.spec.usage import used_asset_keys
 
 REFERENCE = """\
 You are the editor inside Gecko Video Creator (GVC), working with the user on one narrated \
@@ -171,6 +172,17 @@ words in an overlay instead.
 the user they can generate it from the scene with the Generate button.
 - Music and sound effects can't be generated; find them in the library.
 
+## "Still to make" and "still to find"
+These are the editor's lists of placeholders the video still needs filled: "still to \
+make" is generate placeholders without a picture, "still to find" is search placeholders \
+without footage. A placeholder marked `[not used in the video]` in the registry is a \
+leftover: its scene got a picture some other way (often a `generate_image`, which adds a \
+new key), so it needs nothing. When the user asks to clear the still-to-make or \
+still-to-find items that are wrong, stale, invalid, duplicated or already done, they mean \
+these: call `remove_unused_placeholders`, and say how many went. A placeholder the video \
+does use is real work left: offer to generate or find it, and remove it only by changing \
+what uses it, when they ask.
+
 ## Theme
 A theme is one of the user's named looks (realistic, 3D, a colour scheme...). The video's \
 theme is `style.theme`, and its text is added to the end of every picture and clip prompt \
@@ -247,18 +259,32 @@ user sees the changes separately.
 
 
 def _registry_lines(data: Dict[str, Any]) -> str:
+    # A filled placeholder is described as what it now holds: listed as "to generate",
+    # the model offered to make pictures the video already had.
+    used = used_asset_keys(data)
     lines = []
     for key, ref in (data.get("assets") or {}).items():
         source = ref.get("from")
+        result = (ref.get("result") or {}).get("id")
         if source == "gam":
-            lines.append(f"- {key}: library {ref.get('type') or 'asset'} "
-                         f"{ref.get('label') or ''} (gam_id {ref.get('id')})".rstrip())
+            line = (f"- {key}: library {ref.get('type') or 'asset'} "
+                    f"{ref.get('label') or ''} (gam_id {ref.get('id')})").rstrip()
+        elif source == "search" and ref.get("status") == "resolved" and result:
+            line = f"- {key}: found footage for {ref.get('query')!r} (gam_id {result})"
         elif source == "search":
-            lines.append(f"- {key}: placeholder, footage to find: {ref.get('query')!r}")
+            line = f"- {key}: placeholder, footage to find: {ref.get('query')!r}"
+        elif source == "generate" and result:
+            line = (f"- {key}: generated {ref.get('type') or 'asset'}, done: "
+                    f"{ref.get('prompt')!r} (gam_id {result})")
         elif source == "generate":
-            lines.append(f"- {key}: placeholder, to generate: {ref.get('prompt')!r}")
+            line = f"- {key}: placeholder, to generate: {ref.get('prompt')!r}"
         elif source == "notes":
-            lines.append(f"- {key}: a file still in Gecko Notes ({ref.get('label') or ref.get('url')})")
+            line = f"- {key}: a file still in Gecko Notes ({ref.get('label') or ref.get('url')})"
+        else:
+            continue
+        if key not in used:
+            line += " [not used in the video]"
+        lines.append(line)
     return "\n".join(lines) or "(empty)"
 
 

@@ -10,6 +10,7 @@ import {
   removeVisual,
   resolveSearch,
   unresolvedSearches,
+  usedAssetKeys,
 } from '@/spec/footage'
 
 function asset(overrides: Partial<GamAsset> = {}): GamAsset {
@@ -256,5 +257,51 @@ describe('clock', () => {
     expect(clock(734.2)).toBe('12:14')
     expect(clock(3725)).toBe('1:02:05')
     expect(clock(5)).toBe('0:05')
+  })
+})
+
+describe('usedAssetKeys', () => {
+  it('counts what the video draws or plays, and leaves orphaned placeholders out', () => {
+    const spec: VideoSpec = {
+      title: 'T',
+      style: { background: { type: 'image', asset: 'a_bg' } },
+      chrome: { watermark: { asset: 'a_logo' } },
+      assets: {
+        a_bg: { from: 'gam', id: 'g1' },
+        a_logo: { from: 'gam', id: 'g2' },
+        a_new: {
+          from: 'generate',
+          type: 'image',
+          prompt: 'A dam',
+          result: { from: 'gam', id: 'g3' },
+        },
+        a_old: { from: 'generate', type: 'image', prompt: 'A dam' },
+        a_clip: {
+          from: 'generate',
+          type: 'video',
+          prompt: 'Water',
+          base_assets: ['a_still'],
+        },
+        a_still: { from: 'generate', type: 'image', prompt: 'Still water' },
+        a_badge: { from: 'gam', id: 'g4' },
+        a_song: { from: 'gam', id: 'g5' },
+        a_lost: { from: 'search', query: 'river' },
+      },
+      segments: [
+        {
+          id: 's1',
+          kind: 'scene',
+          visual: { asset: 'a_new' },
+          overlays: [{ id: 'o1', type: 'image', asset: 'a_badge' }],
+        },
+        { id: 's2', kind: 'clip', visual: { asset: 'a_clip' } },
+      ],
+      audio_tracks: [
+        { id: 'm1', asset: 'a_song', start: { segment: 's1', edge: 'start' } },
+      ],
+    } as VideoSpec
+    expect([...usedAssetKeys(spec)].sort()).toEqual(
+      ['a_badge', 'a_bg', 'a_clip', 'a_logo', 'a_new', 'a_song', 'a_still'].sort()
+    )
   })
 })
