@@ -51,6 +51,12 @@ interface ProjectState {
   open: (id: string) => Promise<void>
   edit: (next: VideoSpec) => void
   discard: () => void
+  /**
+   * Catch up with a version the server saved by itself (a finished generation put in).
+   * The draft follows only when it has no edits of its own; the saved copy, which
+   * Discard goes back to, always does.
+   */
+  reload: () => Promise<void>
   save: (message?: string) => Promise<boolean>
   loadVersions: () => Promise<void>
   revert: (versionId: string) => Promise<void>
@@ -147,6 +153,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   edit(next) {
     set({ draft: next, dirty: true })
+  },
+
+  async reload() {
+    const project = get().project
+    if (!project) return
+    const token = projectToken
+    try {
+      const fresh = await projectsApi.get(project.id)
+      if (token !== projectToken || get().project?.id !== fresh.id) return
+      if (get().dirty) set({ project: fresh })
+      else set({ project: fresh, draft: fresh.spec })
+      void get().loadVersions()
+    } catch {
+      /* the next read of the generations catches up */
+    }
   },
 
   discard() {

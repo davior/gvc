@@ -236,6 +236,58 @@ def test_reading_the_list_follows_each_job_to_done(auth_client, project, sibling
                             json={"asset_id": "other"}).status_code == 400
 
 
+def _saved(client, project_id):
+    return client.get(f"/api/projects/{project_id}").json()["data"]
+
+
+def test_a_finished_picture_is_saved_into_its_placeholder(auth_client, project, siblings):
+    start(auth_client, project["id"], asset_key="a_dam", outputs=2)
+    before = _saved(auth_client, project["id"])["version"]
+    _list(auth_client, project["id"])
+    # Still running: nothing written.
+    assert _saved(auth_client, project["id"])["version"] == before
+
+    siblings.gen_jobs["job-1"].update(status="done", result_asset_ids=["g1", "g2"])
+    [row] = _list(auth_client, project["id"])
+    saved = _saved(auth_client, project["id"])
+    assert saved["version"] == before + 1
+    assert saved["spec"]["assets"]["a_dam"]["status"] == "ready"
+    assert saved["spec"]["assets"]["a_dam"]["result"] == {"from": "gam", "id": "g1"}
+    assert row["used_id"] == "g1"
+    versions = auth_client.get(f"/api/projects/{project['id']}/versions").json()["data"]
+    assert versions[0]["author"] == "user" and "A dam at dusk" in versions[0]["message"]
+
+    # Read again: already in, so no further version.
+    _list(auth_client, project["id"])
+    assert _saved(auth_client, project["id"])["version"] == before + 1
+
+
+def test_a_picture_lost_from_the_saved_video_is_put_back_as_chosen(
+        auth_client, project, siblings):
+    row = start(auth_client, project["id"], asset_key="a_dam", outputs=2).json()["data"]
+    siblings.gen_jobs["job-1"].update(status="done", result_asset_ids=["g1", "g2"])
+    _list(auth_client, project["id"])
+    auth_client.post(f"/api/generations/{row['id']}/use", json={"asset_id": "g2"})
+    # Saved over by a draft that never had it (an old tab, a proposal applied over it).
+    assert auth_client.put(f"/api/projects/{project['id']}",
+                           json={"spec": SPEC}).status_code == 200
+    _list(auth_client, project["id"])
+    assert _saved(auth_client, project["id"])["spec"]["assets"]["a_dam"]["result"]["id"] == "g2"
+
+
+def test_a_filled_placeholder_is_not_replaced(auth_client, project, siblings):
+    start(auth_client, project["id"], asset_key="a_dam")
+    chosen = {**SPEC, "assets": {**SPEC["assets"], "a_dam": {
+        **SPEC["assets"]["a_dam"], "status": "ready", "result": {"from": "gam", "id": "mine"}}}}
+    auth_client.put(f"/api/projects/{project['id']}", json={"spec": chosen})
+    siblings.gen_jobs["job-1"].update(status="done", result_asset_ids=["g1"])
+    before = _saved(auth_client, project["id"])["version"]
+    _list(auth_client, project["id"])
+    saved = _saved(auth_client, project["id"])
+    assert saved["version"] == before
+    assert saved["spec"]["assets"]["a_dam"]["result"]["id"] == "mine"
+
+
 def test_a_running_generation_can_be_stopped(auth_client, project, siblings):
     row = start(auth_client, project["id"], asset_key="a_dam").json()["data"]
     stopped = auth_client.delete(f"/api/generations/{row['id']}").json()["data"]

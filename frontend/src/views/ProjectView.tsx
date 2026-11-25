@@ -78,6 +78,7 @@ export default function ProjectView() {
   const loadGenerations = useGenerationStore((s) => s.load)
   const generations = useGenerationStore((s) => s.rows)
   const generationError = useGenerationStore((s) => s.error)
+  const fillGenerations = useGenerationStore((s) => s.fill)
 
   useEffect(() => {
     if (id) void open(id)
@@ -89,6 +90,13 @@ export default function ProjectView() {
   useEffect(() => {
     if (openId) void loadGenerations(openId)
   }, [openId, loadGenerations])
+
+  // Whenever the draft or the generations change: a draft can lose a generated picture
+  // (Discard, an applied proposal written against the saved version), and a placeholder
+  // with a finished generation should never be left on the "still to make" list.
+  useEffect(() => {
+    void fillGenerations()
+  }, [draft, generations, fillGenerations])
 
   // Keyed on the ids as a string, so typing narration does not re-ask GAM; only a
   // newly placed asset does, and the store fetches just the ones it lacks.

@@ -160,6 +160,9 @@ def list_generations(project_id: str, user: CurrentUser, token: CallerToken,
         service.refresh(session, gam, rows)
     finally:
         gam.close()
+    # Reading the list is what follows a generation, so it is also where a finished one
+    # goes into the video: saved, whether or not an editor is open to keep it.
+    service.fill_saved(session, project, rows)
     return ListResponse(data=[read(r) for r in rows], total=len(rows), limit=len(rows), offset=0)
 
 
