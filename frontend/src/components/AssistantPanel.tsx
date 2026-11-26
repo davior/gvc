@@ -700,8 +700,8 @@ export default function AssistantPanel() {
             className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-400"
           >
             <span className="flex-1">
-              This project has unsaved changes. Save them first so the assistant works from
-              the latest version, then send your request again.
+              This project has unsaved changes. Save them first so the assistant works
+              from the latest version, then send your request again.
             </span>
             <button
               type="button"
