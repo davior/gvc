@@ -251,6 +251,28 @@ describe('AssistantPanel', () => {
     expect(screen.getByRole('button', { name: 'Apply anyway' })).toBeInTheDocument()
   })
 
+  it('holds a request while the draft has unsaved changes, and sends it once saved', async () => {
+    vi.spyOn(assistantApi, 'sessions').mockResolvedValue([])
+    const running = turn({ status: 'processing', outcome: '', proposed_spec: null })
+    const start = vi.spyOn(assistantApi, 'start').mockResolvedValue(running)
+    vi.spyOn(assistantApi, 'session').mockResolvedValue(chat(running))
+    useProjectStore.setState({ dirty: true })
+    at('/p/p1')
+    await waitFor(() => expect(assistantApi.sessions).toHaveBeenCalledWith('p1'))
+
+    await userEvent.type(screen.getByLabelText('Ask the assistant'), 'add a title{Enter}')
+    expect(start).not.toHaveBeenCalled()
+    expect(await screen.findByText(/unsaved changes/)).toBeInTheDocument()
+    // The request stays typed, ready to send again.
+    expect(screen.getByLabelText('Ask the assistant')).toHaveValue('add a title')
+
+    // Saving (or discarding) clears the notice, and the same request now goes through.
+    useProjectStore.setState({ dirty: false })
+    await waitFor(() => expect(screen.queryByText(/unsaved changes/)).toBeNull())
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+    expect(start).toHaveBeenCalledTimes(1)
+  })
+
   it('sends the draft, its version and the focused scene, and shows the live steps', async () => {
     vi.spyOn(assistantApi, 'sessions').mockResolvedValue([])
     const running = turn({
