@@ -60,7 +60,8 @@ def _turn_read(turn: AssistantTurn, session: Session) -> TurnRead:
         recipe_id=turn.recipe_id,
         recipe_name=recipe.name if recipe is not None and recipe.user_id == turn.user_id
         else None,
-        base_version=turn.base_version, persona_id=turn.persona_id, cost=turn.cost,
+        base_version=turn.base_version, persona_id=turn.persona_id, auto_run=turn.auto_run,
+        cost=turn.cost,
         created_at=turn.created_at, updated_at=turn.updated_at,
     )
 
@@ -387,7 +388,8 @@ def start_turn(body: TurnCreate, user: CurrentUser, token: CallerToken,
                          base_version=body.base_version if body.base_version is not None
                          else (project.head_seq if project else None),
                          focus=body.focus, persona_id=body.persona_id or None,
-                         recipe_id=recipe.id if recipe is not None else None)
+                         recipe_id=recipe.id if recipe is not None else None,
+                         auto_run=body.auto_run)
     return DataResponse(data=_turn_read(turn, session))
 
 

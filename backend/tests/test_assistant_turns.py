@@ -369,3 +369,34 @@ def test_clips_are_picked_in_a_pass_of_their_own_paid_for_on_the_turn(
     # Five model calls, the pass among them, all on the turn's bill.
     rows = session.query(UsageEvent).all()
     assert len(rows) == 5 and all(r.turn_id == turn["id"] for r in rows)
+
+
+@pytest.mark.parametrize("auto_run, started", [(False, 1), (True, 2)])
+def test_auto_run_gives_the_turn_the_larger_picture_budget(
+        auth_client, session, provider, library, engine_for_worker, monkeypatch,
+        auto_run, started):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "assistant_max_generations", 1)
+    monkeypatch.setattr(settings, "assistant_autorun_max_generations", 2)
+    provider.script += [
+        says("", call("replace_spec", spec=VALID)),
+        says("", call("generate_image", prompt="The dam, wide", segment_id="s_title",
+                      use_as="overlay", label="Dam")),
+        says("", call("generate_image", prompt="The dam, close", segment_id="s_title",
+                      use_as="overlay", label="Dam close")),
+        says("Done."),
+    ]
+    res = auth_client.post("/api/assistant/turns",
+                           json={"prompt": "Water wars", "auto_run": auto_run},
+                           headers={"Authorization": "Bearer user-token"})
+    turn = res.json()["data"]
+    assert turn["auto_run"] is auto_run
+    worker._run(turn["id"])
+    done = auth_client.get(f"/api/assistant/turns/{turn['id']}").json()["data"]
+    assert done["status"] == "done", done
+    assert done["auto_run"] is auto_run
+    # The model is told its budget, so a plan can say how many pictures it will make.
+    assert any(f"may generate up to {started} pictures" in part
+               for part in provider.started["system"])
+    assert len(library.generations) == started

@@ -25,6 +25,9 @@ class TurnCreate(BaseModel):
     # One of the suite's personas (`GET /assistant/personas`), or none. The suite is the
     # authority on whether it exists: an unknown one ends the turn with the suite's sentence.
     persona_id: Optional[str] = Field(default=None, max_length=64)
+    # Carry the whole request out in one turn, with the larger budget of pictures and
+    # rounds, instead of stopping at the everyday limit for the person to say "continue".
+    auto_run: bool = False
     # Run one of the user's recipes, with these values for its inputs (names match
     # loosely). `date` and `time` may come in here too, from the asker's own clock.
     recipe_id: Optional[str] = Field(default=None, max_length=64)
@@ -144,6 +147,7 @@ class TurnRead(BaseModel):
     recipe_name: Optional[str] = None
     base_version: Optional[int] = None
     persona_id: Optional[str] = None
+    auto_run: bool = False
     cost: Optional[float] = None
     created_at: datetime
     updated_at: datetime

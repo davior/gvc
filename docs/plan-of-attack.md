@@ -183,7 +183,9 @@ worker for it:
   placeholder; only the clip's is.
 - **The assistant generates pictures, never video** (the user's call: video costs far
   more). `generate_image` adds the placeholder and starts it at once, at most
-  `ASSISTANT_MAX_GENERATIONS` (6) per turn; for footage it leaves a video placeholder for
+  `ASSISTANT_MAX_GENERATIONS` (6) per turn, or `ASSISTANT_AUTORUN_MAX_GENERATIONS` (40)
+  for a turn asked with the panel's Auto-run switch, so an approved plan is carried out in
+  one turn instead of six pictures and a "continue" at a time; for footage it leaves a video placeholder for
   the user's Generate button. Its rows follow the turn into a new project.
 
 ### D3. GVC stands by itself: three ways in, one project

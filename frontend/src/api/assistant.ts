@@ -115,6 +115,8 @@ export interface Turn {
   base_version: number | null
   /** The suite persona this turn was asked as, if any. */
   persona_id: string | null
+  /** Asked with Auto-run: the larger budget of pictures and rounds. */
+  auto_run?: boolean
   cost: number | null
   created_at: string
   updated_at: string
@@ -180,6 +182,8 @@ export interface TurnRequest {
   focus?: string | null
   /** One of the suite's personas, or none. */
   persona_id?: string | null
+  /** Carry the whole request out in one turn, with the larger picture budget. */
+  auto_run?: boolean
   /** Run this recipe, with these values for its inputs. */
   recipe_id?: string | null
   recipe_inputs?: Record<string, string>

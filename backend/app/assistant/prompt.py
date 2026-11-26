@@ -329,9 +329,16 @@ def context(data: Dict[str, Any], *, focus: Optional[str], from_scratch: bool,
             attached: Optional[str] = None,
             themes: Optional[Dict[str, Dict[str, str]]] = None,
             recipes: Optional[Dict[str, Dict[str, Any]]] = None,
-            ran_recipe: Optional[str] = None) -> str:
+            ran_recipe: Optional[str] = None,
+            max_generations: Optional[int] = None) -> str:
     """This project, for this turn."""
     parts = []
+    if max_generations is not None:
+        # Told up front so a plan says how many pictures it will make before the person
+        # approves it, and so the model doesn't stop short of a budget it doesn't know.
+        parts.append(f"This request may generate up to {max_generations} pictures with "
+                     "generate_image. Carry the whole request out in this turn within "
+                     "that; past it, leave the rest as placeholders.")
     if from_scratch:
         parts.append("This is a new video: the working copy is a blank starter. Build it "
                      "from the user's request.")

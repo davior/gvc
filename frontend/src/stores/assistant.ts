@@ -25,6 +25,9 @@ import {
 const POLL_MS = 1500
 const OPEN_KEY = 'gvc-assistant-open'
 const WIDTH_KEY = 'gvc-assistant-width'
+// Kept per browser: the plan is asked in one message and approved in the next, and the
+// switch has to still be on for the approval, which is the turn that does the work.
+const AUTORUN_KEY = 'gvc-assistant-autorun'
 export const MIN_WIDTH = 280
 export const MAX_WIDTH = 640
 
@@ -64,6 +67,8 @@ interface AssistantState {
   personas: Persona[]
   /** The one chosen for the next message; null is the assistant as it is. */
   personaId: string | null
+  /** Ask with Auto-run: the whole request in one turn, not six pictures at a time. */
+  autoRun: boolean
   /** A recipe chosen to run, waiting for its inputs in the panel's run form. */
   pendingRecipe: Recipe | null
 
@@ -71,6 +76,7 @@ interface AssistantState {
   setWidth: (width: number) => void
   setFocus: (segmentId: string | null) => void
   setPersona: (id: string | null) => void
+  setAutoRun: (on: boolean) => void
   /** Open the run form for a recipe (the picker, or Run on the Recipes page). */
   runRecipe: (recipe: Recipe | null) => void
   enter: (scope: string | null) => Promise<void>
@@ -156,6 +162,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => {
     focus: null,
     personas: [],
     personaId: null,
+    autoRun: stored(AUTORUN_KEY, false, (raw) => raw === '1'),
     pendingRecipe: null,
 
     setOpen(open) {
@@ -175,6 +182,11 @@ export const useAssistantStore = create<AssistantState>((set, get) => {
 
     setPersona(id) {
       set({ personaId: id })
+    },
+
+    setAutoRun(on) {
+      keep(AUTORUN_KEY, on ? '1' : '0')
+      set({ autoRun: on })
     },
 
     runRecipe(recipe) {
@@ -423,6 +435,10 @@ export const useAssistantStore = create<AssistantState>((set, get) => {
         personaId: null,
         pendingRecipe: null,
       })
+      // Logging out: whoever signs in next on this browser starts with it off, since it
+      // spends their money.
+      keep(AUTORUN_KEY, '0')
+      set({ autoRun: false })
     },
   }
 })
