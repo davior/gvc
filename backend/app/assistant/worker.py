@@ -96,6 +96,7 @@ def _run(turn_id: str) -> None:
         set_fields(session, turn, status="processing", stage="Thinking", progress=0)
         user_id, project_id = turn.user_id, turn.project_id
         persona_id = turn.persona_id
+        auto_run = turn.auto_run
         recipe_id = turn.recipe_id
         prompt, focus = turn.prompt, turn.focus
         base = json.loads(turn.base_spec or "{}")
@@ -190,7 +191,9 @@ def _run(turn_id: str) -> None:
             raise ProviderError("No AI provider is set up. Add one in Settings first.")
         attached = material(attachments, sees_images=sees_images)
         images = images_of(chat_id, attachments) if sees_images else []
-        working = Working(base, gam=gam, max_generations=settings.assistant_max_generations,
+        generations = (settings.assistant_autorun_max_generations if auto_run
+                       else settings.assistant_max_generations)
+        working = Working(base, gam=gam, max_generations=generations,
                           max_picks=settings.assistant_max_clip_picks,
                           pick_concurrency=settings.assistant_clip_pick_concurrency,
                           note_media=media_ids(attachments), themes=themes,
@@ -261,13 +264,16 @@ def _run(turn_id: str) -> None:
         working.remove_theme = remove_theme
         system = [REFERENCE, attached,
                   context(base, focus=focus, from_scratch=project_id is None, themes=themes,
-                          recipes=recipes, ran_recipe=recipe_id)]
+                          recipes=recipes, ran_recipe=recipe_id,
+                          # No GAM, no generating: then a budget would only mislead.
+                          max_generations=generations if working.generate else None)]
         outcome = loop.run(provider, working, system=system, history=history, prompt=prompt,
                            images=images,
                            on_step=on_step, on_reply=on_reply,
                            on_delta=streamed() if suite.enabled() else None,
                            cancelled=lambda: queue.is_cancelled(turn_id),
-                           max_rounds=settings.assistant_max_rounds)
+                           max_rounds=settings.assistant_autorun_max_rounds if auto_run
+                           else settings.assistant_max_rounds)
     except loop.Stopped:
         _finish(turn_id, status="cancelled", stage="", message="_Stopped._", steps=steps)
         return
@@ -343,12 +349,12 @@ queue = JobQueue(AssistantTurn, _run, name="assistant",
 def submit(session: Session, chat: AssistantSession, *, user_id: str, token: Optional[str],
            prompt: str, base_spec: dict, base_version: Optional[int],
            focus: Optional[str], persona_id: Optional[str] = None,
-           recipe_id: Optional[str] = None) -> AssistantTurn:
+           recipe_id: Optional[str] = None, auto_run: bool = False) -> AssistantTurn:
     turn = AssistantTurn(id=str(uuid.uuid4()), session_id=chat.id, user_id=user_id,
                          project_id=chat.project_id, prompt=prompt,
                          base_spec=json.dumps(base_spec, ensure_ascii=False),
                          base_version=base_version, focus=focus, persona_id=persona_id,
-                         recipe_id=recipe_id)
+                         recipe_id=recipe_id, auto_run=auto_run)
     append_message(chat, "user", prompt, turn.id)
     if not chat.title:
         chat.title = prompt.strip().splitlines()[0][:80]

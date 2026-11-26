@@ -126,6 +126,11 @@ class Settings(BaseSettings):
     # Pictures one request may generate on its own (each is a paid call to fal.ai through
     # GAM). Past it the assistant leaves placeholders for the user to generate.
     assistant_max_generations: int = 6
+    # The same two limits for a turn asked with Auto-run on: the person has approved a
+    # plan and wants the whole video made in one go, not six pictures and a "continue".
+    # Still a ceiling, so a model that loops on generate_image stops at a known cost.
+    assistant_autorun_max_generations: int = 40
+    assistant_autorun_max_rounds: int = 60
     # Calls the clip-picking pass may make in one request. Each reads up to about 15k
     # tokens of transcript, once (an hour of speech is one or two), so this is roughly
     # how many candidate videos a request can weigh before it falls back to reading

@@ -280,6 +280,7 @@ describe('AssistantPanel', () => {
       base_version: 3,
       focus: 's_valley',
       persona_id: null,
+      auto_run: false,
       session_id: null,
       project_id: 'p1',
     })
@@ -461,6 +462,20 @@ describe('AssistantPanel', () => {
       'open the film{Enter}'
     )
     expect(start).toHaveBeenCalledWith(expect.objectContaining({ persona_id: 'p-doc' }))
+  })
+
+  it('asks with Auto-run once it is switched on, and remembers it', async () => {
+    vi.spyOn(assistantApi, 'sessions').mockResolvedValue([])
+    const running = turn({ status: 'processing', outcome: '', proposed_spec: null })
+    const start = vi.spyOn(assistantApi, 'start').mockResolvedValue(running)
+    vi.spyOn(assistantApi, 'session').mockResolvedValue(chat(running))
+    at('/p/p1')
+    await userEvent.click(await screen.findByRole('checkbox', { name: /Auto-run/ }))
+    await userEvent.type(screen.getByLabelText('Ask the assistant'), 'go ahead{Enter}')
+    expect(start).toHaveBeenCalledWith(expect.objectContaining({ auto_run: true }))
+    expect(localStorage.getItem('gvc-assistant-autorun')).toBe('1')
+    useAssistantStore.getState().reset()
+    expect(useAssistantStore.getState().autoRun).toBe(false)
   })
 
   it('has no picker when there are no personas', async () => {

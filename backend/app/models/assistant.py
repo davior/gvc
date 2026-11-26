@@ -59,6 +59,9 @@ class AssistantTurn(SQLModel, table=True):
     # The suite persona this turn was asked as, if any. Kept on the turn so one a restart
     # reruns is asked as the same persona; the suite applies its prompt and model.
     persona_id: Optional[str] = None
+    # Asked with Auto-run on: the turn gets the larger picture and round budget
+    # (config.assistant_autorun_*), so an approved plan is carried out in one turn.
+    auto_run: bool = False
     # JSON: [{"kind": "think"|"search"|"edit"|"issue"|"note", "text"}]
     steps: str = "[]"
     reply: str = ""

@@ -318,6 +318,8 @@ export default function AssistantPanel() {
   const personas = useAssistantStore((s) => s.personas)
   const personaId = useAssistantStore((s) => s.personaId)
   const setPersona = useAssistantStore((s) => s.setPersona)
+  const autoRun = useAssistantStore((s) => s.autoRun)
+  const setAutoRun = useAssistantStore((s) => s.setAutoRun)
   const stop = useAssistantStore((s) => s.stop)
   const newChat = useAssistantStore((s) => s.newChat)
   const attach = useAssistantStore((s) => s.attach)
@@ -382,6 +384,7 @@ export default function AssistantPanel() {
       base_version: here ? here.version : null,
       focus: here ? focus : null,
       persona_id: personaId,
+      auto_run: autoRun,
     })
     if (ok) setPrompt('')
   }
@@ -397,6 +400,7 @@ export default function AssistantPanel() {
       base_version: here ? here.version : null,
       focus: here ? focus : null,
       persona_id: personaId,
+      auto_run: autoRun,
     })
     if (ok) runRecipe(null)
   }
@@ -534,6 +538,9 @@ export default function AssistantPanel() {
               const live = turn && ACTIVE_TURN.includes(turn.status)
               return (
                 <div key={i} className="space-y-1">
+                  {turn?.auto_run && (
+                    <p className="ml-6 text-[11px] text-gray-500">Auto-run</p>
+                  )}
                   {turn?.recipe_id && (
                     <p className="ml-6 text-[11px] text-gray-500">
                       Ran the recipe{' '}
@@ -642,6 +649,17 @@ export default function AssistantPanel() {
             ))}
           </select>
         )}
+        <label
+          className="flex items-center gap-1.5 text-[11px] text-gray-600 dark:text-gray-300"
+          title="Carry the whole request out in one go, generating as many pictures as it needs (up to the Auto-run limit, 40 by default) instead of stopping every 6 for you to say continue. Each picture is a paid generation."
+        >
+          <input
+            type="checkbox"
+            checked={autoRun}
+            onChange={(e) => setAutoRun(e.target.checked)}
+          />
+          Auto-run: finish the whole video without stopping
+        </label>
         {pendingRecipe && (
           <RecipeRunForm
             key={pendingRecipe.id}

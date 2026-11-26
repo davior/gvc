@@ -34,3 +34,9 @@ def test_a_filled_placeholder_reads_as_done_and_an_orphan_as_unused():
     assert "not used" not in lines["- a_todo"]
     assert "to generate" in lines["- a_old"]
     assert "[not used in the video]" in lines["- a_old"]
+
+
+def test_the_picture_budget_is_stated_only_when_given():
+    assert "may generate up to 40 pictures" in context({}, focus=None, from_scratch=True,
+                                                       max_generations=40)
+    assert "may generate up to" not in context({}, focus=None, from_scratch=True)
