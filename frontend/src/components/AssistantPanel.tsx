@@ -328,6 +328,13 @@ export default function AssistantPanel() {
   const runRecipe = useAssistantStore((s) => s.runRecipe)
   const project = useProjectStore((s) => s.project)
   const draft = useProjectStore((s) => s.draft)
+  const dirty = useProjectStore((s) => s.dirty)
+  const saving = useProjectStore((s) => s.saving)
+  const save = useProjectStore((s) => s.save)
+  // Set when a send was held back because the draft had unsaved edits. Shown until the
+  // draft is saved (or discarded), then it clears itself; the prompt stays typed so the
+  // person saves and presses Send again.
+  const [unsavedHeld, setUnsavedHeld] = useState(false)
   const [prompt, setPrompt] = useState('')
   // Dictation (SV-7): each finished phrase is appended to what is typed; nothing is sent
   // until the person presses Send. Offered only when the suite has a Deepgram key.
@@ -373,9 +380,22 @@ export default function AssistantPanel() {
   const focusLabel =
     here && focus ? draft?.segments.find((s) => s.id === focus)?.label || focus : null
 
+  // A turn starts from the editor's draft, and what it proposes is applied to that draft as
+  // another unsaved edit. A second request on top of an unsaved first one works from a
+  // draft the stored version no longer matches, so ask for a save first, before the
+  // request is even planned.
+  const holdForUnsaved = !!here && dirty
+  useEffect(() => {
+    if (!holdForUnsaved) setUnsavedHeld(false)
+  }, [holdForUnsaved])
+
   async function submit() {
     const text = prompt.trim()
     if (!text || sending || running) return
+    if (holdForUnsaved) {
+      setUnsavedHeld(true)
+      return
+    }
     // Sending ends a dictation: what was said so far is what is sent.
     if (dictation.status === 'recording') dictation.stop()
     const ok = await send({
@@ -391,6 +411,10 @@ export default function AssistantPanel() {
 
   async function runPending(values: Record<string, string>) {
     if (!pendingRecipe || sending || running) return
+    if (holdForUnsaved) {
+      setUnsavedHeld(true)
+      return
+    }
     const ok = await send({
       prompt: '',
       recipe_id: pendingRecipe.id,
@@ -669,6 +693,25 @@ export default function AssistantPanel() {
             onRun={(values) => void runPending(values)}
             onCancel={() => runRecipe(null)}
           />
+        )}
+        {unsavedHeld && holdForUnsaved && (
+          <p
+            role="alert"
+            className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-400"
+          >
+            <span className="flex-1">
+              This project has unsaved changes. Save them first so the assistant works from
+              the latest version, then send your request again.
+            </span>
+            <button
+              type="button"
+              className="btn btn-secondary px-2 py-1 text-xs"
+              disabled={saving}
+              onClick={() => void save()}
+            >
+              {saving ? 'Saving…' : 'Save now'}
+            </button>
+          </p>
         )}
         <div className="flex items-end gap-2">
           <AttachControls />
