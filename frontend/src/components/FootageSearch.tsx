@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import { useState, type FormEvent, type ReactNode } from 'react'
 import {
   Film,
@@ -147,7 +148,10 @@ export default function FootageSearch({
       ? { in: selected.asset.in_point, out: selected.asset.out_point }
       : undefined)
 
-  return (
+  // Portalled to <body>: a glass theme blurs the settings panels, and a blurred element
+  // both traps `position: fixed` descendants and makes its own stacking layer, so an
+  // inline dialog was sized to its panel and painted under the panels after it.
+  return createPortal(
     <div
       className="fixed inset-0 z-40 flex items-start justify-center bg-black/40 p-4 pt-12"
       onClick={onClose}
@@ -458,6 +462,7 @@ export default function FootageSearch({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
