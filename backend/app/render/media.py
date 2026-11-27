@@ -147,6 +147,33 @@ def _probe(path: str, kind: str) -> Media:
                  has_audio=F.probe_has_audio(path) if kind == "video" else True)
 
 
+def _clips_of_unknown_length(spec: VideoSpec, media: Dict[str, Media]) -> List[str]:
+    """A clip that plays on its own can only be laid out if its length is known.
+
+    Without one the scene would get the compiler's floor of a tenth of a second, and the
+    render would report success with the clip all but missing, so it stops here instead
+    and says which clip and why.
+    """
+    problems: List[str] = []
+    for segment in spec.segments:
+        visual = segment.visual
+        if segment.kind != "clip" or visual is None:
+            continue
+        found = media.get(visual.asset)
+        if found is None or found.kind != "video":
+            continue
+        if found.duration or found.length is not None:
+            continue
+        if visual.trim is not None and visual.trim.out is not None:
+            continue    # the spec itself says how long it plays
+        label = spec.assets[visual.asset].label or segment.label or segment.id
+        problems.append(
+            f"Can't tell how long “{label}” is, so it can't be placed in the video. "
+            "Recordings made in a browser often lack a length. Give the clip a trim with an "
+            "out point, or upload a copy that has one (ffmpeg -i in.webm -c copy out.webm).")
+    return problems
+
+
 def _slate(work_dir: str, key: str, title: str, subtitle: str, width: int, height: int) -> Media:
     """A placeholder drawn as a card, so a preview shows where it will go."""
     path = os.path.join(work_dir, f"slate_{key}.png")
@@ -278,12 +305,18 @@ def resolve(
             out.problems.append(_too_large(asset.name, None))
             continue
         media = _probe(path, kind)
+        if file_id == asset.id and kind == "video" and not media.duration:
+            # The file would not say how long it is, but the library may: it measured it
+            # when the file arrived (or, for older uploads, may have it from a later look).
+            media.duration = asset.duration_seconds or None
         if file_id != asset.id:
             media.offset = asset.in_point or 0.0
             if asset.out_point is not None:
                 media.length = max(0.1, asset.out_point - (asset.in_point or 0.0))
         out.media[key] = media
         out.credits[key] = asset.credit or ""
+
+    out.problems.extend(_clips_of_unknown_length(spec, out.media))
 
     try:
         cache.prune(int(settings.render_cache_max_gb * 1024 ** 3))

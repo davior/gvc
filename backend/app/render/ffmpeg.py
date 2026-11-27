@@ -154,17 +154,71 @@ def run(argv: Sequence[str], *, cwd: Optional[str] = None, timeout: int = SHOT_T
             logger.warning("ffmpeg said, writing %s:\n%s%s", argv[-1], "\n".join(said[:200]), more)
 
 
+# Reading every packet header of a long recording takes seconds; this bounds that, and is
+# only paid for a file whose own header could not say how long it is.
+SCAN_TIMEOUT_SECONDS = 600
+# Past this many bytes per second a "duration" implies a bitrate no camera or screen
+# recorder produces (400 Mbit/s), so the header is more likely wrong than the file huge.
+IMPLAUSIBLE_BYTES_PER_SECOND = 50_000_000
+
+
 def probe_duration(path: str) -> float:
-    """Container duration in seconds, or 0.0 if it can't be read."""
+    """Length in seconds, or 0.0 if it can't be worked out.
+
+    The container's own figure when it is believable. A browser's MediaRecorder (Gecko
+    Notes' recordings) writes WebM as a live stream with no duration and no index, so
+    ffprobe says `N/A`; and a header can also be plain wrong. In both cases the packets
+    are read, because they always know. Trusting `N/A` as zero is how a 30-minute clip
+    once became a tenth of a second.
+    """
+    header = _header_duration(path)
+    if header and not _implausible(path, header):
+        return header
+    scanned = _scan_duration(path)
+    # Never shorten a believable header; only replace a missing or absurd one.
+    return max(header, scanned)
+
+
+def _header_duration(path: str) -> float:
     try:
         out = subprocess.run(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration",
              "-of", "csv=p=0", path],
             capture_output=True, timeout=PROBE_TIMEOUT_SECONDS,
         )
-        return float((out.stdout.decode(errors="replace").strip() or "0") or 0)
+        return max(0.0, float((out.stdout.decode(errors="replace").strip() or "0") or 0))
     except (ValueError, OSError, subprocess.SubprocessError):
         return 0.0
+
+
+def _implausible(path: str, seconds: float) -> bool:
+    try:
+        return os.path.getsize(path) / seconds > IMPLAUSIBLE_BYTES_PER_SECOND
+    except OSError:
+        return False
+
+
+def _scan_duration(path: str) -> float:
+    """The end of the last packet of the first video stream (else the first audio one)."""
+    for selector in ("v:0", "a:0"):
+        try:
+            out = subprocess.run(
+                ["ffprobe", "-v", "error", "-select_streams", selector,
+                 "-show_entries", "packet=pts_time,duration_time", "-of", "csv=p=0", path],
+                capture_output=True, timeout=SCAN_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return 0.0
+        end = 0.0
+        for line in out.stdout.decode(errors="replace").splitlines():
+            pts, _, length = line.partition(",")
+            try:
+                end = max(end, float(pts) + (float(length) if length else 0.0))
+            except ValueError:
+                continue    # "N/A"
+        if end > 0:
+            return end
+    return 0.0
 
 
 def probe_has_audio(path: str) -> bool:
