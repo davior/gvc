@@ -372,7 +372,12 @@ class Orphaned(Exception):
     """An anchor naming a segment or beat that is not in the video (any more)."""
 
 
-def resolve_anchor(anchor, where: Placement, *, segment: Optional[str] = None) -> float:
+def anchor_seconds(anchor, where: Placement, *, segment: Optional[str] = None) -> float:
+    """Where an anchor points on the timeline, before being held inside it.
+
+    Kept apart from `resolve_anchor` so a caller can tell "this ends before it starts"
+    from "this was asked for past the end of the video", which clamping makes identical.
+    """
     if anchor == "video_start":
         return 0.0
     if anchor == "video_end":
@@ -389,7 +394,16 @@ def resolve_anchor(anchor, where: Placement, *, segment: Optional[str] = None) -
         if span is None:
             raise Orphaned(f"segment {seg!r}")
     edge = span[0] if anchor.edge == "start" else span[1]
-    return max(0.0, min(where.total, edge + anchor.offset))
+    return edge + anchor.offset
+
+
+def resolve_anchor(anchor, where: Placement, *, segment: Optional[str] = None) -> float:
+    return max(0.0, min(where.total, anchor_seconds(anchor, where, segment=segment)))
+
+
+def _clock(seconds: float) -> str:
+    whole = int(round(seconds))
+    return f"{whole // 60}:{whole % 60:02d}"
 
 
 @dataclass
@@ -483,6 +497,22 @@ DEFAULT_OVERLAY_FADE = 0.3
 MIN_OVERLAY_SECONDS = 0.2
 
 
+def _unplaceable(name: str, asked_start: float, asked_end: float, total: float) -> str:
+    """Why an overlay's window came to nothing, in the terms of what was asked.
+
+    Both anchors are held inside the video, so one set past its end collapses to a
+    zero-length window and used to read as "ends before it starts", which sent people
+    looking at their anchors when the real problem was a clip shorter than they thought.
+    """
+    if asked_start >= total - MIN_OVERLAY_SECONDS:
+        return (f"Scene {name}: an overlay is set for {_clock(asked_start)}, but the video is "
+                f"only {_clock(total)} long; left out. If a clip in it looks too short, check "
+                "that its length was read")
+    if asked_end - asked_start < MIN_OVERLAY_SECONDS:
+        return f"Scene {name}: an overlay ends before it starts; left out"
+    return f"Scene {name}: an overlay is too short to see; left out"
+
+
 @dataclass
 class OverlayPlacement:
     segment_id: str
@@ -514,17 +544,22 @@ def place_overlays(spec: VideoSpec, media: Dict[str, Media], where: Placement,
                 continue
             if overlay.show is None:
                 start, end = span
+                if end - start < MIN_OVERLAY_SECONDS:
+                    warnings.append(f"Scene {name}: an overlay is too short to see; left out")
+                    continue
             else:
                 try:
-                    start = resolve_anchor(overlay.show.from_, where, segment=segment.id)
-                    end = resolve_anchor(overlay.show.to, where, segment=segment.id)
+                    asked_start = anchor_seconds(overlay.show.from_, where, segment=segment.id)
+                    asked_end = anchor_seconds(overlay.show.to, where, segment=segment.id)
                 except Orphaned as exc:
                     warnings.append(f"Scene {name}: an overlay is anchored to {exc}, which is "
                                     "not in the video; left out")
                     continue
-            if end - start < MIN_OVERLAY_SECONDS:
-                warnings.append(f"Scene {name}: an overlay ends before it starts; left out")
-                continue
+                start = max(0.0, min(where.total, asked_start))
+                end = max(0.0, min(where.total, asked_end))
+                if end - start < MIN_OVERLAY_SECONDS:
+                    warnings.append(_unplaceable(name, asked_start, asked_end, where.total))
+                    continue
             picture = None
             if isinstance(overlay, ImageOverlay):
                 picture = media.get(overlay.asset)
